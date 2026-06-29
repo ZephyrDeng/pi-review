@@ -1,0 +1,74 @@
+{
+  "name": "@zephyrdeng/pi-review",
+  "version": "0.2.0",
+  "description": "Isolated AI-powered code and plan reviews from the command line",
+  "type": "module",
+  "author": "ZephyrDeng <zephyrTang@aliyun.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/ZephyrDeng/pi-review#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZephyrDeng/pi-review.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZephyrDeng/pi-review/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-review",
+    "code-review",
+    "plan-review",
+    "ai-review",
+    "agent-skill",
+    "cli"
+  ],
+  "bin": {
+    "pi-review": "./bin/pi-review.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "extensions/",
+    "resources/",
+    "skills/",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+"peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/node": "^22.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "smoke": "node dist/cli.js --help >/dev/null",
+    "prepublishOnly": "npm run build",
+    "pack:dry": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+npm-debug.log*
+.DS_Store
+*.tgz
+.pi-review-session/
+.env
+.env.*
+!.env.example
