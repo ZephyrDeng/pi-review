@@ -22,7 +22,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 - **Model-agnostic** — use any model available in your Pi installation
 - **Session continuity** — keep sessions alive for follow-up questions with `--keep-session`
 - **Customizable presets** — extend or override review modes via JSON configuration
-- **Pi package integration** — `/review` slash command and agent skill included
+- **Pi package integration** — `/pi-review` slash command and agent skill included
 
 ## Installation
 
@@ -159,15 +159,15 @@ Override defaults via environment variables:
 
 ## Pi Package Usage
 
-After installing as a Pi package, use the `/review` slash command:
+After installing as a Pi package, use the `/pi-review` slash command:
 
 ```
-/review @src/foo.ts
-/review --mode challenge @docs/design.md
-/review models
+/pi-review @src/foo.ts
+/pi-review --mode challenge @docs/design.md
+/pi-review models
 ```
 
-The `/review` command runs the CLI internally and inserts the review output into the current Pi conversation.
+The `/pi-review` command runs the CLI internally and inserts the review output into the current Pi conversation.
 
 ## Security
 

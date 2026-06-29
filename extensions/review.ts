@@ -51,8 +51,8 @@ function normalizeReviewArgs(args: string[]): string[] {
 }
 
 export default function piReviewExtension(pi: ExtensionAPI) {
-  pi.registerCommand("review", {
-    description: "Run an isolated pi-review session. Usage: /review [--mode challenge] @file-or-text",
+  pi.registerCommand("pi-review", {
+    description: "Run an isolated pi-review session. Usage: /pi-review [--mode challenge] @file-or-text",
     getArgumentCompletions: (prefix) => {
       const items = [
         "@",
@@ -69,7 +69,7 @@ export default function piReviewExtension(pi: ExtensionAPI) {
       const parsedArgs = normalizeReviewArgs(splitArgs(rawArgs.trim()));
 
       if (parsedArgs.length === 0) {
-        ctx.ui.notify("Usage: /review [--mode challenge] @file-or-text", "warning");
+        ctx.ui.notify("Usage: /pi-review [--mode challenge] @file-or-text", "warning");
         return;
       }
 
