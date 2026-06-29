@@ -4,8 +4,8 @@ function usage(exitCode = 0): never {
   const out = `Usage:
   pi-review models [search]
   pi-review [options] -- <@files|text...>
-  pi-review install-skill              Install Claude Code skill
-  pi-review uninstall-skill            Remove Claude Code skill
+  pi-review install-skill [options]     Install skill to AI agents
+  pi-review uninstall-skill [options]  Remove skill from AI agents
 
 Options:
   --mode <name>                                Review mode (default: code)
@@ -44,10 +44,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return { command: "models", search: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
   }
   if (argv[0] === "install-skill") {
-    return { command: "install-skill", mode: "code", skills: [], payload: [], keepSession: false };
+    return { command: "install-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
   }
   if (argv[0] === "uninstall-skill") {
-    return { command: "uninstall-skill", mode: "code", skills: [], payload: [], keepSession: false };
+    return { command: "uninstall-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
   }
 
   let mode = "code";

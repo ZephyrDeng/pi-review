@@ -10,9 +10,9 @@ if (parsed.command === "models") {
   const config = resolveConfig();
   runModels(config.piBin, parsed.search || []);
 } else if (parsed.command === "install-skill") {
-  installSkill();
+  installSkill(parsed.extraArgs);
 } else if (parsed.command === "uninstall-skill") {
-  uninstallSkill();
+  uninstallSkill(parsed.extraArgs);
 } else {
   runReview(parsed);
 }

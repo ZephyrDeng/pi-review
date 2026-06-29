@@ -38,19 +38,26 @@ npm install -g @zephyrdeng/pi-review
 pi install npm:@zephyrdeng/pi-review
 ```
 
-### Claude Code skill
+### Agent skill (Claude Code, Codex, Cursor, Cline, Windsurf, ...)
 
-Register the `/pi-review` slash command in Claude Code (no global install needed):
+Install the pi-review skill to all supported AI agents:
 
 ```bash
 npx @zephyrdeng/pi-review install-skill
 ```
 
-To update or remove:
+This uses the [skills CLI](https://www.npmjs.com/package/skills) when available, installing to 70+ agents automatically. Falls back to Claude Code direct install if `skills` is not found.
+
+Install to specific agents only:
 
 ```bash
-npx @zephyrdeng/pi-review install-skill      # overwrite with latest
-npx @zephyrdeng/pi-review uninstall-skill     # remove
+npx @zephyrdeng/pi-review install-skill --agent claude-code codex cursor
+```
+
+To remove:
+
+```bash
+npx @zephyrdeng/pi-review uninstall-skill
 ```
 
 ### From source

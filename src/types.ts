@@ -3,6 +3,7 @@ export type Verdict = (typeof VERDICTS)[number];
 
 export interface ParsedArgs {
   command: "review" | "models" | "install-skill" | "uninstall-skill";
+  extraArgs?: string[];
   mode: string;
   skills: string[];
   payload: string[];
