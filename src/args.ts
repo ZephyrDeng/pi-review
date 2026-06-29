@@ -7,17 +7,21 @@ function usage(exitCode = 0): never {
   pi-review install-skill [options]     Install skill to AI agents
   pi-review uninstall-skill [options]  Remove skill from AI agents
 
+Requires Pi CLI (https://pi.dev) to be installed and configured.
+
 Options:
-  --mode <name>                                Review mode (default: code)
+  --mode <name>                                Review mode: code, plan, challenge (default: code)
   --model <provider/model[:thinking]|pattern>  Model for child pi session
   --provider <name>                           Model provider
   --thinking <level>                          off|minimal|low|medium|high|xhigh
   --skill <path>                              Load an extra pi skill (repeatable)
   --tools <csv>                               Override allowed tools
-  --keep-session                              Persist the review session
-  --continue <sessionHandle>                  Continue an existing session
-  --name <name>                               Session name (with --keep-session)
   -h, --help                                  Show help
+
+Session (requires Pi session support):
+  --keep-session                              Persist the review session for follow-up
+  --continue <sessionHandle>                  Continue an existing review session
+  --name <name>                               Session name (with --keep-session)
 
 Examples:
   pi-review models
