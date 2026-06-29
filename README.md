@@ -40,24 +40,24 @@ pi install npm:@zephyrdeng/pi-review
 
 ### Agent skill (Claude Code, Codex, Cursor, Cline, Windsurf, ...)
 
-Install the pi-review skill to all supported AI agents:
+Install the pi-review skill to your AI agents:
 
 ```bash
 npx @zephyrdeng/pi-review install-skill
 ```
 
-This uses the [skills CLI](https://www.npmjs.com/package/skills) when available, installing to 70+ agents automatically. Falls back to Claude Code direct install if `skills` is not found.
+This uses the [skills CLI](https://www.npmjs.com/package/skills) when available — it will prompt you to choose which agents to install to. Falls back to Claude Code direct install if `skills` is not found.
 
-Install to specific agents only:
+You can also specify agents directly:
 
 ```bash
-npx @zephyrdeng/pi-review install-skill --agent claude-code codex cursor
+pi-review install-skill --agent claude-code codex cursor
 ```
 
 To remove:
 
 ```bash
-npx @zephyrdeng/pi-review uninstall-skill
+pi-review uninstall-skill
 ```
 
 ### From source

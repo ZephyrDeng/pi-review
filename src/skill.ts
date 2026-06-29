@@ -19,9 +19,8 @@ function hasSkillsCli(): boolean {
 }
 
 function installViaSkillsCli(args: string[]): boolean {
-  const agent = args.includes("--agent") ? [] : ["--agent", "*"];
   const global = args.includes("-g") || args.includes("--global") ? [] : ["-g"];
-  const result = spawnSync("npx", ["skills", "add", REPO, ...global, ...agent, "-y", "--skill", "pi-review", ...args], {
+  const result = spawnSync("npx", ["skills", "add", REPO, ...global, "--skill", "pi-review", ...args], {
     stdio: "inherit",
     encoding: "utf8",
   });
@@ -30,7 +29,7 @@ function installViaSkillsCli(args: string[]): boolean {
 
 function uninstallViaSkillsCli(args: string[]): boolean {
   const global = args.includes("-g") || args.includes("--global") ? [] : ["-g"];
-  const result = spawnSync("npx", ["skills", "remove", "pi-review", ...global, "-y", ...args], {
+  const result = spawnSync("npx", ["skills", "remove", "pi-review", ...global, ...args], {
     stdio: "inherit",
     encoding: "utf8",
   });
@@ -64,7 +63,6 @@ function uninstallDirect(): void {
 
 export function installSkill(extraArgs: string[] = []): never {
   if (hasSkillsCli()) {
-    process.stdout.write("Using skills CLI to install across agents...\n");
     const ok = installViaSkillsCli(extraArgs);
     process.exit(ok ? 0 : 1);
   }
@@ -76,7 +74,6 @@ export function installSkill(extraArgs: string[] = []): never {
 
 export function uninstallSkill(extraArgs: string[] = []): never {
   if (hasSkillsCli()) {
-    process.stdout.write("Using skills CLI to remove across agents...\n");
     const ok = uninstallViaSkillsCli(extraArgs);
     process.exit(ok ? 0 : 1);
   }
