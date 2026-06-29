@@ -38,6 +38,20 @@ npm install -g @zephyrdeng/pi-review
 pi install npm:@zephyrdeng/pi-review
 ```
 
+### Claude Code skill
+
+After installing the CLI, register the `/pi-review` slash command in Claude Code:
+
+```bash
+pi-review install-skill
+```
+
+To remove:
+
+```bash
+pi-review uninstall-skill
+```
+
 ### From source
 
 ```bash

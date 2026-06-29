@@ -1,6 +1,6 @@
 {
   "name": "@zephyrdeng/pi-review",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Isolated AI-powered code and plan reviews from the command line",
   "type": "module",
   "author": "ZephyrDeng <zephyrTang@aliyun.com>",

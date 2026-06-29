@@ -4,6 +4,8 @@ function usage(exitCode = 0): never {
   const out = `Usage:
   pi-review models [search]
   pi-review [options] -- <@files|text...>
+  pi-review install-skill              Install Claude Code skill
+  pi-review uninstall-skill            Remove Claude Code skill
 
 Options:
   --mode <name>                                Review mode (default: code)
@@ -21,7 +23,8 @@ Examples:
   pi-review models
   pi-review -- @src/foo.ts
   pi-review --model openai/gpt-5.5 -- @src/foo.ts
-  pi-review --mode plan-grill --keep-session -- @design.md
+  pi-review --mode challenge --keep-session -- @design.md
+  pi-review install-skill
 `;
   (exitCode === 0 ? process.stdout : process.stderr).write(out);
   process.exit(exitCode);
@@ -39,6 +42,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (argv.length === 0 || argv[0] === "-h" || argv[0] === "--help") usage(0);
   if (argv[0] === "models") {
     return { command: "models", search: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
+  }
+  if (argv[0] === "install-skill") {
+    return { command: "install-skill", mode: "code", skills: [], payload: [], keepSession: false };
+  }
+  if (argv[0] === "uninstall-skill") {
+    return { command: "uninstall-skill", mode: "code", skills: [], payload: [], keepSession: false };
   }
 
   let mode = "code";
