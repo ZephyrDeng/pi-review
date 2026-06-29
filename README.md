@@ -40,16 +40,17 @@ pi install npm:@zephyrdeng/pi-review
 
 ### Claude Code skill
 
-After installing the CLI, register the `/pi-review` slash command in Claude Code:
+Register the `/pi-review` slash command in Claude Code (no global install needed):
 
 ```bash
-pi-review install-skill
+npx @zephyrdeng/pi-review install-skill
 ```
 
-To remove:
+To update or remove:
 
 ```bash
-pi-review uninstall-skill
+npx @zephyrdeng/pi-review install-skill      # overwrite with latest
+npx @zephyrdeng/pi-review uninstall-skill     # remove
 ```
 
 ### From source
