@@ -8,6 +8,6 @@ const parsed = parseArgs(process.argv.slice(2));
 if (parsed.command === "models") {
   const config = resolveConfig();
   runModels(config.piBin, parsed.search || []);
+} else {
+  runReview(parsed);
 }
-
-runReview(parsed);
