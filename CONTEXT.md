@@ -1,5 +1,10 @@
 # Pi Review — Domain Context
 
+## Language
+
+- **Code and runtime copy**: English only (including `/rv` orchestration text, presets, child-session prompts).
+- **Docs**: English README is canonical; [README.zh-CN.md](./README.zh-CN.md) is the Chinese companion.
+
 ## Glossary
 
 **pi-review**: A CLI and Pi package that runs isolated child Pi sessions for review-only work. It reads code, analyzes, and returns structured findings — never edits, patches, or deploys.
@@ -8,7 +13,7 @@
 
 **Review conclusion**: The Markdown review body plus a `PI_REVIEW_META` JSON footer emitted by the CLI.
 
-**Review mode**: A named preset that shapes the review behavior. The default mode is `code`; plan modes are selected with `--mode plan-bigbang` or `--mode plan-grill`.
+**Review mode**: A named preset in `review-presets.json` that shapes review behavior. Built-in modes are `code` (default), `plan`, and `challenge`, selected with `--mode <name>`. Custom modes can be added by extending the presets file.
 
 **Model catalog**: The model list returned by `pi --list-models`, exposed through `pi-review models [search]`.
 
@@ -20,5 +25,5 @@
 
 - A **review run** always executes in a child Pi process — never in the parent session.
 - `pi-review models` delegates to the Pi **model catalog** directly.
-- The Pi package `/rv` command sends a review request to the agent, which uses the **pi-review skill** to invoke the **shell CLI**.
+- The Pi package `/rv` command sends mode-specific orchestration text to the parent agent, which uses the **pi-review skill** to invoke the **shell CLI**.
 - The package skill guides parent agents to call the **shell CLI** and preserve the `PI_REVIEW_META` footer.

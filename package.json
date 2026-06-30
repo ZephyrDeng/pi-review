@@ -65,6 +65,7 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "smoke": "node dist/cli.js --help >/dev/null",
+    "test:rv": "npx --yes tsx --test extensions/rv-prompts.test.ts",
     "prepublishOnly": "npm run build",
     "pack:dry": "npm pack --dry-run"
   },

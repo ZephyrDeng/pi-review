@@ -1,27 +1,41 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  buildRvOrchestrationPrompt,
+  parseRvArgs,
+  RV_COMPLETIONS,
+  validateRvParsed,
+} from "./rv-prompts.js";
 
 export default function piReviewExtension(pi: ExtensionAPI) {
   pi.registerCommand("rv", {
-    description: "Delegate a pi-review to the agent. Usage: /rv @file-or-text",
+    description:
+      "Delegate pi-review to the agent. Usage: /rv [--mode plan|challenge] [--model id] [--keep-session] @target | /rv --continue <handle> [opts] [text] | models",
     getArgumentCompletions: (prefix) => {
-      const items = [
-        "@",
-        "--mode challenge",
-        "--mode plan",
-        "--model ",
-        "--keep-session",
-        "models",
-      ];
-      const filtered = items.filter((item) => item.startsWith(prefix));
-      return filtered.length ? filtered.map((value) => ({ value, label: value })) : null;
+      const filtered = RV_COMPLETIONS.filter((item) => item.value.startsWith(prefix));
+      return filtered.length
+        ? filtered.map(({ value, hint }) => ({ value, label: value, description: hint }))
+        : null;
     },
     handler: async (rawArgs, ctx) => {
       const trimmed = rawArgs.trim();
       if (!trimmed) {
-        ctx.ui.notify("Usage: /rv [--mode challenge] @file-or-text", "warning");
+        ctx.ui.notify("/rv needs a target or `models`. Try: /rv @path or /rv models", "warning");
         return;
       }
-      pi.sendUserMessage(`使用 pi-review 审查: ${trimmed}`);
+
+      const parsed = parseRvArgs(trimmed);
+      const validation = validateRvParsed(parsed);
+      if (!validation.ok) {
+        ctx.ui.notify(validation.message, "warning");
+        return;
+      }
+
+      if (!parsed.modelsOnly && !parsed.target && !parsed.continueHandle) {
+        ctx.ui.notify("/rv needs a target, --continue <handle>, or `models`.", "warning");
+        return;
+      }
+
+      pi.sendUserMessage(buildRvOrchestrationPrompt(parsed));
     },
   });
 }

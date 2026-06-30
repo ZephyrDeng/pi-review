@@ -1,0 +1,19 @@
+# Project-local ai-commit config (overrides ~/.ai-commit.yaml for this repo).
+# Docs: gusky ai-commit guide — generate still appends AI-USE/META unless amended (see scripts/git-commit-en.sh).
+
+api:
+  model: ai-commit
+  timeout: 120s
+
+commit:
+  language: en
+  body_mode: auto
+  manual_ai_mode: off
+  # Conventional subject only — no AI-USE / AI-NONE / AI-COMMIT-META in template
+  template: "{type}({scope}): {subject}"
+  context: ""
+  triggers: []
+
+ui:
+  spinner: auto
+  hook_spinner: off

@@ -22,7 +22,13 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 - **Model-agnostic** — use any model available in your Pi installation
 - **Session continuity** — keep sessions alive for follow-up questions with `--keep-session`
 - **Customizable presets** — extend or override review modes via JSON configuration
-- **Pi package integration** — `/pi-review` slash command and agent skill included
+- **Pi package integration** — `/rv` slash command and agent skill included
+
+## Language policy
+
+- **Source code** (CLI, extensions, presets, prompts, TUI strings emitted from code): **English only**.
+- **Documentation** may be bilingual. See [README.zh-CN.md](./README.zh-CN.md) for 中文说明.
+- **Git commits** in this repo: English messages via [`.ai-commit.yaml`](./.ai-commit.yaml) (`commit.language: en`, `manual_ai_mode: off`). Use `./scripts/git-commit-en.sh "semantic context"` after `git add` if you want AI-generated messages without `AI-USE` / `AI-COMMIT-META` footers.
 
 ## Installation
 
@@ -122,8 +128,8 @@ PI_REVIEW_META: {"reviewMode":"code","verdict":"request_changes","verdictSource"
 # Keep a review session for follow-up
 pi-review --mode challenge --keep-session -- @docs/design.md
 
-# Continue a previous session
-pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
+# Continue a previous session (same optional flags as an initial run)
+pi-review --continue <sessionHandle> --mode challenge --model provider/model -- "expand finding 2"
 ```
 
 ## CLI Reference
@@ -166,7 +172,16 @@ After installing as a Pi package, use the `/rv` slash command:
 /rv --mode challenge @docs/design.md
 ```
 
-The `/rv` command sends the review request to the agent, which uses the pi-review skill to run an isolated review session.
+The `/rv` command injects a task message for the parent agent (mode-specific instructions + the `pi-review` CLI to run). The agent follows the **pi-review** skill and runs an isolated child session.
+
+```
+/rv models
+/rv @src/foo.ts
+/rv --mode plan @docs/architecture.md
+/rv --mode challenge --keep-session @docs/design.md
+```
+
+Argument completions (`--mode`, `@`, `models`, etc.) are hints only; execution is skill-driven.
 
 ## Security
 
