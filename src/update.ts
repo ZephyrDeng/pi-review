@@ -17,23 +17,39 @@ function getLatestVersion(): string | null {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+function box(lines: string[]): string {
+  const width = Math.max(...lines.map((l) => l.length));
+  const pad = (s: string) => s + " ".repeat(width - s.length);
+  const top = `╭${"─".repeat(width + 2)}╮`;
+  const bot = `╰${"─".repeat(width + 2)}╯`;
+  const empty = `│${" ".repeat(width + 2)}│`;
+  const body = lines.map((l) => `│ ${pad(l)} │`).join("\n");
+  return `${top}\n${empty}\n${body}\n${empty}\n${bot}\n`;
+}
+
 export function runUpdate(): void {
   const current = getCurrentVersion();
-  process.stdout.write(`当前版本: ${current}\n`);
 
   const latest = getLatestVersion();
   if (!latest) {
-    process.stderr.write("无法从 npm registry 获取最新版本\n");
+    process.stderr.write(box(["Failed to fetch latest version from npm registry"]));
     process.exit(1);
   }
 
   if (current === latest) {
-    process.stdout.write(`已是最新版本\n`);
+    process.stdout.write(box([
+      `pi-review v${current}`,
+      "",
+      "Already up to date ✓",
+    ]));
     return;
   }
 
-  process.stdout.write(`发现新版本: ${latest}\n`);
-  process.stdout.write(`正在更新...\n`);
+  process.stdout.write(box([
+    `Update available: ${current} → ${latest}`,
+    "",
+    "Updating...",
+  ]));
 
   const install = spawnSync("npm", ["install", "-g", `${PKG_NAME}@latest`], {
     encoding: "utf8",
@@ -42,9 +58,17 @@ export function runUpdate(): void {
   });
 
   if (install.status !== 0) {
-    process.stderr.write("更新失败，请手动执行: npm install -g " + PKG_NAME + "@latest\n");
+    process.stderr.write(box([
+      "Update failed. Run manually:",
+      "",
+      `npm install -g ${PKG_NAME}@latest`,
+    ]));
     process.exit(1);
   }
 
-  process.stdout.write(`更新完成: ${current} → ${latest}\n`);
+  process.stdout.write(box([
+    `Updated: ${current} → ${latest}`,
+    "",
+    "Done ✓",
+  ]));
 }
