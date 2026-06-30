@@ -4,6 +4,7 @@ npm-debug.log*
 .DS_Store
 *.tgz
 .pi-review-session/
+.pi/
 .env
 .env.*
 !.env.example
