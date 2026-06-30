@@ -58,10 +58,12 @@
     }
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "husky": "^9.1.7",
+    "typescript": "^5.8.0"
   },
   "scripts": {
+    "prepare": "husky",
     "build": "tsc",
     "check": "tsc --noEmit",
     "smoke": "node dist/cli.js --help >/dev/null",

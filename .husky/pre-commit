@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Optional: preview AI message before commit (skipped in non-interactive / CI).
+set -e
+command -v ai-commit >/dev/null 2>&1 || exit 0
+exec ai-commit preview

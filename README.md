@@ -28,9 +28,11 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 - **Source code** (CLI, extensions, presets, prompts, TUI strings emitted from code): **English only**.
 - **Documentation** may be bilingual. See [README.zh-CN.md](./README.zh-CN.md) for 中文说明.
-- **Git commits** in this repo: English via [`.ai-commit.yaml`](./.ai-commit.yaml) (`commit.language: en`, `commit.ai_footer: off`, requires **ai-commit v0.1.45+**). After `git add`, run `./scripts/git-commit-en.sh "optional context"` or `ai-commit generate --lang en`.
+- **Git commits**: [Husky](https://typicode.github.io/husky/) runs `ai-commit` on `prepare-commit-msg` / `commit-msg` / `pre-commit` (see [`.husky/`](./.husky/)). Config: [`.ai-commit.yaml`](./.ai-commit.yaml) (English, `ai_footer: off`, **ai-commit v0.1.45+** on PATH). Or run `ai-commit commit` / `ai-commit generate` directly after `git add`.
 
 ## Installation
+
+Dev dependencies use the [public npm registry](https://registry.npmjs.org/) (see [`.npmrc`](./.npmrc)); run `npm install` in the repo root for Husky hooks.
 
 ### CLI (recommended)
 

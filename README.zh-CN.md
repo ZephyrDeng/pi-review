@@ -70,6 +70,8 @@ pi-review models
 
 ## 配置
 
+提交代码：`npm install` 后会启用 **Husky** 钩子（`.husky/` → `ai-commit` 的 prepare-commit-msg / commit-msg / pre-commit）。也可 `git add` 后直接 `ai-commit commit`。配置见 `.ai-commit.yaml`（英文、`ai_footer: off`，需本机安装 ai-commit ≥ v0.1.45）。
+
 可通过 `PI_REVIEW_HOME`、`PI_REVIEW_PRESETS`、`PI_REVIEW_SYSTEM_PROMPT` 等环境变量覆盖预设与系统提示词路径。预设与审查指令文件内容均为英文。
 
 ## 安全

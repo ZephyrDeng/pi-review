@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Fill commit message via ai-commit when using interactive git commit / placeholders.
+# Requires ai-commit on PATH and .ai-commit.yaml in repo root. Silent skip if missing.
+set -e
+command -v ai-commit >/dev/null 2>&1 || exit 0
+exec ai-commit hook "$1" "$2" "${3:-}"

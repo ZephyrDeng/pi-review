@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Final commit-msg stage (manual_ai_mode: off in .ai-commit.yaml — no AI-NONE footer).
+set -e
+command -v ai-commit >/dev/null 2>&1 || exit 0
+exec ai-commit commit-msg "$1"
