@@ -12,7 +12,7 @@
 
 **Model catalog**: The model list returned by `pi --list-models`, exposed through `pi-review models [search]`.
 
-**Pi package**: The installable package shape that lets Pi load the `/review` extension and the `pi-review` skill via `pi install`.
+**Pi package**: The installable package shape that lets Pi load the `/rv` extension and the `pi-review` skill via `pi install`.
 
 **Shell CLI**: The npm `bin` entry exposed as `pi-review` for terminal, CI, and editor integration workflows.
 
@@ -20,5 +20,5 @@
 
 - A **review run** always executes in a child Pi process — never in the parent session.
 - `pi-review models` delegates to the Pi **model catalog** directly.
-- The Pi package `/review` command invokes the **shell CLI** internally and displays the result in the current Pi session.
+- The Pi package `/rv` command sends a review request to the agent, which uses the **pi-review skill** to invoke the **shell CLI**.
 - The package skill guides parent agents to call the **shell CLI** and preserve the `PI_REVIEW_META` footer.

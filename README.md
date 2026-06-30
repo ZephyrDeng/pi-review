@@ -159,15 +159,14 @@ Override defaults via environment variables:
 
 ## Pi Package Usage
 
-After installing as a Pi package, use the `/pi-review` slash command:
+After installing as a Pi package, use the `/rv` slash command:
 
 ```
-/pi-review @src/foo.ts
-/pi-review --mode challenge @docs/design.md
-/pi-review models
+/rv @src/foo.ts
+/rv --mode challenge @docs/design.md
 ```
 
-The `/pi-review` command runs the CLI internally and inserts the review output into the current Pi conversation.
+The `/rv` command sends the review request to the agent, which uses the pi-review skill to run an isolated review session.
 
 ## Security
 
