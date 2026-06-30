@@ -28,7 +28,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 - **Source code** (CLI, extensions, presets, prompts, TUI strings emitted from code): **English only**.
 - **Documentation** may be bilingual. See [README.zh-CN.md](./README.zh-CN.md) for 中文说明.
-- **Git commits** in this repo: English messages via [`.ai-commit.yaml`](./.ai-commit.yaml) (`commit.language: en`, `manual_ai_mode: off`). Use `./scripts/git-commit-en.sh "semantic context"` after `git add` if you want AI-generated messages without `AI-USE` / `AI-COMMIT-META` footers.
+- **Git commits** in this repo: English via [`.ai-commit.yaml`](./.ai-commit.yaml) (`commit.language: en`, `commit.ai_footer: off`, requires **ai-commit v0.1.45+**). After `git add`, run `./scripts/git-commit-en.sh "optional context"` or `ai-commit generate --lang en`.
 
 ## Installation
 
