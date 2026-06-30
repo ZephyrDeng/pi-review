@@ -8,6 +8,8 @@ export interface ParsedArgs {
   skills: string[];
   payload: string[];
   keepSession: boolean;
+  /** When false, buffer child output and print after exit (legacy / scripting). Default: stream. */
+  stream: boolean;
   continueHandle?: string;
   model?: string;
   provider?: string;

@@ -9,6 +9,7 @@ export type RvParsed = {
   mode: string;
   model?: string;
   keepSession: boolean;
+  noStream: boolean;
   continueHandle?: string;
   modelsOnly: boolean;
   target: string;
@@ -25,6 +26,7 @@ export function parseRvArgs(raw: string): RvParsed {
   let mode = "code";
   let model: string | undefined;
   let keepSession = false;
+  let noStream = false;
   let continueHandle: string | undefined;
   let modelsOnly = false;
   const rest: string[] = [];
@@ -37,6 +39,10 @@ export function parseRvArgs(raw: string): RvParsed {
     }
     if (t === "--keep-session") {
       keepSession = true;
+      continue;
+    }
+    if (t === "--no-stream") {
+      noStream = true;
       continue;
     }
     if (t === "--mode") {
@@ -73,6 +79,7 @@ export function parseRvArgs(raw: string): RvParsed {
     mode,
     model,
     keepSession,
+    noStream,
     continueHandle,
     modelsOnly,
     target: rest.join(" ").trim(),
@@ -101,6 +108,7 @@ export function buildPiReviewArgv(parsed: RvParsed, target: string): string[] {
   }
   if (parsed.mode !== "code") parts.push("--mode", parsed.mode);
   if (parsed.model) parts.push("--model", parsed.model);
+  if (parsed.noStream) parts.push("--no-stream");
   parts.push("--", target);
   return parts;
 }
@@ -111,6 +119,7 @@ function baseRules(): string {
     "Run pi-review in an isolated child session; return only the review conclusion.",
     "Do not edit, patch, commit, or implement findings unless the user asks separately.",
     "Preserve the final PI_REVIEW_META line from pi-review output.",
+    "pi-review streams child output by default so the user sees live progress; use --no-stream only if buffering is required.",
   ].join(" ");
 }
 
@@ -131,7 +140,7 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
   if (!target && !parsed.continueHandle) {
     return [
       "/rv needs a review target.",
-      "Usage: /rv [--mode code|plan|challenge] [--model provider/model] [--keep-session] @files-or-brief",
+      "Usage: /rv [--mode code|plan|challenge] [--model provider/model] [--keep-session] [--no-stream] @files-or-brief",
       "Continue: /rv --continue <handle> [--mode ...] [--model ...] [follow-up text]",
       "Examples: /rv @src/foo.ts | /rv --mode challenge @docs/design.md | /rv models",
     ].join("\n\n");
@@ -188,5 +197,6 @@ export const RV_COMPLETIONS: { value: string; hint: string }[] = [
   { value: "--mode challenge", hint: "adversarial plan review" },
   { value: "--model ", hint: "provider/model from pi-review models" },
   { value: "--keep-session", hint: "persist session for follow-up" },
+  { value: "--no-stream", hint: "buffer child output until exit" },
   { value: "--continue ", hint: "resume session; same optional flags as initial /rv" },
 ];

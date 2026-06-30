@@ -25,6 +25,18 @@ describe("parseRvArgs / validateRvParsed", () => {
     assert.equal(v.ok, false);
   });
 
+  it("parses --no-stream into CLI argv", () => {
+    const p = parseRvArgs("--no-stream @src/foo.ts");
+    assert.equal(p.noStream, true);
+    assert.equal(p.target, "@src/foo.ts");
+    assert.deepEqual(buildPiReviewArgv(p, "@src/foo.ts"), [
+      "pi-review",
+      "--no-stream",
+      "--",
+      "@src/foo.ts",
+    ]);
+  });
+
   it("buildPiReviewArgv matches for initial and continue", () => {
     const initial = parseRvArgs("--mode plan --model m/a @doc.md");
     assert.deepEqual(buildPiReviewArgv(initial, "@doc.md"), [

@@ -20,6 +20,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 - **Multiple review modes** — code review, multi-lens plan review, adversarial challenge review
 - **Structured output** — machine-readable `PI_REVIEW_META` JSON footer for automation
 - **Model-agnostic** — use any model available in your Pi installation
+- **Live streaming** — child review output is forwarded as it arrives (use `--no-stream` to buffer)
 - **Session continuity** — keep sessions alive for follow-up questions with `--keep-session`
 - **Customizable presets** — extend or override review modes via JSON configuration
 - **Pi package integration** — `/rv` slash command and agent skill included
@@ -152,6 +153,7 @@ pi-review models [search]
 | `--keep-session` | Persist session for follow-up |
 | `--continue <handle>` | Continue an existing session |
 | `--name <name>` | Session name (with `--keep-session`) |
+| `--no-stream` | Buffer child output until exit (default: stream live) |
 
 ## Configuration
 

@@ -17,5 +17,5 @@ if (parsed.command === "models") {
 } else if (parsed.command === "uninstall-skill") {
   uninstallSkill(parsed.extraArgs);
 } else {
-  runReview(parsed);
+  await runReview(parsed);
 }

@@ -17,6 +17,7 @@ Options:
   --thinking <level>                          off|minimal|low|medium|high|xhigh
   --skill <path>                              Load an extra pi skill (repeatable)
   --tools <csv>                               Override allowed tools
+  --no-stream                                 Buffer child output until exit (default: stream live)
   -h, --help                                  Show help
 
 Session (requires Pi session support):
@@ -46,16 +47,16 @@ function requireValue(flag: string, argv: string[]): string {
 export function parseArgs(argv: string[]): ParsedArgs {
   if (argv.length === 0 || argv[0] === "-h" || argv[0] === "--help") usage(0);
   if (argv[0] === "models") {
-    return { command: "models", search: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
+    return { command: "models", search: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
   if (argv[0] === "install-skill") {
-    return { command: "install-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
+    return { command: "install-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
   if (argv[0] === "uninstall-skill") {
-    return { command: "uninstall-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
+    return { command: "uninstall-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
   if (argv[0] === "update") {
-    return { command: "update", mode: "code", skills: [], payload: [], keepSession: false };
+    return { command: "update", mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
 
   let mode = "code";
@@ -69,6 +70,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     skills: [],
     payload: [],
     keepSession: false,
+    stream: true,
   };
 
   while (argv.length > 0) {
@@ -108,6 +110,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--name":
         options.name = requireValue(arg, argv);
+        break;
+      case "--no-stream":
+        options.stream = false;
         break;
       default:
         if (arg.startsWith("--")) {

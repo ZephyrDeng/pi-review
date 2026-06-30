@@ -9,7 +9,7 @@ import {
 export default function piReviewExtension(pi: ExtensionAPI) {
   pi.registerCommand("rv", {
     description:
-      "Delegate pi-review to the agent. Usage: /rv [--mode plan|challenge] [--model id] [--keep-session] @target | /rv --continue <handle> [opts] [text] | models",
+      "Delegate pi-review to the agent. Usage: /rv [--mode plan|challenge] [--model id] [--keep-session] [--no-stream] @target | /rv --continue <handle> [opts] [text] | models",
     getArgumentCompletions: (prefix) => {
       const filtered = RV_COMPLETIONS.filter((item) => item.value.startsWith(prefix));
       return filtered.length

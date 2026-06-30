@@ -1,6 +1,6 @@
 ---
 name: pi-review
-description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, or wants to avoid context pollution.
+description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, review status/progress, or wants to avoid context pollution.
 ---
 
 # Pi Review
@@ -22,6 +22,36 @@ node ../../bin/pi-review.js --help
 ```
 
 When resolving this fallback, use the actual directory that contains this `SKILL.md`.
+
+## Streaming vs agent hosts
+
+- `pi-review` **streams** child `pi` stdout/stderr to the process terminal by default (`--no-stream` buffers until exit).
+- **Pi** with `/rv` or a foreground bash that inherits stdio: users often see output arrive live.
+- **Claude Code, Cursor, Codex**, and similar hosts usually **buffer tool stdout** until the bash command exits, so the chat may show the review **all at once** even though the CLI is streaming. That is expected—not a misconfiguration.
+- For **live** progress in those hosts: ask the user to run the same `pi-review` command in a **local terminal** (split pane), or accept one-shot review output in chat.
+
+## Review status (no slash command)
+
+There is **no** `/status` slash in this skill. When the user asks for **review status**, **progress**, **is pi-review still running**, or **/status** in the sense of review progress, run read-only checks and summarize—do **not** start a new review.
+
+1. **In-flight review (heuristic)** — list likely `pi-review` / child `pi -p` processes:
+   ```bash
+   pgrep -fl 'pi-review' 2>/dev/null || true
+   pgrep -fl 'pi.*-p' 2>/dev/null | head -20 || true
+   ```
+   If matches exist, say a review **may still be running** (heuristic; other `pi -p` jobs can match). If none, say **no obvious in-flight pi-review** from process list—not that the last review failed.
+
+2. **Persisted sessions** (only after `--keep-session` / `--continue`) — default dir `~/.pi/pi-review/sessions`, overridable with `PI_REVIEW_SESSION_DIR`:
+   ```bash
+   ls -lt "${PI_REVIEW_SESSION_DIR:-$HOME/.pi/pi-review/sessions}" 2>/dev/null | head -15 || true
+   ```
+   Mention newest folders and that `sessionHandle` from `PI_REVIEW_META` is used with `--continue`.
+
+3. **Last conclusion** — if this conversation already has a `PI_REVIEW_META` line, quote `verdict`, `durationMs`, and `sessionHandle` instead of re-running review.
+
+4. **Live output** — remind that chat tools may not stream; for live text, use a **terminal** running `pi-review` (default streaming).
+
+Do not implement findings from a status check; status is informational only.
 
 ## Steps
 
@@ -52,6 +82,7 @@ When resolving this fallback, use the actual directory that contains this `SKILL
    - Use `--continue <handle>` only with a previous `PI_REVIEW_META.sessionHandle`.
    - Put file references as `@path` after `--`.
    - Do not ask `pi-review` to edit, patch, commit, or implement.
+   - Default streams child output live; add `--no-stream` only when the caller must buffer until exit.
    Completion criterion: the command includes the resolved model/default choice and a concrete review target.
 
 4. Return the result:
@@ -67,3 +98,8 @@ pi-review --model openai/gpt-5.5 -- @src/foo.ts
 pi-review --mode challenge --keep-session -- @docs/design.md
 pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
 ```
+
+## Status examples (user phrasing)
+
+- "review status" / "is the review still running?" → run **Review status** checks above.
+- "show streaming in Claude Code" → explain tool buffering; offer terminal `pi-review` or Pi `/rv` for live output.

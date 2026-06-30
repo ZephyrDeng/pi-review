@@ -1,7 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import type { ParsedArgs, ReviewPreset, ReviewMeta } from "./types.js";
+import type { ParsedArgs, ReviewMeta } from "./types.js";
+import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./child-process.js";
 import { loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
@@ -35,6 +36,19 @@ function childEnv(piBin: string): NodeJS.ProcessEnv {
   };
 }
 
+/** Ensures PI_REVIEW_META is on its own line after streamed child stdout. */
+export function metaLinePrefix(childStdout: string, streamMode: boolean): string {
+  if (!streamMode || !childStdout) return "";
+  return childStdout.endsWith("\n") ? "" : "\n";
+}
+
+export function childRuntimeError(child: Pick<ChildRunResult, "status" | "signal" | "error">): string | undefined {
+  if (child.error) return child.error.message;
+  if (child.signal) return `child pi terminated by signal ${child.signal}`;
+  if ((child.status ?? 0) !== 0) return `child pi exited with status ${child.status}`;
+  return undefined;
+}
+
 export function runModels(piBin: string, args: string[]): never {
   const result = spawnSync(piBin, ["--list-models", ...args], {
     stdio: "inherit",
@@ -43,7 +57,7 @@ export function runModels(piBin: string, args: string[]): never {
   process.exit(result.status ?? (result.error ? 1 : 0));
 }
 
-export function runReview(parsed: ParsedArgs): void {
+export async function runReview(parsed: ParsedArgs): Promise<void> {
   const config = resolveConfig();
   const presets = loadPresets(config.presetsFile);
   const preset = presets[parsed.mode];
@@ -87,29 +101,30 @@ export function runReview(parsed: ParsedArgs): void {
   args.push(...payload.fileRefs, prompt);
 
   const startedAt = Date.now();
-  const child = spawnSync(config.piBin, args, {
-    cwd: process.cwd(),
-    env: childEnv(config.piBin),
-    encoding: "utf8",
-    maxBuffer: 50 * 1024 * 1024,
-  });
+  const spawnOpts = { cwd: process.cwd(), env: childEnv(config.piBin) };
+  const child = parsed.stream
+    ? await spawnStreamingChild(config.piBin, args, spawnOpts)
+    : spawnBufferedChild(config.piBin, args, spawnOpts);
   const durationMs = Date.now() - startedAt;
 
   const stdout = child.stdout || "";
   const stderr = child.stderr || "";
-  if (stdout) process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
-  if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+  if (!parsed.stream) {
+    if (stdout) process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
+    if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+  }
 
   if (parsed.keepSession) {
     sessionHandle = newestJsonl(runSessionDir);
   }
 
   let verdictInfo = parseVerdict(stdout);
-  if ((child.status ?? 0) !== 0) {
+  const runtimeError = childRuntimeError(child);
+  if (runtimeError) {
     verdictInfo = {
       verdict: "blocked",
       verdictSource: "runtime_error",
-      parseError: child.error ? child.error.message : `child pi exited with status ${child.status}`,
+      parseError: runtimeError,
     };
   }
 
@@ -123,6 +138,8 @@ export function runReview(parsed: ParsedArgs): void {
     parseError: verdictInfo.parseError || undefined,
   };
 
+  const metaPrefix = metaLinePrefix(stdout, parsed.stream);
+  if (metaPrefix) process.stdout.write(metaPrefix);
   process.stdout.write(`PI_REVIEW_META: ${JSON.stringify(meta)}\n`);
-  process.exit(child.status ?? (child.error ? 1 : 0));
+  process.exit(child.status ?? (child.error || child.signal ? 1 : 0));
 }
