@@ -43,7 +43,7 @@
   ],
   "pi": {
     "extensions": [
-      "./extensions"
+      "./extensions/review.ts"
     ],
     "skills": [
       "./skills"
