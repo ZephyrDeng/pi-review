@@ -2,7 +2,7 @@ export const VERDICTS = ["approve", "request_changes", "needs_clarification", "b
 export type Verdict = (typeof VERDICTS)[number];
 
 export interface ParsedArgs {
-  command: "review" | "models" | "install-skill" | "uninstall-skill";
+  command: "review" | "models" | "install-skill" | "uninstall-skill" | "update";
   extraArgs?: string[];
   mode: string;
   skills: string[];

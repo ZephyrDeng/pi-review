@@ -4,6 +4,7 @@ function usage(exitCode = 0): never {
   const out = `Usage:
   pi-review models [search]
   pi-review [options] -- <@files|text...>
+  pi-review update                      Update to the latest version
   pi-review install-skill [options]     Install skill to AI agents
   pi-review uninstall-skill [options]  Remove skill from AI agents
 
@@ -52,6 +53,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
   if (argv[0] === "uninstall-skill") {
     return { command: "uninstall-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false };
+  }
+  if (argv[0] === "update") {
+    return { command: "update", mode: "code", skills: [], payload: [], keepSession: false };
   }
 
   let mode = "code";
