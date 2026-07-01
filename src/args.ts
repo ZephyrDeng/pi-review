@@ -1,11 +1,13 @@
 import type { ParsedArgs } from "./types.js";
+import { parseInstallCommand } from "./install-args.js";
 
-function usage(exitCode = 0): never {
+export function usage(exitCode = 0): never {
   const out = `Usage:
   pi-review models [search]
   pi-review [options] -- <@files|text...>
   pi-review update                      Update to the latest version
-  pi-review install-skill [options]     Install skill to AI agents
+  pi-review install [options]           Pi package + agent skills (one-shot)
+  pi-review install-skill [options]     Install skill to AI agents only
   pi-review uninstall-skill [options]  Remove skill from AI agents
 
 Requires Pi CLI (https://pi.dev) to be installed and configured.
@@ -31,6 +33,8 @@ Examples:
   pi-review -- @src/foo.ts
   pi-review --model openai/gpt-5.5 -- @src/foo.ts
   pi-review --mode challenge --keep-session -- @design.md
+  pi-review install
+  pi-review install --agent claude-code codex -y
   pi-review install-skill
 `;
   (exitCode === 0 ? process.stdout : process.stderr).write(out);
@@ -49,6 +53,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (argv.length === 0 || argv[0] === "-h" || argv[0] === "--help") usage(0);
   if (argv[0] === "models") {
     return { command: "models", search: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };
+  }
+  if (argv[0] === "install") {
+    return parseInstallCommand(argv.slice(1));
   }
   if (argv[0] === "install-skill") {
     return { command: "install-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };

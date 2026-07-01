@@ -2,7 +2,11 @@ export const VERDICTS = ["approve", "request_changes", "needs_clarification", "b
 export type Verdict = (typeof VERDICTS)[number];
 
 export interface ParsedArgs {
-  command: "review" | "models" | "install-skill" | "uninstall-skill" | "update";
+  command: "review" | "models" | "install" | "install-skill" | "uninstall-skill" | "update";
+  /** For `install`: run `pi install npm:@zephyrdeng/pi-review` */
+  installPi?: boolean;
+  /** For `install`: run agent skill install (skills CLI / Claude fallback) */
+  installAgents?: boolean;
   extraArgs?: string[];
   mode: string;
   skills: string[];

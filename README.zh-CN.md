@@ -25,11 +25,15 @@
 
 ```bash
 npm install -g @zephyrdeng/pi-review
-# 或 Pi 包
+# 一键：Pi 包 + Claude Code / Codex / Cursor 等 skill（推荐首次安装）
+npx @zephyrdeng/pi-review install
+# 仅 Pi 包
 pi install npm:@zephyrdeng/pi-review
-# 或安装 skill 到各 Agent
+# 仅各 Agent skill
 npx @zephyrdeng/pi-review install-skill
 ```
+
+`install` 会在有 Pi CLI 时执行 `pi install npm:@zephyrdeng/pi-review`，再通过 [skills CLI](https://www.npmjs.com/package/skills) 非交互安装 agent skill。只用 Pi 时**不要**再跑 `install-skill`，避免与 `pi.skills` 重复冲突。可用 `--pi-only` / `--agents-only` 拆分。
 
 ## 快速开始
 

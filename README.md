@@ -42,15 +42,23 @@ Dev dependencies use the [public npm registry](https://registry.npmjs.org/) (see
 npm install -g @zephyrdeng/pi-review
 ```
 
-### Pi package
+### One-shot (Pi + other agents)
+
+```bash
+npx @zephyrdeng/pi-review install
+```
+
+Runs `pi install npm:@zephyrdeng/pi-review` when the Pi CLI is on PATH, then installs the agent skill for Claude Code, Codex, and Cursor (via the [skills CLI](https://www.npmjs.com/package/skills), non-interactive `-y`). Forward extra flags to the skill step, e.g. `npx @zephyrdeng/pi-review install --agent claude-code codex -y` or `npx @zephyrdeng/pi-review install --agents-only --all`.
+
+Use `--pi-only` or `--agents-only` to run one side. For Pi-only use, **do not** also run `install-skill` — the npm Pi package already exposes the skill via `pi.skills`.
+
+### Pi package only
 
 ```bash
 pi install npm:@zephyrdeng/pi-review
 ```
 
-### Agent skill (Claude Code, Codex, Cursor, Cline, Windsurf, ...)
-
-Install the pi-review skill to your AI agents:
+### Agent skill only (Claude Code, Codex, Cursor, ...)
 
 ```bash
 npx @zephyrdeng/pi-review install-skill
