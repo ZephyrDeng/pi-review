@@ -154,6 +154,8 @@ pi-review --continue <sessionHandle> --mode challenge --model provider/model -- 
 
 Agent hosts like Claude Code, Cursor, and Codex typically buffer a Bash tool's stdout until the command exits, so a multi-minute review can look like a silent wait followed by one large dump — even though `pi-review` streams by default. `--progress-log <path>` sidesteps this: it runs the child in `--mode json` and writes its event log to a file in real time, independent of what the calling tool does with stdout.
 
+The bundled **pi-review** agent skill tells parent agents to use `--progress-log` by default on those hosts (Pi `/rv` stays on default streaming). Details: [`skills/pi-review/SKILL.md`](skills/pi-review/SKILL.md) and [`skills/pi-review/references/codex-tools.md`](skills/pi-review/references/codex-tools.md).
+
 ```bash
 # Start the review in the background, writing structured progress events to a file
 pi-review --progress-log /tmp/pi-review.jsonl -- @src/foo.ts &

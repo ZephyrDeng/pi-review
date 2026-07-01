@@ -1,6 +1,6 @@
 ---
 name: pi-review
-description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, review status/progress, or wants to avoid context pollution.
+description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. On Claude Code or Codex, default to --progress-log with a background shell run and tail the log (chat tools buffer stdout). Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, review status/progress, or wants to avoid context pollution.
 ---
 
 # Pi Review
@@ -23,17 +23,36 @@ node ../../bin/pi-review.js --help
 
 When resolving this fallback, use the actual directory that contains this `SKILL.md`.
 
+## Codex / Claude Code
+
+- Map skill mentions of `Bash` to your host shell tool.
+- Read **[references/codex-tools.md](./references/codex-tools.md)** (next to this `SKILL.md`) for Codex/Claude Code defaults: `--progress-log` + background run + tail.
+- Do not use a blocking foreground shell alone for live progress; follow **Default workflow by host** below.
+
+## Default workflow by host
+
+| Host | How to run `pi-review` |
+|------|-------------------------|
+| **Pi** (`/rv`) | Foreground CLI, **default streaming** only. Do **not** add `--no-stream` or `--progress-log` unless the user explicitly asks. |
+| **Claude Code, Codex, Cursor**, and similar AI agents | **Default: `--progress-log <path>` + background run + tail** (see below). Do **not** rely on foreground Bash stdout for “streaming” — the tool buffers until exit. |
+| Scripts / CI | Foreground is fine; use `--no-stream` only when you must buffer until exit. |
+
 ## Pi host (`/rv`)
 
 - In **Pi interactive** sessions, run `pi-review` with **default streaming only** — do **not** add `--no-stream` or `--progress-log` unless the user explicitly asks.
 - The `/rv` extension injects these rules into the parent agent; ordinary `/rv @path` needs no extra flags.
 
-## Streaming vs agent hosts
+## Streaming vs agent hosts (Claude Code / Codex)
 
-- `pi-review` **streams** child `pi` stdout/stderr to the process terminal by default (`--no-stream` buffers until exit).
-- **Pi** with `/rv` or a foreground bash that inherits stdio: users often see output arrive live.
-- **Claude Code, Cursor, Codex**, and similar hosts usually **buffer tool stdout** until the bash command exits, so the chat may show the review **all at once** even though the CLI is streaming. That is expected—not a misconfiguration. Also note: pi-review's default `text` mode produces **no output at all** during the tool-use/thinking phase (only the final answer), so even a local terminal looks silent for most of a multi-minute review.
-- For **live** progress in those hosts, prefer `--progress-log <path>`: it runs the child in `--mode json` and writes a structured, incremental event log to that file, independent of host stdout buffering. Run `pi-review --progress-log <path> ...` with a background/async tool call, then tail the file (e.g. with a Monitor-style tool) filtering out `message_update`/`tool_execution_update` (high-frequency token deltas) to surface milestone events. Fall back to a **local terminal** running the same command only if the host has no way to run a background command or tail a file.
+- `pi-review` **streams** child `pi` stdout/stderr to the process terminal by default (`--no-stream` buffers until exit). That helps **Pi** and real terminals, not most agent chat UIs.
+- **Claude Code, Cursor, Codex**, and similar hosts **buffer tool stdout** until the bash command exits, so the chat shows the review **all at once** even though the CLI is streaming. That is expected—not a misconfiguration.
+- Default `text` mode also produces **no stdout** during tool-use/thinking (only the final answer), so even a local terminal stays quiet for most of a multi-minute review.
+- **Recommended for Claude Code / Codex (live progress):** always use `--progress-log <path>` unless the user explicitly wants a silent blocking wait:
+  1. Pick a writable path (e.g. `/tmp/pi-review-<id>.jsonl`).
+  2. Start `pi-review --progress-log <path> ...` in a **background** or **async** shell invocation (not a blocking foreground Bash that you wait on with no updates).
+  3. While the child runs, **tail** the log and summarize milestones to the user (filter out `message_update` / `tool_execution_update` unless they asked for token-level detail).
+  4. When the process exits, show the Markdown body and ASCII `── pi-review` footer from the command result (or re-read the final output as the skill’s step 4 describes).
+- Fall back to a **local terminal** with default streaming only if the host cannot run background commands or tail a file.
 
 ## Review status (no slash command)
 
@@ -87,8 +106,9 @@ Do not implement findings from a status check; status is informational only.
    - Use `--continue <handle>` only with a **Session** path from a prior ASCII footer or `sessionHandle` in `PI_REVIEW_META_JSON`.
    - Put file references as `@path` after `--`.
    - Do not ask `pi-review` to edit, patch, commit, or implement.
-   - Default streams child output live; add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`).
-   - In a host that buffers tool stdout (Claude Code, Codex, ...), prefer running with `--progress-log <path>` in the background and tailing the file for live progress instead of waiting on the blocking call.
+   - **Pi `/rv`:** default streaming; no `--progress-log` unless the user asked.
+   - **Claude Code / Codex / Cursor:** **include `--progress-log <path>` by default**; background the CLI and tail the log for user-visible progress. Foreground Bash alone does not stream in chat.
+   - Add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`).
    Completion criterion: the command includes the resolved model/default choice and a concrete review target.
 
 4. Return the result:
