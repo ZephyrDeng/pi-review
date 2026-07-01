@@ -10,6 +10,8 @@ export interface ParsedArgs {
   keepSession: boolean;
   /** When false, buffer child output and print after exit (legacy / scripting). Default: stream. */
   stream: boolean;
+  /** When set, run the child in --mode json and stream its event log to this file path. */
+  progressLog?: string;
   continueHandle?: string;
   model?: string;
   provider?: string;

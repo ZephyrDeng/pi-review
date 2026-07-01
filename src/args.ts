@@ -18,6 +18,7 @@ Options:
   --skill <path>                              Load an extra pi skill (repeatable)
   --tools <csv>                               Override allowed tools
   --no-stream                                 Buffer child output until exit (default: stream live)
+  --progress-log <path>                       Stream child --mode json events to this file (cannot combine with --no-stream)
   -h, --help                                  Show help
 
 Session (requires Pi session support):
@@ -114,6 +115,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--no-stream":
         options.stream = false;
         break;
+      case "--progress-log":
+        options.progressLog = requireValue(arg, argv);
+        break;
       default:
         if (arg.startsWith("--")) {
           process.stderr.write(`pi-review: unknown option: ${arg}\n`);
@@ -127,6 +131,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (options.keepSession && options.continueHandle) {
     process.stderr.write("pi-review: --keep-session and --continue cannot be used together\n");
+    process.exit(2);
+  }
+
+  if (options.progressLog && !options.stream) {
+    process.stderr.write("pi-review: --progress-log cannot be used with --no-stream\n");
     process.exit(2);
   }
 

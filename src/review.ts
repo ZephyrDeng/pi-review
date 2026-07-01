@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -6,6 +7,7 @@ import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./
 import { loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
+import { extractFinalText } from "./json-events.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig } from "./config.js";
@@ -13,7 +15,6 @@ import { resolveConfig } from "./config.js";
 function readStdin(): string {
   if (process.stdin.isTTY) return "";
   try {
-    const fs = require("node:fs");
     return fs.readFileSync(0, "utf8").trim();
   } catch {
     return "";
@@ -40,6 +41,11 @@ function childEnv(piBin: string): NodeJS.ProcessEnv {
 export function metaLinePrefix(childStdout: string, streamMode: boolean): string {
   if (!streamMode || !childStdout) return "";
   return childStdout.endsWith("\n") ? "" : "\n";
+}
+
+/** True when the final text must be printed after exit instead of having streamed live. */
+export function progressLogBuffersOutput(streamMode: boolean, hasProgressLog: boolean): boolean {
+  return !streamMode || hasProgressLog;
 }
 
 export function childRuntimeError(child: Pick<ChildRunResult, "status" | "signal" | "error">): string | undefined {
@@ -70,6 +76,7 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
   const payload = splitPayload(parsed.payload);
   const prompt = buildPrompt(parsed.mode, preset, payload, stdinText);
   const args: string[] = ["-p"];
+  if (parsed.progressLog) args.push("--mode", "json");
   const systemPrompt = loadSystemPrompt(config.systemPromptFile);
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
 
@@ -100,18 +107,55 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
 
   args.push(...payload.fileRefs, prompt);
 
+  let progressStream: fs.WriteStream | undefined;
+  let progressStreamError: Error | undefined;
+  if (parsed.progressLog) {
+    try {
+      fs.mkdirSync(path.dirname(parsed.progressLog), { recursive: true });
+    } catch (error) {
+      fail(`failed to prepare --progress-log directory: ${(error as Error).message}`);
+    }
+    progressStream = fs.createWriteStream(parsed.progressLog, { flags: "a" });
+    progressStream.on("error", (error) => {
+      progressStreamError = error;
+    });
+  }
+
   const startedAt = Date.now();
-  const spawnOpts = { cwd: process.cwd(), env: childEnv(config.piBin) };
+  const spawnOpts = {
+    cwd: process.cwd(),
+    env: childEnv(config.piBin),
+    ...(progressStream ? { stdoutSink: progressStream } : {}),
+  };
   const child = parsed.stream
     ? await spawnStreamingChild(config.piBin, args, spawnOpts)
     : spawnBufferedChild(config.piBin, args, spawnOpts);
   const durationMs = Date.now() - startedAt;
 
-  const stdout = child.stdout || "";
+  if (progressStream) {
+    await new Promise<void>((resolve) => progressStream!.end(() => resolve()));
+    if (progressStreamError) {
+      process.stderr.write(`pi-review: warning: --progress-log write failed: ${progressStreamError.message}\n`);
+    }
+  }
+
+  let stdout = child.stdout || "";
   const stderr = child.stderr || "";
-  if (!parsed.stream) {
-    if (stdout) process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
-    if (stderr) process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
+  let extractedError: string | undefined;
+  let extractedFatal = false;
+  if (parsed.progressLog) {
+    const extracted = extractFinalText(stdout);
+    stdout = extracted.text;
+    extractedError = extracted.error;
+    extractedFatal = Boolean(extracted.fatal);
+  }
+
+  const bufferedPrint = progressLogBuffersOutput(parsed.stream, Boolean(parsed.progressLog));
+  if (bufferedPrint && stdout) {
+    process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
+  }
+  if (!parsed.stream && stderr) {
+    process.stderr.write(stderr.endsWith("\n") ? stderr : `${stderr}\n`);
   }
 
   if (parsed.keepSession) {
@@ -126,6 +170,17 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
       verdictSource: "runtime_error",
       parseError: runtimeError,
     };
+  } else if (extractedFatal) {
+    verdictInfo = {
+      verdict: "blocked",
+      verdictSource: "runtime_error",
+      parseError: extractedError,
+    };
+  } else if (extractedError) {
+    verdictInfo = {
+      ...verdictInfo,
+      parseError: [verdictInfo.parseError, extractedError].filter(Boolean).join("; "),
+    };
   }
 
   const meta: ReviewMeta = {
@@ -138,7 +193,7 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
     parseError: verdictInfo.parseError || undefined,
   };
 
-  const metaPrefix = metaLinePrefix(stdout, parsed.stream);
+  const metaPrefix = metaLinePrefix(stdout, !bufferedPrint);
   if (metaPrefix) process.stdout.write(metaPrefix);
   process.stdout.write(`PI_REVIEW_META: ${JSON.stringify(meta)}\n`);
   process.exit(child.status ?? (child.error || child.signal ? 1 : 0));

@@ -27,8 +27,8 @@ When resolving this fallback, use the actual directory that contains this `SKILL
 
 - `pi-review` **streams** child `pi` stdout/stderr to the process terminal by default (`--no-stream` buffers until exit).
 - **Pi** with `/rv` or a foreground bash that inherits stdio: users often see output arrive live.
-- **Claude Code, Cursor, Codex**, and similar hosts usually **buffer tool stdout** until the bash command exits, so the chat may show the review **all at once** even though the CLI is streaming. That is expected—not a misconfiguration.
-- For **live** progress in those hosts: ask the user to run the same `pi-review` command in a **local terminal** (split pane), or accept one-shot review output in chat.
+- **Claude Code, Cursor, Codex**, and similar hosts usually **buffer tool stdout** until the bash command exits, so the chat may show the review **all at once** even though the CLI is streaming. That is expected—not a misconfiguration. Also note: pi-review's default `text` mode produces **no output at all** during the tool-use/thinking phase (only the final answer), so even a local terminal looks silent for most of a multi-minute review.
+- For **live** progress in those hosts, prefer `--progress-log <path>`: it runs the child in `--mode json` and writes a structured, incremental event log to that file, independent of host stdout buffering. Run `pi-review --progress-log <path> ...` with a background/async tool call, then tail the file (e.g. with a Monitor-style tool) filtering out `message_update`/`tool_execution_update` (high-frequency token deltas) to surface milestone events. Fall back to a **local terminal** running the same command only if the host has no way to run a background command or tail a file.
 
 ## Review status (no slash command)
 
@@ -49,7 +49,7 @@ There is **no** `/status` slash in this skill. When the user asks for **review s
 
 3. **Last conclusion** — if this conversation already has a `PI_REVIEW_META` line, quote `verdict`, `durationMs`, and `sessionHandle` instead of re-running review.
 
-4. **Live output** — remind that chat tools may not stream; for live text, use a **terminal** running `pi-review` (default streaming).
+4. **Live output** — remind that chat tools may not stream; prefer re-running with `--progress-log <path>` + a background/tail workflow for live progress, or use a **terminal** running `pi-review` (default streaming) as a fallback.
 
 Do not implement findings from a status check; status is informational only.
 
@@ -73,7 +73,7 @@ Do not implement findings from a status check; status is informational only.
 
 3. Run an isolated review:
    ```bash
-   pi-review [--mode <name>] [--model <provider/model[:thinking]>] [--keep-session|--continue <handle>] -- <@files|text...>
+   pi-review [--mode <name>] [--model <provider/model[:thinking]>] [--keep-session|--continue <handle>] [--progress-log <path>] -- <@files|text...>
    ```
    Rules:
    - Use the model decision from step 1; do not invent model IDs.
@@ -82,7 +82,8 @@ Do not implement findings from a status check; status is informational only.
    - Use `--continue <handle>` only with a previous `PI_REVIEW_META.sessionHandle`.
    - Put file references as `@path` after `--`.
    - Do not ask `pi-review` to edit, patch, commit, or implement.
-   - Default streams child output live; add `--no-stream` only when the caller must buffer until exit.
+   - Default streams child output live; add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`).
+   - In a host that buffers tool stdout (Claude Code, Codex, ...), prefer running with `--progress-log <path>` in the background and tailing the file for live progress instead of waiting on the blocking call.
    Completion criterion: the command includes the resolved model/default choice and a concrete review target.
 
 4. Return the result:
@@ -102,4 +103,4 @@ pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
 ## Status examples (user phrasing)
 
 - "review status" / "is the review still running?" → run **Review status** checks above.
-- "show streaming in Claude Code" → explain tool buffering; offer terminal `pi-review` or Pi `/rv` for live output.
+- "show streaming in Claude Code" / "the wait is bad, is there a better way" → explain tool buffering; re-run with `--progress-log <path>` + a background/tail workflow (or Pi `/rv`) for live progress, offering a local terminal only as a fallback.

@@ -21,6 +21,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 - **Structured output** — machine-readable `PI_REVIEW_META` JSON footer for automation
 - **Model-agnostic** — use any model available in your Pi installation
 - **Live streaming** — child review output is forwarded as it arrives (use `--no-stream` to buffer)
+- **Progress logging for AI hosts** — `--progress-log <path>` writes a live JSON event log so agent hosts that buffer tool stdout (Claude Code, Codex, ...) can still show real-time progress
 - **Session continuity** — keep sessions alive for follow-up questions with `--keep-session`
 - **Customizable presets** — extend or override review modes via JSON configuration
 - **Pi package integration** — `/rv` slash command and agent skill included
@@ -135,6 +136,24 @@ pi-review --mode challenge --keep-session -- @docs/design.md
 pi-review --continue <sessionHandle> --mode challenge --model provider/model -- "expand finding 2"
 ```
 
+## Live Progress in AI Hosts
+
+Agent hosts like Claude Code, Cursor, and Codex typically buffer a Bash tool's stdout until the command exits, so a multi-minute review can look like a silent wait followed by one large dump — even though `pi-review` streams by default. `--progress-log <path>` sidesteps this: it runs the child in `--mode json` and writes its event log to a file in real time, independent of what the calling tool does with stdout.
+
+```bash
+# Start the review in the background, writing structured progress events to a file
+pi-review --progress-log /tmp/pi-review.jsonl -- @src/foo.ts &
+
+# Tail it from another process/tool (e.g. Claude Code's Monitor tool) for live updates.
+# `message_update` and `tool_execution_update` carry high-frequency token-level deltas —
+# excluding them keeps the feed to milestone events (tool start/end, turn end, agent end).
+tail -f -n +1 /tmp/pi-review.jsonl | jq -c --unbuffered '
+  select(.type != "message_update" and .type != "tool_execution_update")
+'
+```
+
+The JSON event schema is pi CLI's own internal format, not a contract `pi-review` guarantees — it may change between pi versions. `pi-review` parses it defensively (unparseable lines are skipped, missing events degrade to a diagnostic `parseError`) and still prints the same clean Markdown + `PI_REVIEW_META` footer to stdout once the child exits.
+
 ## CLI Reference
 
 ```
@@ -154,6 +173,7 @@ pi-review models [search]
 | `--continue <handle>` | Continue an existing session |
 | `--name <name>` | Session name (with `--keep-session`) |
 | `--no-stream` | Buffer child output until exit (default: stream live) |
+| `--progress-log <path>` | Stream child `--mode json` events to this file (cannot combine with `--no-stream`) |
 
 ## Configuration
 
