@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildPiReviewArgv, parseRvArgs, validateRvParsed } from "./rv-prompts.js";
+import {
+  buildPiReviewArgv,
+  buildRvOrchestrationPrompt,
+  parseRvArgs,
+  validateRvParsed,
+} from "./rv-prompts.js";
 
 describe("parseRvArgs / validateRvParsed", () => {
   it("parses continue with optional mode and model", () => {
@@ -35,6 +40,14 @@ describe("parseRvArgs / validateRvParsed", () => {
       "--",
       "@src/foo.ts",
     ]);
+  });
+
+  it("orchestration prompt forbids default no-stream and progress-log in Pi", () => {
+    const p = parseRvArgs("@src/foo.ts");
+    const prompt = buildRvOrchestrationPrompt(p);
+    assert.match(prompt, /Do NOT add --no-stream or --progress-log/);
+    assert.match(prompt, /ASCII pi-review footer/);
+    assert.doesNotMatch(prompt, /PI_REVIEW_META:/);
   });
 
   it("buildPiReviewArgv matches for initial and continue", () => {

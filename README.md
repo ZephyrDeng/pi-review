@@ -18,7 +18,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 - **Isolated review sessions** — each review runs in a clean child process with no shared state
 - **Multiple review modes** — code review, multi-lens plan review, adversarial challenge review
-- **Structured output** — machine-readable `PI_REVIEW_META` JSON footer for automation
+- **Structured output** — human-readable ASCII footer on stdout; `PI_REVIEW_META_JSON` on stderr for automation
 - **Model-agnostic** — use any model available in your Pi installation
 - **Live streaming** — child review output is forwarded as it arrives (use `--no-stream` to buffer)
 - **Progress logging for AI hosts** — `--progress-log <path>` writes a live JSON event log so agent hosts that buffer tool stdout (Claude Code, Codex, ...) can still show real-time progress
@@ -120,11 +120,17 @@ approve | request_changes | needs_clarification | blocked
 ## Open Questions
 ```
 
-The CLI appends a machine-readable footer:
+The CLI appends a readable ASCII footer on **stdout**:
 
 ```
-PI_REVIEW_META: {"reviewMode":"code","verdict":"request_changes","verdictSource":"parsed"}
+── pi-review ────────────────────────────
+  Verdict     ! REQUEST CHANGES
+  Mode        code
+  Duration    42.3s
+──────────────────────────────────────────
 ```
+
+For scripts, parse **`PI_REVIEW_META_JSON:`** from **stderr** (same fields as before). Set `PI_REVIEW_META_STDOUT=1` to also emit that JSON line on stdout.
 
 ## Session Management
 
@@ -152,7 +158,7 @@ tail -f -n +1 /tmp/pi-review.jsonl | jq -c --unbuffered '
 '
 ```
 
-The JSON event schema is pi CLI's own internal format, not a contract `pi-review` guarantees — it may change between pi versions. `pi-review` parses it defensively (unparseable lines are skipped, missing events degrade to a diagnostic `parseError`) and still prints the same clean Markdown + `PI_REVIEW_META` footer to stdout once the child exits.
+The JSON event schema is pi CLI's own internal format, not a contract `pi-review` guarantees — it may change between pi versions. `pi-review` parses it defensively (unparseable lines are skipped, missing events degrade to a diagnostic `parseError`) and still prints the same clean Markdown + ASCII footer to stdout once the child exits.
 
 ## CLI Reference
 
@@ -186,6 +192,7 @@ Override defaults via environment variables:
 | `PI_REVIEW_PRESETS` | Path to presets JSON file |
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
+| `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to also print `PI_REVIEW_META_JSON` on stdout (default: stderr only) |
 
 ## Pi Package Usage
 
@@ -196,7 +203,7 @@ After installing as a Pi package, use the `/rv` slash command:
 /rv --mode challenge @docs/design.md
 ```
 
-The `/rv` command injects a task message for the parent agent (mode-specific instructions + the `pi-review` CLI to run). The agent follows the **pi-review** skill and runs an isolated child session.
+The `/rv` command injects a task message for the parent agent (Pi host rules: default streaming, no automatic `--no-stream` or `--progress-log` + the `pi-review` CLI to run). The agent follows the **pi-review** skill and runs an isolated child session. Use plain `/rv @path` in Pi — no extra streaming flags needed.
 
 ```
 /rv models

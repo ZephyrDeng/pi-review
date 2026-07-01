@@ -15,7 +15,7 @@
 | 源码（CLI、扩展、`review-presets.json`、提示词、代码里的用户可见文案） | **仅英文** |
 | 文档（本页与英文 README） | **中英均可** |
 
-实现与对外协议（如 `PI_REVIEW_META`、Verdict 枚举）保持英文，便于自动化与跨工具一致。
+实现与对外协议（如 `PI_REVIEW_META_JSON`、Verdict 枚举）保持英文，便于自动化与跨工具一致。
 
 ## 前置条件
 
@@ -62,11 +62,11 @@ pi-review models
 
 跟进审查时，`--continue` 与首次 `/rv` 一样可**选填** `--mode`、`--model`（以及后续 CLI 支持的其它选项由 skill 直接调用 CLI 时传入）。
 
-`/rv` 会向主会话注入**英文任务说明**（按 `--mode` 等参数区分），由主 Agent 按 **pi-review** skill 调用 `pi-review` CLI 跑子会话。`pi-review` **默认流式转发**子进程输出，终端可实时看到审查进度；需要整段缓冲时加 `--no-stream`。若在 Claude Code / Codex 这类会缓冲 Bash 工具 stdout 的 AI host 里使用，可加 `--progress-log <path>` 把结构化进度事件实时写入文件，配合 `tail -f` 之类的工具在宿主里也能看到实时进度（见英文 README 的 “Live Progress in AI Hosts”）。Tab 补全是固定选项提示，不是另一套实现。
+`/rv` 会向主会话注入**英文任务说明**（Pi 宿主策略：默认流式、**不要**自动加 `--no-stream` / `--progress-log`），由主 Agent 调用 `pi-review` CLI。普通 `/rv @path` 无需额外参数。需要整段缓冲时显式 `/rv --no-stream`；Claude Code 等宿主见英文 README 的 `--progress-log`。
 
 ## 输出格式
 
-审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节，并以 `PI_REVIEW_META: {...}` 结尾（英文 JSON，便于脚本解析）。
+审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节，并以 **ASCII 页脚**（`── pi-review` 框线 + Verdict/Mode/Duration/Session）结尾；机器可读 JSON 在 **stderr** 一行 `PI_REVIEW_META_JSON:`（需写 stdout 时设 `PI_REVIEW_META_STDOUT=1`）。
 
 ## 配置
 

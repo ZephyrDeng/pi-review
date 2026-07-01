@@ -11,7 +11,7 @@
 
 **Review run**: A single `pi-review` invocation that spawns a fresh child Pi session and returns a review conclusion.
 
-**Review conclusion**: The Markdown review body plus a `PI_REVIEW_META` JSON footer emitted by the CLI.
+**Review conclusion**: The Markdown review body plus an ASCII `── pi-review` footer on stdout; machine metadata as `PI_REVIEW_META_JSON` on stderr.
 
 **Review mode**: A named preset in `review-presets.json` that shapes review behavior. Built-in modes are `code` (default), `plan`, and `challenge`, selected with `--mode <name>`. Custom modes can be added by extending the presets file.
 
@@ -26,4 +26,4 @@
 - A **review run** always executes in a child Pi process — never in the parent session.
 - `pi-review models` delegates to the Pi **model catalog** directly.
 - The Pi package `/rv` command sends mode-specific orchestration text to the parent agent, which uses the **pi-review skill** to invoke the **shell CLI**.
-- The package skill guides parent agents to call the **shell CLI** and preserve the `PI_REVIEW_META` footer.
+- The package skill guides parent agents to call the **shell CLI** and show the ASCII footer to users; `/rv` orchestration forbids default `--no-stream` / `--progress-log` in Pi.

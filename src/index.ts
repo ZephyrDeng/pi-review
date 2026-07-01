@@ -16,4 +16,5 @@ export type {
 export { VERDICTS } from "./types.js";
 export { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 export { parseVerdict } from "./verdict.js";
+export { formatDurationMs, formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
 export { installSkill, uninstallSkill } from "./skill.js";

@@ -11,6 +11,7 @@ import { extractFinalText } from "./json-events.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig } from "./config.js";
+import { formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
 
 function readStdin(): string {
   if (process.stdin.isTTY) return "";
@@ -37,7 +38,7 @@ function childEnv(piBin: string): NodeJS.ProcessEnv {
   };
 }
 
-/** Ensures PI_REVIEW_META is on its own line after streamed child stdout. */
+/** Ensures the ASCII meta footer starts on its own line after streamed child stdout. */
 export function metaLinePrefix(childStdout: string, streamMode: boolean): string {
   if (!streamMode || !childStdout) return "";
   return childStdout.endsWith("\n") ? "" : "\n";
@@ -195,6 +196,13 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
 
   const metaPrefix = metaLinePrefix(stdout, !bufferedPrint);
   if (metaPrefix) process.stdout.write(metaPrefix);
-  process.stdout.write(`PI_REVIEW_META: ${JSON.stringify(meta)}\n`);
+  process.stdout.write(`${formatReviewMetaAscii(meta)}\n`);
+  const metaJsonDest = process.env.PI_REVIEW_META_STDOUT?.toLowerCase();
+  const jsonLine = formatReviewMetaJsonLine(meta);
+  if (metaJsonDest === "1" || metaJsonDest === "true" || metaJsonDest === "stdout") {
+    process.stdout.write(jsonLine);
+  } else {
+    process.stderr.write(jsonLine);
+  }
   process.exit(child.status ?? (child.error || child.signal ? 1 : 0));
 }

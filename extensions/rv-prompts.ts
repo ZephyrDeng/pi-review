@@ -113,13 +113,14 @@ export function buildPiReviewArgv(parsed: RvParsed, target: string): string[] {
   return parts;
 }
 
-function baseRules(): string {
+function piHostRules(): string {
   return [
     "Follow the pi-review skill.",
-    "Run pi-review in an isolated child session; return only the review conclusion.",
+    "Host: Pi interactive session (/rv).",
+    "Run pi-review in an isolated child session; return the review conclusion (Markdown sections) plus the ASCII pi-review footer.",
+    "CLI defaults: stream child output live. Do NOT add --no-stream or --progress-log unless the user explicitly asked.",
     "Do not edit, patch, commit, or implement findings unless the user asks separately.",
-    "Preserve the final PI_REVIEW_META line from pi-review output.",
-    "pi-review streams child output by default so the user sees live progress; use --no-stream only if buffering is required.",
+    "After pi-review exits, show the user the ASCII footer (lines starting with ── pi-review). Do not paste PI_REVIEW_META_JSON to the user; use Session from the footer for /rv --continue.",
   ].join(" ");
 }
 
@@ -127,7 +128,7 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
   if (parsed.modelsOnly) {
     return [
       "Run the pi-review model catalog step.",
-      baseRules(),
+      piHostRules(),
       "Execute: pi-review models",
       "Summarize briefly: provider count and 2–3 model IDs that fit code review vs plan/challenge.",
       "Do not start a review until the user supplies a target (@path or text).",
@@ -140,7 +141,7 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
   if (!target && !parsed.continueHandle) {
     return [
       "/rv needs a review target.",
-      "Usage: /rv [--mode code|plan|challenge] [--model provider/model] [--keep-session] [--no-stream] @files-or-brief",
+      "Usage: /rv [--mode code|plan|challenge] [--model provider/model] [--keep-session] @files-or-brief",
       "Continue: /rv --continue <handle> [--mode ...] [--model ...] [follow-up text]",
       "Examples: /rv @src/foo.ts | /rv --mode challenge @docs/design.md | /rv models",
     ].join("\n\n");
@@ -178,7 +179,7 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
 
   return [
     parsed.continueHandle ? "Continue a prior pi-review session." : "Run pi-review for the target below.",
-    baseRules(),
+    piHostRules(),
     modeBlock[parsed.mode] ??
       `Mode: ${parsed.mode}. Follow the preset named in review-presets.json when present.`,
     modelStep,
@@ -197,6 +198,6 @@ export const RV_COMPLETIONS: { value: string; hint: string }[] = [
   { value: "--mode challenge", hint: "adversarial plan review" },
   { value: "--model ", hint: "provider/model from pi-review models" },
   { value: "--keep-session", hint: "persist session for follow-up" },
-  { value: "--no-stream", hint: "buffer child output until exit" },
+  { value: "--no-stream", hint: "rare: buffer until exit (not default in Pi)" },
   { value: "--continue ", hint: "resume session; same optional flags as initial /rv" },
 ];

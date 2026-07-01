@@ -23,6 +23,11 @@ node ../../bin/pi-review.js --help
 
 When resolving this fallback, use the actual directory that contains this `SKILL.md`.
 
+## Pi host (`/rv`)
+
+- In **Pi interactive** sessions, run `pi-review` with **default streaming only** — do **not** add `--no-stream` or `--progress-log` unless the user explicitly asks.
+- The `/rv` extension injects these rules into the parent agent; ordinary `/rv @path` needs no extra flags.
+
 ## Streaming vs agent hosts
 
 - `pi-review` **streams** child `pi` stdout/stderr to the process terminal by default (`--no-stream` buffers until exit).
@@ -45,9 +50,9 @@ There is **no** `/status` slash in this skill. When the user asks for **review s
    ```bash
    ls -lt "${PI_REVIEW_SESSION_DIR:-$HOME/.pi/pi-review/sessions}" 2>/dev/null | head -15 || true
    ```
-   Mention newest folders and that `sessionHandle` from `PI_REVIEW_META` is used with `--continue`.
+   Mention newest folders and that **Session** from the ASCII footer (or `sessionHandle` in `PI_REVIEW_META_JSON` on stderr) is used with `--continue`.
 
-3. **Last conclusion** — if this conversation already has a `PI_REVIEW_META` line, quote `verdict`, `durationMs`, and `sessionHandle` instead of re-running review.
+3. **Last conclusion** — if this conversation already has the ASCII `── pi-review` footer, quote verdict, duration, and session path instead of re-running review.
 
 4. **Live output** — remind that chat tools may not stream; prefer re-running with `--progress-log <path>` + a background/tail workflow for live progress, or use a **terminal** running `pi-review` (default streaming) as a fallback.
 
@@ -79,7 +84,7 @@ Do not implement findings from a status check; status is informational only.
    - Use the model decision from step 1; do not invent model IDs.
    - Omit `--mode` for normal code review; the command defaults to `code`.
    - Use `--keep-session` only when the user wants follow-up questions on this review.
-   - Use `--continue <handle>` only with a previous `PI_REVIEW_META.sessionHandle`.
+   - Use `--continue <handle>` only with a **Session** path from a prior ASCII footer or `sessionHandle` in `PI_REVIEW_META_JSON`.
    - Put file references as `@path` after `--`.
    - Do not ask `pi-review` to edit, patch, commit, or implement.
    - Default streams child output live; add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`).
@@ -87,9 +92,10 @@ Do not implement findings from a status check; status is informational only.
    Completion criterion: the command includes the resolved model/default choice and a concrete review target.
 
 4. Return the result:
-   - Preserve the final `PI_REVIEW_META: {...}` line.
+   - Show the Markdown review body and the **ASCII footer** (`── pi-review` block on stdout). Do not paste raw `PI_REVIEW_META_JSON` to the user unless they ask for machine output.
+   - Scripts: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to also emit JSON on stdout).
    - Do not apply findings automatically; implementation is a separate user decision.
-   Completion criterion: the user sees the Markdown review conclusion and meta footer.
+   Completion criterion: the user sees the review conclusion and readable footer.
 
 ## Examples
 
