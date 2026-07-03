@@ -424,7 +424,13 @@ function topLevelCompletions(
   items.push(...semanticCompletionItems(localeOf(deps), tail, headPrefix, head));
 
   const ui = rvUi(localeOf(deps));
-  if (fuzzyMatch(ui.modelsKeyword, tail) || ui.modelsKeyword.startsWith(tail) || fuzzyMatch("models", tail)) {
+  const hasListModelsItem = items.some((i) => i.label === ui.listModels);
+  if (
+    !hasListModelsItem &&
+    (fuzzyMatch(ui.modelsKeyword, tail) ||
+      ui.modelsKeyword.startsWith(tail) ||
+      fuzzyMatch("models", tail))
+  ) {
     items.push({
       value: `${headPrefix}${ui.listModels}`,
       label: ui.listModels,

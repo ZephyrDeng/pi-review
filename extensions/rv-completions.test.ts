@@ -177,6 +177,21 @@ describe("buildRvCompletions", () => {
     assert.ok(tmpl.value.endsWith(" @"));
   });
 
+  it("does not duplicate list-models completion at top level", () => {
+    for (const locale of ["en", "zh"] as const) {
+      for (const prefix of ["", "models", "list", "mod"]) {
+        const items = buildRvCompletions(prefix, { ...deps, locale });
+        if (!items?.length) continue;
+        const ui = rvUi(locale);
+        const listModelItems = items.filter((i) => i.label === ui.listModels);
+        assert.ok(
+          listModelItems.length <= 1,
+          `locale=${locale} prefix=${JSON.stringify(prefix)} got ${listModelItems.length} "${ui.listModels}" items`,
+        );
+      }
+    }
+  });
+
   it("every returned value preserves the head prefix (整段替换安全)", () => {
     const cases = ["@a.ts --mode ", "@a.ts --model ", "@a.ts --thinking ", "@a.ts --"];
     for (const c of cases) {
