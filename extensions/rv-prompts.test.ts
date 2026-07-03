@@ -42,6 +42,21 @@ describe("parseRvArgs / validateRvParsed", () => {
     ]);
   });
 
+  it("parses --thinking and threads it into CLI argv", () => {
+    const p = parseRvArgs("--thinking xhigh --model openai/gpt-5.5 @x.md");
+    assert.equal(p.thinking, "xhigh");
+    assert.equal(p.model, "openai/gpt-5.5");
+    assert.deepEqual(buildPiReviewArgv(p, "@x.md"), [
+      "pi-review",
+      "--model",
+      "openai/gpt-5.5",
+      "--thinking",
+      "xhigh",
+      "--",
+      "@x.md",
+    ]);
+  });
+
   it("orchestration prompt forbids default no-stream and progress-log in Pi", () => {
     const p = parseRvArgs("@src/foo.ts");
     const prompt = buildRvOrchestrationPrompt(p);

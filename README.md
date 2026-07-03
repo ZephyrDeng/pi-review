@@ -222,7 +222,13 @@ The `/rv` command injects a task message for the parent agent (Pi host rules: de
 /rv --mode challenge --keep-session @docs/design.md
 ```
 
-Argument completions (`--mode`, `@`, `models`, etc.) are hints only; execution is skill-driven.
+Argument completions are context-aware. After the host session starts, `/rv` reads the live model registry and offers:
+
+- **Model list** after `--model `, ranked by review fit (reasoning, context window, cross-vendor bonus for adversarial review) with a `★ 推荐` marker and a one-line reason.
+- **Thinking suffix** after `provider/model:` — only levels the chosen model actually supports (e.g. `:high`, `:xhigh`); non-reasoning models offer none.
+- **`--mode` / `--thinking` / flag** completions with hints, and **scene templates** (e.g. “审代码改动（推荐配置）”) at the top level that pre-fill a recommended command.
+
+Completions are a hint layer only; execution remains skill-driven. When the model registry is unavailable (e.g. non-TUI mode), `/rv` falls back to the static hint list.
 
 ## Security
 

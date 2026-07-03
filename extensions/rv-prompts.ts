@@ -3,11 +3,12 @@
 export const RV_MODES = ["code", "plan", "challenge"] as const;
 export type RvMode = (typeof RV_MODES)[number];
 
-const FLAGS_REQUIRING_VALUE = ["--mode", "--model", "--continue"] as const;
+const FLAGS_REQUIRING_VALUE = ["--mode", "--model", "--thinking", "--continue"] as const;
 
 export type RvParsed = {
   mode: string;
   model?: string;
+  thinking?: string;
   keepSession: boolean;
   noStream: boolean;
   continueHandle?: string;
@@ -25,6 +26,7 @@ export function parseRvArgs(raw: string): RvParsed {
 
   let mode = "code";
   let model: string | undefined;
+  let thinking: string | undefined;
   let keepSession = false;
   let noStream = false;
   let continueHandle: string | undefined;
@@ -63,6 +65,15 @@ export function parseRvArgs(raw: string): RvParsed {
       model = cleaned[++i];
       continue;
     }
+    if (t === "--thinking") {
+      const v = cleaned[i + 1];
+      if (!v || v.startsWith("--")) {
+        rest.push(t);
+        continue;
+      }
+      thinking = cleaned[++i];
+      continue;
+    }
     if (t === "--continue") {
       const v = cleaned[i + 1];
       if (!v || v.startsWith("--")) {
@@ -78,6 +89,7 @@ export function parseRvArgs(raw: string): RvParsed {
   return {
     mode,
     model,
+    thinking,
     keepSession,
     noStream,
     continueHandle,
@@ -108,6 +120,7 @@ export function buildPiReviewArgv(parsed: RvParsed, target: string): string[] {
   }
   if (parsed.mode !== "code") parts.push("--mode", parsed.mode);
   if (parsed.model) parts.push("--model", parsed.model);
+  if (parsed.thinking) parts.push("--thinking", parsed.thinking);
   if (parsed.noStream) parts.push("--no-stream");
   parts.push("--", target);
   return parts;
@@ -168,8 +181,10 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
   const cliLine = buildPiReviewArgv(parsed, target).join(" ");
 
   const modelStep = parsed.model
-    ? `Use model exactly as given: ${parsed.model} (must appear in pi-review models output).`
-    : "Run pi-review models first if needed; pick a suitable listed ID or omit --model for Pi default.";
+    ? `Use model exactly as given: ${parsed.model}${parsed.thinking ? ` at thinking ${parsed.thinking}` : ""} (model must appear in pi-review models output).`
+    : parsed.thinking
+      ? `Run pi-review models first if needed; pick a suitable listed ID or omit --model for Pi default. Use thinking ${parsed.thinking}.`
+      : "Run pi-review models first if needed; pick a suitable listed ID or omit --model for Pi default.";
 
   const continueNote = parsed.continueHandle
     ? "Continuing an existing review session. Optional --mode and --model match the same flags as an initial /rv run."
@@ -197,6 +212,7 @@ export const RV_COMPLETIONS: { value: string; hint: string }[] = [
   { value: "--mode plan", hint: "architecture or plan review" },
   { value: "--mode challenge", hint: "adversarial plan review" },
   { value: "--model ", hint: "provider/model from pi-review models" },
+  { value: "--thinking ", hint: "off|minimal|low|medium|high|xhigh" },
   { value: "--keep-session", hint: "persist session for follow-up" },
   { value: "--no-stream", hint: "rare: buffer until exit (not default in Pi)" },
   { value: "--continue ", hint: "resume session; same optional flags as initial /rv" },
