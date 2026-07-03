@@ -1,15 +1,21 @@
 /**
  * Pure, testable /rv argument-completion logic.
  *
- * This module deliberately avoids importing pi types so the tokenizer, state
- * machine, and model scorer can be unit-tested with `node:test` and reused
- * across hosts. The thin runtime adapter (registry capture + AutocompleteItem
- * shaping) lives in `review.ts`.
- *
- * Completion items are returned "续写式": `value` always carries the already-typed
- * head tokens because pi-tui's `applyCompletion` replaces the *entire* argument
- * text after the slash command with `item.value`.
+ * Avoids pi types so tokenizer + preset ordering can be unit-tested.
+ * Completion `value` must include the typed head (pi-tui replaces the whole arg).
  */
+
+import { type RvLocale, rvUi } from "./rv-locale.js";
+import { semanticCompletionItems, SEMANTIC_PHRASES } from "./rv-semantic.js";
+import {
+  loadReviewModelPriorities,
+  primaryPresetForProfile,
+  rankModelsWithPresets,
+  resolvePresetOrderedModels,
+  resolveReviewProfile,
+  type ReviewModelPriorities,
+  type ReviewProfile,
+} from "./rv-model-priorities.js";
 
 export type AutocompleteItem = {
   value: string;
@@ -36,18 +42,18 @@ export const RV_FLAGS = [
 ] as const;
 
 export const MODE_HINTS: Record<string, string> = {
-  code: "代码 / diff / MR 审核",
-  plan: "架构 / 计划评审",
-  challenge: "对抗性方案评审",
+  code: "Code / diff / MR review",
+  plan: "Architecture or plan review",
+  challenge: "Adversarial plan review",
 };
 
 export const FLAG_HINTS: Record<string, string> = {
-  "--mode": "审核模式 code|plan|challenge",
+  "--mode": "Review mode: code | plan | challenge",
   "--model": "provider/model[:thinking]",
-  "--thinking": "off|minimal|low|medium|high|xhigh",
-  "--keep-session": "保留会话，可用 /rv --continue 追问",
-  "--no-stream": "缓冲输出到结束（非默认）",
-  "--continue": "继续既有 review 会话",
+  "--thinking": "off | minimal | low | medium | high | xhigh",
+  "--keep-session": "Keep session for /rv --continue follow-up",
+  "--no-stream": "Buffer output until exit (not default)",
+  "--continue": "Resume an existing review session",
 };
 
 /** Minimal model metadata we need; converted from the host's Model registry. */
@@ -74,6 +80,31 @@ export interface ReviewSignals {
 export interface CompletionDeps {
   models?: ModelInfo[];
   primaryProvider?: string;
+  priorities?: ReviewModelPriorities;
+  locale?: RvLocale;
+}
+
+function localeOf(deps: CompletionDeps): RvLocale {
+  return deps.locale ?? "en";
+}
+
+function modeFromSemanticHead(head: string[]): string | undefined {
+  const joined = head.join(" ").toLowerCase();
+  for (const row of SEMANTIC_PHRASES) {
+    if (!row.apply.mode) continue;
+    for (const p of row.phrases) {
+      if (joined.includes(p.toLowerCase())) return row.apply.mode;
+    }
+  }
+  return undefined;
+}
+
+function getPriorities(deps: CompletionDeps): ReviewModelPriorities {
+  return deps.priorities ?? loadReviewModelPriorities();
+}
+
+export function reviewProfileForSignals(sig: ReviewSignals): ReviewProfile {
+  return resolveReviewProfile(sig.mode, sig.targetExt);
 }
 
 // ---------------------------------------------------------------------------
@@ -111,12 +142,6 @@ export function tokenizeArgPrefix(prefix: string): TokenizedArgs {
 // Signal extraction
 // ---------------------------------------------------------------------------
 
-const CODE_EXTS = new Set([
-  "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rb", "go", "rs", "java", "kt",
-  "c", "cc", "cpp", "h", "hpp", "cs", "php", "swift", "scala", "sh", "sql",
-  "vue", "svelte",
-]);
-const PLAN_EXTS = new Set(["md", "markdown", "txt", "rst", "adoc"]);
 
 function extOf(token: string): string | undefined {
   const cleaned = token.replace(/^['"]|['"]$/g, "").replace(/^@/, "");
@@ -127,7 +152,8 @@ function extOf(token: string): string | undefined {
 export function extractSignals(head: string[], deps: CompletionDeps): ReviewSignals {
   const target = head.find((t) => t.startsWith("@"));
   const modeIdx = head.indexOf("--mode");
-  const mode = modeIdx >= 0 ? head[modeIdx + 1] : "code";
+  const mode =
+    (modeIdx >= 0 ? head[modeIdx + 1] : undefined) ?? modeFromSemanticHead(head) ?? "code";
   return {
     mode,
     hasTarget: Boolean(target),
@@ -137,46 +163,27 @@ export function extractSignals(head: string[], deps: CompletionDeps): ReviewSign
 }
 
 // ---------------------------------------------------------------------------
-// Model scoring (P2 rule engine — pure, no LLM in the completion hot path)
+// Model ordering: registry + preset priorities (no LLM)
 // ---------------------------------------------------------------------------
-
-export function scoreModelForReview(
-  m: ModelInfo,
-  sig: ReviewSignals,
-): { score: number; reason: string } {
-  let score = 0;
-  const reasons: string[] = [];
-  if (m.reasoning) {
-    score += 3;
-    reasons.push("reasoning");
-  }
-  if (m.contextWindow >= 200_000) score += 2;
-  else if (m.contextWindow >= 100_000) score += 1;
-  if (sig.primaryProvider && m.provider !== sig.primaryProvider) {
-    score += 1;
-    reasons.push("跨厂商交叉审核");
-  }
-  if ((sig.mode === "plan" || sig.mode === "challenge") && m.thinkingLevels.includes("xhigh")) {
-    score += 2;
-    reasons.push("xhigh 思考");
-  } else if (m.thinkingLevels.includes("high")) {
-    score += 1;
-  }
-  if (sig.targetExt && PLAN_EXTS.has(sig.targetExt) && m.reasoning) {
-    score += 1;
-    reasons.push("适合文档评审");
-  }
-  return { score, reason: reasons.filter(Boolean).join(" · ") };
-}
 
 export function rankModelsForReview(
   models: ModelInfo[],
   sig: ReviewSignals,
+  priorities?: ReviewModelPriorities,
 ): ModelInfo[] {
-  return models
-    .map((m) => ({ m, s: scoreModelForReview(m, sig).score }))
-    .sort((a, b) => b.s - a.s)
-    .map((x) => x.m);
+  const profile = reviewProfileForSignals(sig);
+  return rankModelsWithPresets(models, profile, priorities ?? loadReviewModelPriorities());
+}
+
+function presetDescription(
+  presetLabel: string,
+  profile: ReviewProfile,
+  presetRank: number | undefined,
+  locale: RvLocale,
+): string {
+  if (presetRank === undefined) return "";
+  const ui = rvUi(locale);
+  return `${ui.presetTier(presetRank)} · ${profile} · ${presetLabel}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,16 +241,16 @@ function wrap(
   }));
 }
 
-function thinkingDescription(level: string, sig: ReviewSignals): string {
+function thinkingDescription(level: string, sig: ReviewSignals, locale: RvLocale): string {
   const recommended = sig.mode === "code" ? "high" : "xhigh";
-  const star = level === recommended ? "★ 推荐 " : "";
+  const star = level === recommended ? rvUi(locale).thinkingSuggested : "";
   const map: Record<string, string> = {
-    off: "不思考（最快）",
-    minimal: "极简思考",
-    low: "低强度",
-    medium: "中强度",
-    high: "高强度（review 默认）",
-    xhigh: "极致思考（plan/challenge 推荐）",
+    off: "No thinking (fastest)",
+    minimal: "Minimal thinking",
+    low: "Low effort",
+    medium: "Medium effort",
+    high: "High effort (common for review)",
+    xhigh: "Max effort (plan/challenge)",
   };
   return `${star}${map[level] ?? level}`;
 }
@@ -259,22 +266,25 @@ function modelItems(
   sig: ReviewSignals,
   headPrefix: string,
   tail: string,
+  deps: CompletionDeps,
 ): AutocompleteItem[] | null {
-  const ranked = rankModelsForReview(models, sig);
-  const items = ranked.map((m, i) => {
-    const { score, reason } = scoreModelForReview(m, sig);
-    const recommended = i < 3 && score > 0;
-    const tag =
-      sig.mode === "plan" || sig.mode === "challenge" ? "plan/challenge" : "review";
+  const priorities = getPriorities(deps);
+  const profile = reviewProfileForSignals(sig);
+  const presetRows = resolvePresetOrderedModels(models, profile, priorities);
+  const presetByLabel = new Map(presetRows.map((p) => [p.model.label, p]));
+  const ranked = rankModelsWithPresets(models, profile, priorities);
+  const items = ranked.map((m) => {
+    const preset = presetByLabel.get(m.label);
+    const tag = profile;
     return {
       value: `${headPrefix}${m.label}`,
       label: m.label,
       description: [
-        recommended ? "★ 推荐" : "",
+        preset ? presetDescription(preset.presetLabel, profile, preset.presetRank, localeOf(deps)) : "",
         tag,
         m.reasoning ? "reasoning" : "",
         contextLabel(m.contextWindow),
-        reason,
+        preset?.thinking ? `preset thinking ${preset.thinking}` : "",
       ]
         .filter(Boolean)
         .join(" · "),
@@ -301,6 +311,7 @@ function thinkingSuffixItems(
   models: ModelInfo[],
   headPrefix: string,
   sig: ReviewSignals,
+  deps: CompletionDeps,
 ): AutocompleteItem[] | null {
   const colonIdx = tail.lastIndexOf(":");
   const modelPart = tail.slice(0, colonIdx);
@@ -319,40 +330,64 @@ function thinkingSuffixItems(
   return filtered.map((level) => ({
     value: `${headPrefix}${modelPart}:${level}`,
     label: level,
-    description: thinkingDescription(level, sig),
+    description: thinkingDescription(level, sig, localeOf(deps)),
   }));
 }
 
+function thinkingSuffixForModel(m: ModelInfo, want?: string): string {
+  const lvl =
+    want && m.thinkingLevels.includes(want)
+      ? want
+      : want && m.thinkingLevels.includes("high")
+        ? "high"
+        : m.thinkingLevels.includes("xhigh")
+          ? "xhigh"
+          : m.thinkingLevels.includes("high")
+            ? "high"
+            : (m.thinkingLevels[0] ?? "");
+  return lvl ? `:${lvl}` : "";
+}
+
 function sceneTemplates(
-  top: ModelInfo | undefined,
+  models: ModelInfo[],
+  sig: ReviewSignals,
   headPrefix: string,
   tail: string,
+  deps: CompletionDeps,
 ): AutocompleteItem[] {
-  if (!top) return [];
-  const pref = (m: ModelInfo, want: string): string => {
-    if (m.thinkingLevels.includes(want)) return want;
-    if (m.thinkingLevels.includes("high")) return "high";
-    return m.thinkingLevels[0] ?? "";
-  };
-  const suffix = (want: string): string => {
-    const lvl = pref(top, want);
-    return lvl ? `:${lvl}` : "";
-  };
+  const priorities = getPriorities(deps);
+  const codePrimary = primaryPresetForProfile(models, "code", priorities);
+  const planPrimary = primaryPresetForProfile(models, "plan", priorities);
+  const frontendPrimary = primaryPresetForProfile(models, "frontend", priorities);
 
-  const templates = [
-    {
-      cmd: `--mode code --model ${top.label}${suffix("high")} @`,
-      label: "审代码改动（推荐配置）",
-    },
-    {
-      cmd: `--mode plan --model ${top.label}${suffix("high")} @`,
-      label: "架构 / 计划评审",
-    },
-    {
-      cmd: `--mode challenge --keep-session --model ${top.label}${suffix("xhigh")} @`,
-      label: "对抗性方案评审（可追问）",
-    },
-  ];
+  const ui = rvUi(localeOf(deps));
+  const templates: { cmd: string; label: string }[] = [];
+  if (codePrimary) {
+    const m = codePrimary.model;
+    templates.push({
+      cmd: `${ui.modeCode} --model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "xhigh")} @`,
+      label: ui.codePreset,
+    });
+  }
+  if (frontendPrimary) {
+    const m = frontendPrimary.model;
+    templates.push({
+      cmd: `${ui.modeCode} --model ${m.label}${thinkingSuffixForModel(m, frontendPrimary.thinking)} @`,
+      label: ui.frontendPreset,
+    });
+  }
+  if (planPrimary) {
+    const m = planPrimary.model;
+    templates.push({
+      cmd: `${ui.modePlan} --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @`,
+      label: ui.planPreset,
+    });
+    templates.push({
+      cmd: `${ui.modeChallenge} ${ui.keepSession} --model ${m.label}${thinkingSuffixForModel(m, "xhigh")} @`,
+      label: ui.challengePreset,
+    });
+  }
+
   return templates
     .filter((t) => fuzzyMatch(t.label, tail) || t.cmd.includes(tail))
     .map((t) => ({
@@ -382,21 +417,25 @@ function topLevelCompletions(
   const items: AutocompleteItem[] = [];
 
   // Scene templates (only at top level, before any target/mode chosen is fine).
-  const ranked = deps.models?.length ? rankModelsForReview(deps.models, sig) : [];
-  items.push(...sceneTemplates(ranked[0], headPrefix, tail));
+  if (deps.models?.length) {
+    items.push(...sceneTemplates(deps.models, sig, headPrefix, tail, deps));
+  }
 
-  // `models` keyword.
-  if (fuzzyMatch("models", tail) || "models".startsWith(tail)) {
+  items.push(...semanticCompletionItems(localeOf(deps), tail, headPrefix, head));
+
+  const ui = rvUi(localeOf(deps));
+  if (fuzzyMatch(ui.modelsKeyword, tail) || ui.modelsKeyword.startsWith(tail) || fuzzyMatch("models", tail)) {
     items.push({
-      value: `${headPrefix}models`,
-      label: "models",
-      description: "仅列出 pi-review 可用模型",
+      value: `${headPrefix}${ui.listModels}`,
+      label: ui.listModels,
+      description: ui.listModelsDesc,
     });
   }
 
-  // Flags.
-  const flags = flagItems(head, tail, headPrefix);
-  if (flags) items.push(...flags);
+  if (tail.startsWith("--")) {
+    const flags = flagItems(head, tail, headPrefix);
+    if (flags) items.push(...flags);
+  }
 
   return items.length ? items : null;
 }
@@ -418,10 +457,10 @@ export function buildRvCompletions(
   if (prev === "--model") {
     const colonIdx = tail.lastIndexOf(":");
     if (colonIdx !== -1 && tail.slice(0, colonIdx).includes("/")) {
-      const items = thinkingSuffixItems(tail, deps.models ?? [], headPrefix, sig);
+      const items = thinkingSuffixItems(tail, deps.models ?? [], headPrefix, sig, deps);
       return items;
     }
-    return modelItems(deps.models ?? [], sig, headPrefix, tail);
+    return modelItems(deps.models ?? [], sig, headPrefix, tail, deps);
   }
 
   // 2) --mode value position.

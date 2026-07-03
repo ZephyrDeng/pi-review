@@ -1,6 +1,6 @@
 ---
 name: pi-review
-description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. On Claude Code or Codex, default to --progress-log with a background shell run and tail the log (chat tools buffer stdout). Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, review status/progress, or wants to avoid context pollution.
+description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. Model selection presets for code, frontend, and plan review (see references/model-selection.md). On Claude Code or Codex, default to --progress-log with a background shell run and tail the log (chat tools buffer stdout). Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, review status/progress, or wants to avoid context pollution.
 ---
 
 # Pi Review
@@ -26,7 +26,8 @@ When resolving this fallback, use the actual directory that contains this `SKILL
 ## Codex / Claude Code
 
 - Map skill mentions of `Bash` to your host shell tool.
-- Read **[references/codex-tools.md](./references/codex-tools.md)** (next to this `SKILL.md`) for Codex/Claude Code defaults: `--progress-log` + background run + tail.
+- Read **[references/codex-tools.md](./references/codex-tools.md)** for `--progress-log` + background run + tail.
+- Read **[references/model-selection.md](./references/model-selection.md)** when choosing `--model` after `pi-review models` (code / frontend / plan presets).
 - Do not use a blocking foreground shell alone for live progress; follow **Default workflow by host** below.
 
 ## Default workflow by host
@@ -79,15 +80,17 @@ Do not implement findings from a status check; status is informational only.
 
 ## Steps
 
-1. Prime the model catalog:
+1. Prime the model catalog and pick a model:
    ```bash
    pi-review models [search]
    ```
    Rules:
    - Run this before building the review command.
-   - If the user named a model, use that provider/model text as `[search]` and verify the exact ID from the output.
-   - If the user did not name a model, run `pi-review models` and either choose an exact suitable ID from the output or deliberately omit `--model` to use Pi's default.
-   Completion criterion: the model choice is either an exact listed `provider/model[:thinking]` or an explicit decision to use Pi's default.
+   - If the user named a model, use that text as `[search]` and verify the **exact** listed `provider/model` from the output.
+   - If the user did not name a model, follow **[references/model-selection.md](./references/model-selection.md)**: infer profile (code / frontend / plan), match the priority list against catalog ids, then set `--model` with optional `:thinking` when supported.
+   - On **Claude Code / Codex / Cursor**, state the chosen model in one line (match the user's language) before running the review command.
+   - If nothing in the priority list matches, omit `--model` (Pi default) or pick a listed reasoning model with large context—say which and why.
+   Completion criterion: exact listed `provider/model[:thinking]` or an explicit default; never invented ids.
 
 2. Choose one mode:
    - default `code` — code, diff, MR, file, or repository review.

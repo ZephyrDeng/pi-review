@@ -3,6 +3,7 @@ import {
   buildRvCompletions,
   type ModelInfo,
 } from "./rv-completions.js";
+import { detectRvLocale } from "./rv-locale.js";
 import {
   buildRvOrchestrationPrompt,
   parseRvArgs,
@@ -18,6 +19,28 @@ import {
  */
 let capturedModels: ModelInfo[] | undefined;
 let capturedPrimaryProvider: string | undefined;
+let capturedLocale: ReturnType<typeof detectRvLocale> = "en";
+
+function sampleSessionText(
+  sessionManager: { getEntries?: () => Array<{ type?: string; content?: unknown }> },
+): string[] {
+  const out: string[] = [];
+  try {
+    const entries = sessionManager.getEntries?.() ?? [];
+    for (let i = entries.length - 1; i >= 0 && out.length < 12; i--) {
+      const e = entries[i];
+      if (e.type !== "message") continue;
+      const c = e.content;
+      if (typeof c === "string") out.push(c);
+      else if (c && typeof c === "object" && "text" in c && typeof (c as { text: string }).text === "string") {
+        out.push((c as { text: string }).text);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
 
 function toModelInfo(m: {
   provider: string;
@@ -50,11 +73,21 @@ export default function piReviewExtension(pi: ExtensionAPI) {
       const available = ctx.modelRegistry?.getAvailable?.() ?? [];
       capturedModels = available.map((m) => toModelInfo(m as unknown as Parameters<typeof toModelInfo>[0]));
       capturedPrimaryProvider = ctx.model?.provider;
+      capturedLocale = detectRvLocale(sampleSessionText(ctx.sessionManager));
     } catch {
       capturedModels = undefined;
       capturedPrimaryProvider = undefined;
+      capturedLocale = "en";
     }
   });
+
+  function localeForHandler(ctx: { sessionManager?: Parameters<typeof sampleSessionText>[0] }): typeof capturedLocale {
+    try {
+      return detectRvLocale(sampleSessionText(ctx.sessionManager ?? { getEntries: () => [] }));
+    } catch {
+      return capturedLocale;
+    }
+  }
 
   pi.registerCommand("rv", {
     description:
@@ -65,6 +98,7 @@ export default function piReviewExtension(pi: ExtensionAPI) {
         const dynamic = buildRvCompletions(prefix, {
           models: capturedModels,
           primaryProvider: capturedPrimaryProvider,
+          locale: capturedLocale,
         });
         if (dynamic && dynamic.length) return dynamic;
       }
@@ -93,7 +127,7 @@ export default function piReviewExtension(pi: ExtensionAPI) {
         return;
       }
 
-      pi.sendUserMessage(buildRvOrchestrationPrompt(parsed));
+      pi.sendUserMessage(buildRvOrchestrationPrompt(parsed, localeForHandler(ctx)));
     },
   });
 }

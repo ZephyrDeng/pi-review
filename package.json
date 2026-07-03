@@ -1,6 +1,6 @@
 {
   "name": "@zephyrdeng/pi-review",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Isolated AI-powered code and plan reviews from the command line",
   "type": "module",
   "author": "ZephyrDeng <zephyrTang@aliyun.com>",
@@ -67,8 +67,8 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "smoke": "node dist/cli.js --help >/dev/null",
-    "test": "npx --yes tsx --test src/child-process.test.ts src/review.meta.test.ts src/meta-footer.test.ts src/json-events.test.ts src/install-args.test.ts extensions/rv-prompts.test.ts extensions/rv-completions.test.ts",
-    "test:rv": "npx --yes tsx --test extensions/rv-prompts.test.ts extensions/rv-completions.test.ts",
+    "test": "npx --yes tsx --test src/child-process.test.ts src/review.meta.test.ts src/meta-footer.test.ts src/json-events.test.ts src/install-args.test.ts extensions/rv-prompts.test.ts extensions/rv-completions.test.ts extensions/rv-model-priorities.test.ts extensions/rv-locale.test.ts extensions/rv-semantic.test.ts",
+    "test:rv": "npx --yes tsx --test extensions/rv-prompts.test.ts extensions/rv-completions.test.ts extensions/rv-model-priorities.test.ts extensions/rv-locale.test.ts extensions/rv-semantic.test.ts",
     "prepublishOnly": "npm run build",
     "pack:dry": "npm pack --dry-run"
   },

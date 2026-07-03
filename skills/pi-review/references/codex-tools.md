@@ -25,6 +25,8 @@ When the **pi-review** skill applies on Codex, Claude Code, or Cursor:
 
 See the parent skill: sections *Default workflow by host* and *Streaming vs agent hosts (Claude Code / Codex)*.
 
+**Model choice:** after `pi-review models`, use **[model-selection.md](./model-selection.md)** (code / frontend / plan presets)—same guidance as Pi `/rv` completions.
+
 Example tail (milestone events only):
 
 ```bash

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildPiReviewArgv,
   buildRvOrchestrationPrompt,
+  orchestrationLocaleNote,
   parseRvArgs,
   validateRvParsed,
 } from "./rv-prompts.js";
@@ -55,6 +56,14 @@ describe("parseRvArgs / validateRvParsed", () => {
       "--",
       "@x.md",
     ]);
+  });
+
+  it("models orchestration includes locale note and model-selection reference", () => {
+    const p = parseRvArgs("models");
+    const zh = buildRvOrchestrationPrompt(p, "zh");
+    assert.match(zh, /用中文向用户总结/);
+    assert.match(zh, /model-selection/);
+    assert.match(orchestrationLocaleNote("en"), /English/);
   });
 
   it("orchestration prompt forbids default no-stream and progress-log in Pi", () => {

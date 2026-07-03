@@ -1,0 +1,17 @@
+{
+  "code": [
+    { "idContains": "gpt-5.5", "thinking": "xhigh" },
+    { "idContains": "glm-5.2", "thinking": "high" }
+  ],
+  "frontend": [
+    { "idContains": "kimi", "versionPrefer": "2.7" },
+    { "idContains": "claude-sonnet", "versionPrefer": "5" },
+    { "idContains": "minimax-m3" }
+  ],
+  "plan": [
+    { "idContains": "claude-opus-4-8" },
+    { "idContains": "claude-opus-4", "versionPrefer": "8" },
+    { "idContains": "deepseek-v4-pro" },
+    { "idContains": "deepseek-v4" }
+  ]
+}

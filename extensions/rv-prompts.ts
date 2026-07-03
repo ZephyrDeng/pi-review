@@ -1,5 +1,8 @@
 /** /rv → parent-agent task text; child review uses resources/review-presets.json */
 
+import type { RvLocale } from "./rv-locale.js";
+import { mergeSemanticIntoParsed, stripSemanticPhrases } from "./rv-semantic.js";
+
 export const RV_MODES = ["code", "plan", "challenge"] as const;
 export type RvMode = (typeof RV_MODES)[number];
 
@@ -21,7 +24,8 @@ export type RvValidation =
   | { ok: false; message: string };
 
 export function parseRvArgs(raw: string): RvParsed {
-  const tokens = raw.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const { remainder, apply: semanticApply } = stripSemanticPhrases(raw);
+  const tokens = remainder.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   const cleaned = tokens.map((t) => t.replace(/^['"]|['"]$/g, ""));
 
   let mode = "code";
@@ -86,16 +90,19 @@ export function parseRvArgs(raw: string): RvParsed {
     rest.push(t);
   }
 
-  return {
-    mode,
-    model,
-    thinking,
-    keepSession,
-    noStream,
-    continueHandle,
-    modelsOnly,
-    target: rest.join(" ").trim(),
-  };
+  return mergeSemanticIntoParsed(
+    {
+      mode,
+      model,
+      thinking,
+      keepSession,
+      noStream,
+      continueHandle,
+      modelsOnly,
+      target: rest.join(" ").trim(),
+    },
+    semanticApply,
+  );
 }
 
 export function validateRvParsed(parsed: RvParsed): RvValidation {
@@ -126,6 +133,13 @@ export function buildPiReviewArgv(parsed: RvParsed, target: string): string[] {
   return parts;
 }
 
+export function orchestrationLocaleNote(locale: RvLocale = "en"): string {
+  if (locale === "zh") {
+    return "用中文向用户总结（模型目录、选型理由、review 结论）；技术 id 如 provider/model 可保留英文。";
+  }
+  return "Summarize for the user in English (catalog, model rationale, review conclusion); keep technical ids such as provider/model as listed.";
+}
+
 function piHostRules(): string {
   return [
     "Follow the pi-review skill.",
@@ -137,13 +151,15 @@ function piHostRules(): string {
   ].join(" ");
 }
 
-export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
+export function buildRvOrchestrationPrompt(parsed: RvParsed, locale: RvLocale = "en"): string {
+  const localeNote = orchestrationLocaleNote(locale);
   if (parsed.modelsOnly) {
     return [
       "Run the pi-review model catalog step.",
       piHostRules(),
+      localeNote,
       "Execute: pi-review models",
-      "Summarize briefly: provider count and 2–3 model IDs that fit code review vs plan/challenge.",
+      "Summarize briefly: provider count and 2–3 model IDs that fit code vs frontend vs plan/challenge (see pi-review skill references/model-selection.md).",
       "Do not start a review until the user supplies a target (@path or text).",
     ].join("\n\n");
   }
@@ -183,8 +199,8 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
   const modelStep = parsed.model
     ? `Use model exactly as given: ${parsed.model}${parsed.thinking ? ` at thinking ${parsed.thinking}` : ""} (model must appear in pi-review models output).`
     : parsed.thinking
-      ? `Run pi-review models first if needed; pick a suitable listed ID or omit --model for Pi default. Use thinking ${parsed.thinking}.`
-      : "Run pi-review models first if needed; pick a suitable listed ID or omit --model for Pi default.";
+      ? `Run pi-review models first if needed; pick using skill references/model-selection.md (code / frontend / plan) or omit --model for Pi default. Use thinking ${parsed.thinking}.`
+      : "Run pi-review models first if needed; pick using skill references/model-selection.md (code / frontend / plan) or omit --model for Pi default.";
 
   const continueNote = parsed.continueHandle
     ? "Continuing an existing review session. Optional --mode and --model match the same flags as an initial /rv run."
@@ -195,6 +211,7 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed): string {
   return [
     parsed.continueHandle ? "Continue a prior pi-review session." : "Run pi-review for the target below.",
     piHostRules(),
+    localeNote,
     modeBlock[parsed.mode] ??
       `Mode: ${parsed.mode}. Follow the preset named in review-presets.json when present.`,
     modelStep,

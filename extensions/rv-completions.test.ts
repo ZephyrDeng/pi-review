@@ -6,10 +6,11 @@ import {
   fuzzyMatch,
   MODE_HINTS,
   rankModelsForReview,
-  scoreModelForReview,
   tokenizeArgPrefix,
   type ModelInfo,
 } from "./rv-completions.js";
+import { rvUi } from "./rv-locale.js";
+import { DEFAULT_REVIEW_MODEL_PRIORITIES } from "./rv-model-priorities.js";
 
 function model(partial: Partial<ModelInfo> & Pick<ModelInfo, "provider" | "id">): ModelInfo {
   return {
@@ -72,28 +73,23 @@ describe("extractSignals", () => {
     assert.equal(sig.targetExt, "ts");
   });
 
-  it("carries primary provider for cross-vendor bonus", () => {
+  it("carries primary provider on signals", () => {
     const sig = extractSignals([], { primaryProvider: "anthropic" });
     assert.equal(sig.primaryProvider, "anthropic");
   });
 });
 
-describe("scoreModelForReview / rankModelsForReview", () => {
-  it("scores reasoning + cross-vendor + xhigh higher than a cheap non-reasoning model", () => {
-    const sig = { mode: "challenge", hasTarget: true, targetExt: "md", primaryProvider: "anthropic" };
-    const opus = scoreModelForReview(MODELS[0], sig);
-    const gpt = scoreModelForReview(MODELS[1], sig);
-    const flash = scoreModelForReview(MODELS[2], sig);
-    assert.ok(gpt.score > opus.score, `gpt (${gpt.score}) should beat opus (${opus.score}) for challenge+cross-vendor`);
-    assert.ok(opus.score > flash.score, "opus should beat the non-reasoning flash");
-    assert.ok(flash.score >= 2, "flash still gets context-window points");
+describe("rankModelsForReview", () => {
+  it("puts preset code models first when registered", () => {
+    const sig = extractSignals(["@src/a.ts"], {});
+    const ranked = rankModelsForReview(MODELS, sig, DEFAULT_REVIEW_MODEL_PRIORITIES);
+    assert.equal(ranked[0].id, "gpt-5.5");
   });
 
-  it("ranks descending by score", () => {
-    const sig = { mode: "plan", hasTarget: false, primaryProvider: "anthropic" };
-    const ranked = rankModelsForReview(MODELS, sig);
-    assert.equal(ranked[0].id, "gpt-5.5");
-    assert.equal(ranked[ranked.length - 1].id, "gemini-3-flash");
+  it("puts preset plan models first for plan mode", () => {
+    const sig = extractSignals(["--mode", "plan"], {});
+    const ranked = rankModelsForReview(MODELS, sig, DEFAULT_REVIEW_MODEL_PRIORITIES);
+    assert.equal(ranked[0].id, "claude-opus-4-6");
   });
 });
 
@@ -106,13 +102,17 @@ describe("fuzzyMatch", () => {
 });
 
 describe("buildRvCompletions", () => {
-  const deps = { models: MODELS, primaryProvider: "anthropic" };
+  const deps = {
+    models: MODELS,
+    primaryProvider: "anthropic",
+    priorities: DEFAULT_REVIEW_MODEL_PRIORITIES,
+  };
 
   it("returns dynamic model list after --model, with recommended marker on top items", () => {
     const items = buildRvCompletions("@x.md --model ", deps);
     assert.ok(items, "expected items");
     assert.ok(items!.some((i) => i.label === "openai/gpt-5.5"));
-    const top = items!.find((i) => i.description?.includes("★ 推荐"));
+    const top = items!.find((i) => i.description?.includes("Suggested"));
     assert.ok(top, "expected at least one recommended item");
     // value carries the head so applyCompletion replaces the whole arg safely
     assert.ok(top!.value.startsWith("@x.md --model "));
@@ -169,11 +169,11 @@ describe("buildRvCompletions", () => {
 
   it("offers scene templates + models keyword at empty top level", () => {
     const items = buildRvCompletions("", deps);
+    const ui = rvUi("en");
     assert.ok(items);
-    assert.ok(items!.some((i) => i.label === "models"));
-    assert.ok(items!.some((i) => i.label.startsWith("审代码改动")));
-    // template values end with " @" so the user can keep typing a path
-    const tmpl = items!.find((i) => i.label.startsWith("审代码改动"))!;
+    assert.ok(items!.some((i) => i.label === ui.listModels));
+    assert.ok(items!.some((i) => i.label === ui.codePreset));
+    const tmpl = items!.find((i) => i.label === ui.codePreset)!;
     assert.ok(tmpl.value.endsWith(" @"));
   });
 
@@ -202,15 +202,12 @@ describe("buildRvCompletions", () => {
     }
   });
 
-  it("scene templates omit the thinking colon for non-reasoning models (note #1 fix)", () => {
+  it("omits preset scene templates when registry has no preset id match", () => {
     const nonReasoning = [{ ...MODELS[2], thinkingLevels: [] }] as ModelInfo[];
-    const items = buildRvCompletions("", { models: nonReasoning });
+    const items = buildRvCompletions("", { models: nonReasoning, priorities: DEFAULT_REVIEW_MODEL_PRIORITIES });
     assert.ok(items);
-    const tmpl = items!.find((i) => i.label.startsWith("审代码改动"));
-    assert.ok(tmpl, "expected a scene template even for non-reasoning models");
-    // Must NOT contain a dangling colon like `gemini-3-flash: @`
-    assert.doesNotMatch(tmpl!.value, /flash:\s@/);
-    assert.match(tmpl!.value, /flash @/);
+    assert.ok(!items!.some((i) => i.label === rvUi("en").codePreset));
+    assert.ok(items!.some((i) => i.label === rvUi("en").listModels));
   });
 
   it("falls back gracefully when models are unavailable (static flags still work)", () => {
