@@ -1,4 +1,4 @@
-import { formatDurationMs } from "./meta-footer.js";
+import { formatDurationMs, formatUsage } from "./meta-footer.js";
 import { reviewExitCode } from "./review-result.js";
 import type { PanelReviewMeta, ReviewMeta, ReviewRunResult, ReviewStatus, Verdict } from "./types.js";
 
@@ -21,6 +21,10 @@ export interface LoopRoundSummary {
   durationMs: number;
   findingCount: number;
   actionableCount: number;
+  /** Thinking level requested for this round, if any. */
+  thinking?: string;
+  /** Token usage for this round, when available. */
+  usage?: import("./types.js").TokenUsage;
   /** Present when the round evaluated a panel. */
   panel?: LoopRoundPanelSummary;
 }
@@ -41,13 +45,15 @@ function displayEnum(value: string): string {
 export function formatLoopSummary(result: LoopReviewResult): string {
   const lines = ["── pi-review loop " + "─".repeat(23)];
   for (const round of result.rounds) {
+    const tokenBit = round.usage ? ` | ${formatUsage(round.usage)}` : "";
+    const thinkBit = round.thinking ? ` | think:${round.thinking}` : "";
     if (round.panel) {
       lines.push(
-        `  Round ${round.index}  ${displayEnum(round.status)} | panel ${round.panel.successfulReviewers}/${round.panel.configuredReviewers} | ${round.panel.confirmedCount} confirmed / ${round.panel.advisoryCount} advisory | ${round.panel.consensusPolicy}≥${round.panel.consensusThreshold} | ${displayEnum(round.panel.panelHealth as string)} | ${formatDurationMs(round.durationMs)}`,
+        `  Round ${round.index}  ${displayEnum(round.status)} | panel ${round.panel.successfulReviewers}/${round.panel.configuredReviewers} | ${round.panel.confirmedCount} confirmed / ${round.panel.advisoryCount} advisory | ${round.panel.consensusPolicy}≥${round.panel.consensusThreshold} | ${displayEnum(round.panel.panelHealth as string)}${thinkBit}${tokenBit} | ${formatDurationMs(round.durationMs)}`,
       );
     } else {
       lines.push(
-        `  Round ${round.index}  ${displayEnum(round.status)} | ${displayEnum(round.verdict)} | ${round.actionableCount} actionable / ${round.findingCount} total | ${formatDurationMs(round.durationMs)}`,
+        `  Round ${round.index}  ${displayEnum(round.status)} | ${displayEnum(round.verdict)} | ${round.actionableCount} actionable / ${round.findingCount} total${thinkBit}${tokenBit} | ${formatDurationMs(round.durationMs)}`,
       );
     }
   }
@@ -88,6 +94,8 @@ export async function runReviewLoop(
       durationMs: meta.durationMs,
       findingCount: meta.findings.length,
       actionableCount: meta.actionableCount,
+      ...(meta.thinking ? { thinking: meta.thinking } : {}),
+      ...(meta.usage ? { usage: meta.usage } : {}),
       ...(panel ? { panel } : {}),
     });
 

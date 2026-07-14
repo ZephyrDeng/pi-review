@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatDurationMs, formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
+import { formatDurationMs, formatReviewMetaAscii, formatReviewMetaJsonLine, formatTokens, formatUsage } from "./meta-footer.js";
 import type { ReviewMeta } from "./types.js";
 
 const sample: ReviewMeta = {
@@ -52,4 +52,28 @@ test("formatReviewMetaJsonLine is one JSON line", () => {
   assert.equal(json.status, "has_findings");
   assert.equal(json.actionableCount, 1);
   assert.deepEqual(json.findings, sample.findings);
+});
+
+test("formatTokens scales with K/M/B units", () => {
+  assert.equal(formatTokens(0), "0");
+  assert.equal(formatTokens(512), "512");
+  assert.equal(formatTokens(1024), "1.0K");
+  assert.equal(formatTokens(18031), "17.6K");
+  assert.equal(formatTokens(1_500_000), "1.4M");
+  assert.equal(formatTokens(2_500_000_000), "2.3B");
+});
+
+test("formatUsage renders in/out/cache/reason breakdown", () => {
+  const text = formatUsage({ input: 1024, output: 512, cacheRead: 2048, cacheWrite: 0, reasoning: 100 });
+  assert.match(text, /1\.0Kin/);
+  assert.match(text, /512out/);
+  assert.match(text, /2\.0Kcache/);
+  assert.match(text, /100reason/);
+});
+
+test("ASCII footer shows thinking and tokens when present", () => {
+  const meta = { ...sample, thinking: "xhigh", usage: { input: 1024, output: 512, cacheRead: 2048, cacheWrite: 0, reasoning: 0, totalTokens: 3584 } };
+  const ascii = formatReviewMetaAscii(meta);
+  assert.match(ascii, /Thinking\s+xhigh/);
+  assert.match(ascii, /Tokens\s+.*in.*out.*cache/);
 });

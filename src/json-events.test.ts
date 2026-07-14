@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractFinalText } from "./json-events.js";
+import { extractFinalText, extractUsage } from "./json-events.js";
 
 function lines(...events: unknown[]): string {
   return events.map((e) => JSON.stringify(e)).join("\n");
@@ -103,4 +103,37 @@ test("extractFinalText uses the last agent_end when the child retries", () => {
   const result = extractFinalText(input);
   assert.equal(result.text, "final attempt");
   assert.equal(result.fatal, undefined);
+});
+
+test("extractUsage accumulates tokens from message_end and agent_end", () => {
+  const input = lines(
+    { type: "session", id: "s1" },
+    { type: "message_end", message: { role: "assistant", usage: { input: 44, output: 3, cacheRead: 17984, cacheWrite: 0, reasoning: 0, totalTokens: 18031, cost: { total: 0.025 } }, model: "hf:zai-org/GLM-5.2" } },
+    { type: "agent_end", messages: [{ role: "assistant", responseModel: "zai-org/GLM-5.2" }] },
+  );
+  const result = extractUsage(input);
+  assert.ok(result.usage);
+  assert.equal(result.usage!.input, 44);
+  assert.equal(result.usage!.output, 3);
+  assert.equal(result.usage!.cacheRead, 17984);
+  assert.equal(result.usage!.totalTokens, 18031);
+  assert.equal(result.usage!.costTotal, 0.025);
+  assert.equal(result.responseModel, "zai-org/GLM-5.2");
+});
+
+test("extractUsage returns undefined when no usage events exist", () => {
+  const input = lines({ type: "session", id: "s1" }, { type: "agent_end", messages: [{ role: "assistant" }] });
+  const result = extractUsage(input);
+  assert.equal(result.usage, undefined);
+  assert.equal(result.responseModel, undefined);
+});
+
+test("extractUsage sums output across multiple assistant turns", () => {
+  const input = lines(
+    { type: "message_end", message: { role: "assistant", usage: { input: 100, output: 50, totalTokens: 150 } } },
+    { type: "message_end", message: { role: "assistant", usage: { input: 100, output: 30, totalTokens: 130 } } },
+  );
+  const result = extractUsage(input);
+  assert.equal(result.usage!.output, 80);
+  assert.equal(result.usage!.input, 100);
 });

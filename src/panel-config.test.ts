@@ -122,7 +122,7 @@ test("min-agree with a non-quorum policy (from preset combination) is a usage er
   expectUsage(
     { panel: "code-experts" },
     { "code-experts": presetWithMin },
-    /only meaningful with --consensus quorum/,
+    /only meaningful with quorum/,
   );
 });
 

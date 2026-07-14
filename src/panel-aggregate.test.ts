@@ -462,3 +462,58 @@ test("low-confidence semantic matches remain separate advisories (no manufacture
   assert.equal(result.confirmedClusters.length, 0);
   assert.equal(result.advisories.length, 2);
 });
+
+test("F1: dirty verdict (request_changes) with zero parseable findings yields needs-human, never clean", async () => {
+  const reviewers = [
+    submission("r1", review("has_findings", [], "parsed")),
+    submission("r2", review("has_findings", [], "parsed")),
+  ];
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher: byPathSummary(),
+  });
+  assert.equal(result.status, "needs_human");
+  assert.equal(result.panelHealth, "needs_human");
+  assert.equal(result.confirmedClusters.length, 0);
+});
+
+test("F7: duplicate finding ids from one reviewer stay unique by construction and each appears once", async () => {
+  const reviewers = [
+    submission("r1", review("has_findings", [
+      finding("same bug", { id: "F1", path: "src/cli.ts" }),
+      finding("same bug", { id: "F1", path: "src/cli.ts" }),
+    ])),
+    submission("r2", review("has_findings", [finding("same bug", { id: "F1", path: "src/cli.ts" })])),
+  ];
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher: byPathSummary(),
+  });
+  // Three source findings (r1 has two with same model id, but internal ids r1#F1, r1#F2 are unique)
+  const allSourceIds = result.confirmedClusters.concat(result.advisories).flatMap((c) => c.sourceFindingIds);
+  assert.equal(allSourceIds.length, 3);
+  assert.equal(new Set(allSourceIds).size, 3);
+  assert.deepEqual(allSourceIds.sort(), ["r1#F1", "r1#F2", "r2#F1"].sort());
+});
+
+test("F7: a matcher that assigns a source id to multiple groups is rejected as needs-human", async () => {
+  const reviewers = [
+    submission("r1", review("has_findings", [bugA(), finding("Typo", { id: "F2", path: "src/util.ts" })])),
+    submission("r2", review("has_findings", [bugA()])),
+  ];
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher: fakeMatcher([["r1#F1", "r2#F1"], ["r1#F1", "r1#F2"]]),
+  });
+  assert.equal(result.status, "needs_human");
+  assert.ok(result.adjudicationErrors?.some((e) => /multiple groups/.test(e)));
+});

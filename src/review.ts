@@ -8,7 +8,8 @@ import { loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
-import { extractFinalText } from "./json-events.js";
+import { extractFinalText, extractUsage } from "./json-events.js";
+import type { TokenUsage } from "./types.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig } from "./config.js";
@@ -144,7 +145,9 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
   const stderr = child.stderr || "";
   let extractedError: string | undefined;
   let extractedFatal = false;
+  let extractedUsage: TokenUsage | undefined;
   if (parsed.progressLog) {
+    extractedUsage = extractUsage(stdout).usage;
     const extracted = extractFinalText(stdout);
     stdout = extracted.text;
     extractedError = extracted.error;
@@ -185,11 +188,14 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
   }
 
   const structuredResult = parseReviewResult(stdout, verdictInfo);
+  const thinking = parsed.thinking || preset.thinking;
   const meta: ReviewMeta = {
     reviewMode: parsed.mode,
     ...structuredResult,
     durationMs,
     model: parsed.model || preset.model || null,
+    ...(thinking ? { thinking } : {}),
+    ...(extractedUsage ? { usage: extractedUsage } : {}),
     sessionHandle: sessionHandle || undefined,
   };
 

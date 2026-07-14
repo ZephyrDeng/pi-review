@@ -19,16 +19,38 @@ import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
-import { extractFinalText } from "./json-events.js";
+import { extractFinalText, extractUsage } from "./json-events.js";
+import type { TokenUsage } from "./types.js";
 import { fail, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
 import { resolvePanelConfig, type ResolvedPanelConfig } from "./panel-config.js";
 import { aggregatePanel } from "./panel-aggregate.js";
-import { DeterministicMatcher, SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
-import { formatPanelMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
+import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
+import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine, formatUsage, formatTokens } from "./meta-footer.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
+/** Sum token usage across reviewers (prompt-scoped fields as maxima, output as additive). */
+function sumUsage(usages: (TokenUsage | undefined)[]): TokenUsage | undefined {
+  const present = usages.filter((u): u is TokenUsage => Boolean(u));
+  if (present.length === 0) return undefined;
+  const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0 };
+  for (const u of present) {
+    total.input = Math.max(total.input, u.input);
+    total.cacheRead = Math.max(total.cacheRead, u.cacheRead);
+    total.cacheWrite = Math.max(total.cacheWrite, u.cacheWrite);
+    total.output += u.output;
+    total.reasoning = Math.max(total.reasoning, u.reasoning);
+    total.totalTokens = Math.max(total.totalTokens, u.totalTokens);
+    if (typeof u.costTotal === "number") total.costTotal = (total.costTotal ?? 0) + u.costTotal;
+  }
+  return total;
+}
+
 export function emitPanelFooter(meta: PanelReviewMeta): void {
+  // Issue #2 Decision 39: confirmed findings are the primary Findings section;
+  // advisories are clearly separated and labelled non-blocking.
+  const body = formatPanelFindingsMarkdown(meta);
+  if (body) process.stdout.write(`${body}\n\n`);
   process.stdout.write(`${formatPanelMetaAscii(meta)}\n`);
   const metaJsonDest = process.env.PI_REVIEW_META_STDOUT?.toLowerCase();
   const jsonLine = formatReviewMetaJsonLine(meta);
@@ -43,6 +65,23 @@ function reviewerProgressLog(baseProgressLog: string | undefined, reviewerId: st
   if (!baseProgressLog) return undefined;
   const base = baseProgressLog.replace(/\.jsonl$/i, "");
   return `${base}.r${reviewerId}.jsonl`;
+}
+
+/** Tools that can mutate the working tree — forbidden for panel reviewers. */
+const WRITE_TOOLS = new Set([
+  "edit", "write", "apply_patch", "create_file", "create", "patch",
+  "str_replace_editor", "file_editor", "delete", "move",
+]);
+
+/** Force a read-only tool allowlist for panel reviewers (issue #2 review-only security). */
+function readOnlyTools(tools: string | undefined): string | undefined {
+  if (!tools) return undefined;
+  const kept = tools
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0 && !WRITE_TOOLS.has(t));
+  if (kept.length === 0) return "read,grep,find,ls";
+  return kept.join(",");
 }
 
 function buildReviewerArgs(
@@ -66,7 +105,7 @@ function buildReviewerArgs(
   if (model) args.push("--model", model);
   if (thinking) args.push("--thinking", thinking);
 
-  const tools = parsed.tools || normalizeTools(preset.tools);
+  const tools = readOnlyTools(parsed.tools || normalizeTools(preset.tools));
   if (tools) args.push("--tools", tools);
 
   const presetSkills = Array.isArray(preset.skillPaths) ? preset.skillPaths : [];
@@ -123,7 +162,9 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   let verdictInfo: VerdictInfo = parseVerdict(stdout);
   let extractedError: string | undefined;
   let extractedFatal = false;
+  let reviewerUsage: TokenUsage | undefined;
   if (progressLog) {
+    reviewerUsage = extractUsage(stdout).usage;
     const extracted = extractFinalText(stdout);
     stdout = extracted.text;
     extractedError = extracted.error;
@@ -142,11 +183,14 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
 
   const structured: StructuredReviewResult = parseReviewResult(stdout, verdictInfo);
   const model = reviewer.model || parsed.model || preset.model || null;
+  const thinking = reviewer.thinking || parsed.thinking || preset.thinking;
 
   return {
     reviewerId: reviewer.id,
     role: reviewer.role,
     model,
+    ...(thinking ? { thinking } : {}),
+    ...(reviewerUsage ? { usage: reviewerUsage } : {}),
     durationMs: 0, // set by caller wrapper
     result: structured,
   };
@@ -173,9 +217,17 @@ async function mapWithConcurrency<T, R>(
 /** Real semantic adjudicator: spawns a review-only Pi session with the consensus model. */
 function createAdjudicator(
   config: Config,
-  consensusModel: string,
-  systemPrompt: string,
+  consensusModel: string | undefined,
 ): SemanticAdjudicator {
+  // Dedicated JSON-only system prompt. The adjudicator must NOT inherit the
+  // review Markdown output contract (system-prompt.md), which would conflict
+  // with the strict JSON clustering response and break parsing.
+  const adjudicatorSystemPrompt = [
+    "You are the consensus adjudicator for a panel code review.",
+    "Your only output is one JSON object matching the requested clustering schema.",
+    "Do not output Markdown, prose, or any other format. Do not review code quality.",
+    "You may not invent findings, drop findings, or act as a reviewer.",
+  ].join("\n");
   return {
     async adjudicate(request) {
       const prompt = buildAdjudicatorPrompt(request.candidates as AdjudicationCandidate[]);
@@ -183,8 +235,8 @@ function createAdjudicator(
       // as an additional reviewer and has no write capability. Disable all tools
       // and run with no session — it returns JSON purely from the structured
       // findings embedded in the prompt.
-      const args: string[] = ["-p", "--no-session", "--no-tools", "--model", consensusModel];
-      if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
+      const args: string[] = ["-p", "--no-session", "--no-tools", "--append-system-prompt", adjudicatorSystemPrompt];
+      if (consensusModel) args.push("--model", consensusModel);
       args.push(prompt);
 
       const child = spawnBufferedChild(config.piBin, args, {
@@ -262,9 +314,13 @@ export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readRev
     },
   );
 
-  const matcher = resolved.semanticEnabled
-    ? new SemanticMatcher(createAdjudicator(config, resolved.consensusModel!, systemPrompt))
-    : new DeterministicMatcher();
+  // Semantic adjudication is on by default (issue #2 Decision 27): when
+  // ambiguous same-path candidates exist, a constrained adjudicator clusters
+  // them. --consensus-model overrides the adjudicator model; otherwise fall
+  // back to the shared review model / Pi default. Exact matches never invoke
+  // the adjudicator, so this stays cheap when there is nothing ambiguous.
+  const adjudicatorModel = resolved.consensusModel ?? parsed.model ?? preset.model ?? undefined;
+  const matcher = new SemanticMatcher(createAdjudicator(config, adjudicatorModel));
 
   const aggregate = await aggregatePanel({
     reviewers: submissions,
@@ -279,6 +335,8 @@ export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readRev
     reviewMode: parsed.mode,
     durationMs: Date.now() - startedAt,
     model: parsed.model || preset.model || null,
+    thinking: parsed.thinking || preset.thinking,
+    usage: sumUsage(submissions.map((s) => s.usage)),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
   };
 

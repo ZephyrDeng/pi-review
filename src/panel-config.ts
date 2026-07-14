@@ -74,14 +74,39 @@ export function resolvePanelConfig(
         `panel preset ${parsed.panel} defines ${preset.reviewers.length} reviewers (max ${MAX_REVIEWERS})`,
       );
     }
+    const seenReviewerIds = new Set<string>();
     for (const reviewer of preset.reviewers) {
       if (!reviewer?.id || !reviewer?.role) {
         throw new ArgsParseError(`panel preset ${parsed.panel} has a reviewer missing id or role`);
       }
+      if (seenReviewerIds.has(reviewer.id)) {
+        throw new ArgsParseError(`panel preset ${parsed.panel} has duplicate reviewer id: ${reviewer.id}`);
+      }
+      if (!/^[A-Za-z0-9_.-]+$/.test(reviewer.id)) {
+        throw new ArgsParseError(`panel preset ${parsed.panel} reviewer id "${reviewer.id}" must be alphanumeric/dot/dash/underscore`);
+      }
+      seenReviewerIds.add(reviewer.id);
+    }
+    if (preset.consensus !== undefined && !isPolicy(preset.consensus)) {
+      throw new ArgsParseError(
+        `panel preset ${parsed.panel} has unknown consensus: ${preset.consensus}. Available: ${CONSENSUS_POLICIES.join(", ")}`,
+      );
+    }
+    if (preset.minAgree !== undefined && (!Number.isSafeInteger(preset.minAgree) || preset.minAgree < 1)) {
+      throw new ArgsParseError(`panel preset ${parsed.panel} minAgree must be a positive integer`);
+    }
+    const presetConsensus = (explicitConsensus ?? preset.consensus ?? "quorum") as ConsensusPolicy;
+    if (preset.minAgree !== undefined && presetConsensus !== "quorum") {
+      throw new ArgsParseError(
+        `panel preset ${parsed.panel} sets minAgree but effective consensus is ${presetConsensus}; minAgree is only meaningful with quorum`,
+      );
     }
     reviewers = preset.reviewers;
     consensus = (explicitConsensus ?? preset.consensus ?? "quorum") as ConsensusPolicy;
-    minAgree = parsed.minAgree ?? preset.minAgree ?? defaultMinAgree(consensus);
+    // Only inherit a preset/default minAgree when the effective policy is quorum;
+    // a non-quorum override must not carry a stale quorum threshold.
+    const inheritMinAgree = consensus === "quorum" ? preset.minAgree : undefined;
+    minAgree = parsed.minAgree ?? inheritMinAgree ?? defaultMinAgree(consensus);
     consensusModel = parsed.consensusModel ?? preset.consensusModel;
     concurrency = parsed.concurrency ?? preset.concurrency;
   } else {

@@ -197,7 +197,14 @@ export class SemanticMatcher implements FindingMatcher {
     };
 
     for (const merge of response.merges ?? []) {
-      if (!Array.isArray(merge.sourceFindingIds) || merge.sourceFindingIds.length < 2) continue;
+      if (!merge || typeof merge !== "object" || Array.isArray(merge)) {
+        errors.push("adjudicator returned a malformed merge entry (not an object)");
+        continue;
+      }
+      if (!Array.isArray(merge.sourceFindingIds)) {
+        errors.push("adjudicator returned a merge with non-array sourceFindingIds");
+        continue;
+      }
       const unknown = merge.sourceFindingIds.filter((id) => !candidateIds.has(id));
       if (unknown.length > 0) {
         errors.push(`adjudicator invented source finding ids: ${unknown.join(", ")}`);
@@ -211,7 +218,7 @@ export class SemanticMatcher implements FindingMatcher {
         continue;
       }
       const ids = merge.sourceFindingIds;
-      if (ids.length < 2) continue;
+      if (ids.length < 2) continue; // no-op, not malformed
       const confidence = Number(merge.confidence);
       if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
         errors.push(`adjudicator returned invalid confidence for merge of ${ids.join(", ")}`);

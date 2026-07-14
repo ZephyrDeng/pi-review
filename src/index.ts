@@ -36,6 +36,7 @@ export type {
   ReviewerSubmission,
   PanelReviewerSpec,
   PanelPreset,
+  TokenUsage,
 } from "./types.js";
 export {
   REVIEW_STATUSES,
@@ -47,5 +48,5 @@ export {
 export { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 export { parseVerdict } from "./verdict.js";
 export { parseReviewResult, reviewExitCode } from "./review-result.js";
-export { formatDurationMs, formatReviewMetaAscii, formatReviewMetaJsonLine, formatPanelMetaAscii } from "./meta-footer.js";
+export { formatDurationMs, formatTokens, formatUsage, formatReviewMetaAscii, formatReviewMetaJsonLine, formatPanelMetaAscii, formatPanelFindingsMarkdown } from "./meta-footer.js";
 export { installSkill, uninstallSkill } from "./skill.js";

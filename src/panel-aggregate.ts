@@ -50,11 +50,13 @@ function classifyReviewer(sub: ReviewerSubmission): {
   kind: ReviewerKind;
   contributed: boolean;
 } {
-  const { result, reviewerId, role, model, durationMs } = sub;
+  const { result, reviewerId, role, model, thinking, usage, durationMs } = sub;
   const outcome: ReviewerOutcome = {
     reviewerId,
     ...(role ? { role } : {}),
     model: model ?? null,
+    ...(thinking ? { thinking } : {}),
+    ...(usage ? { usage } : {}),
     durationMs,
     status: result.status,
     verdict: result.verdict,
@@ -76,6 +78,16 @@ function classifyReviewer(sub: ReviewerSubmission): {
   }
   if (result.status === "needs_human") {
     return { outcome, kind: "needs_human", contributed: false };
+  }
+  // A dirty verdict (has_findings) that yielded zero parseable findings is a
+  // malformed conclusion: the reviewer asked for changes but produced no safe
+  // structured finding. It must not become a clean vote (issue #2 Decision 30).
+  if (result.status === "has_findings" && result.findings.length === 0) {
+    return {
+      outcome: { ...outcome, parseError: [outcome.parseError, "dirty verdict with no parseable findings"].filter(Boolean).join("; ") },
+      kind: "needs_human",
+      contributed: false,
+    };
   }
   return { outcome: { ...outcome, contributed: true }, kind: "ok", contributed: true };
 }
@@ -168,7 +180,10 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
     if (!cls.contributed) continue;
     for (let index = 0; index < sub.result.findings.length; index += 1) {
       const finding = sub.result.findings[index]!;
-      const sourceId = `${sub.reviewerId}#${finding.id ?? `F${index + 1}`}`;
+      // Internal source id is unique by construction (reviewer + position),
+      // so a reviewer that emits duplicate finding ids cannot collide or
+      // silently overwrite a sibling finding (issue #2 raw-finding uniqueness).
+      const sourceId = `${sub.reviewerId}#F${index + 1}`;
       sourceFindings.push({ id: sourceId, reviewerId: sub.reviewerId, finding });
     }
   }
@@ -196,16 +211,24 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
   // Provenance invariant: every source finding must appear exactly once and no
   // unknown id may be accepted.
   const covered = new Set<string>();
+  const membershipCount = new Map<string, number>();
   for (const group of groups) {
-    for (const id of group) covered.add(id);
+    for (const id of group) {
+      covered.add(id);
+      membershipCount.set(id, (membershipCount.get(id) ?? 0) + 1);
+    }
   }
   const invented = [...covered].filter((id) => !allSourceIds.has(id));
   const missing = [...allSourceIds].filter((id) => !covered.has(id));
+  const duplicated = [...membershipCount.entries()].filter(([, count]) => count > 1).map(([id]) => id);
   if (invented.length > 0) {
     matcherErrors.push(`matcher invented source finding ids: ${invented.join(", ")}`);
   }
   if (missing.length > 0) {
     matcherErrors.push(`matcher dropped source finding ids: ${missing.join(", ")}`);
+  }
+  if (duplicated.length > 0) {
+    matcherErrors.push(`matcher assigned source finding ids to multiple groups: ${duplicated.join(", ")}`);
   }
   const aggregationSemanticFailure = matcherErrors.length > 0;
 

@@ -179,3 +179,29 @@ test("SemanticMatcher honors a within-candidate merge", async () => {
   const result = await matcher.match(findings);
   assert.equal(result.groups.length, 1);
 });
+
+test("F6: a malformed (non-object) merge entry is reported as an error, not silently skipped", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(Promise.resolve({ merges: ["not-an-object", null, 42] as unknown as never[] })),
+  );
+  const result = await matcher.match(findings);
+  assert.ok(result.errors.some((e) => /malformed merge entry/.test(e)), `got ${result.errors.join(";")}`);
+  assert.equal(result.groups.length, 2);
+});
+
+test("F6: a merge with non-array sourceFindingIds is reported as an error", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(Promise.resolve({ merges: [{ sourceFindingIds: "r1#F1,r2#F1", confidence: 0.9 }] as never })),
+  );
+  const result = await matcher.match(findings);
+  assert.ok(result.errors.some((e) => /non-array sourceFindingIds/.test(e)));
+  assert.equal(result.groups.length, 2);
+});

@@ -76,6 +76,10 @@ export interface ReviewMeta extends StructuredReviewResult {
   reviewMode: string;
   durationMs: number;
   model: string | null;
+  /** Thinking level requested for this review (off|minimal|low|medium|high|xhigh|max), if any. */
+  thinking?: string;
+  /** Token usage from the child pi --mode json stream, when available. */
+  usage?: TokenUsage;
   sessionHandle?: string;
 }
 
@@ -95,6 +99,17 @@ export interface SplitPayload {
 
 export const CONSENSUS_POLICIES = ["any", "quorum", "majority", "unanimous"] as const;
 export type ConsensusPolicy = (typeof CONSENSUS_POLICIES)[number];
+
+/** Token usage accumulated across an agent turn (from pi's --mode json stream). */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reasoning: number;
+  totalTokens: number;
+  costTotal?: number;
+}
 
 /** Documented initial maximum number of reviewers in one panel. */
 export const MAX_REVIEWERS = 8;
@@ -140,6 +155,8 @@ export interface ReviewerOutcome {
   reviewerId: string;
   role?: string;
   model?: string | null;
+  thinking?: string;
+  usage?: TokenUsage;
   durationMs: number;
   status: ReviewStatus;
   verdict: Verdict;
@@ -177,6 +194,8 @@ export interface ReviewerSubmission {
   reviewerId: string;
   role?: string;
   model?: string | null;
+  thinking?: string;
+  usage?: TokenUsage;
   durationMs: number;
   result: StructuredReviewResult;
 }
