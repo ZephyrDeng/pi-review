@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { parseArgs, usage } from "./args.js";
 import { isInstallHelp } from "./install-args.js";
-import { runModels, runReview } from "./review.js";
+import { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.js";
+import { formatLoopSummary, runReviewLoop } from "./loop.js";
 import { resolveConfig } from "./config.js";
 import { installSkill, uninstallSkill } from "./skill.js";
 import { runUpdate } from "./update.js";
@@ -25,6 +26,11 @@ if (parsed.command === "models") {
   installSkill(parsed.extraArgs);
 } else if (parsed.command === "uninstall-skill") {
   uninstallSkill(parsed.extraArgs);
+} else if (parsed.command === "loop") {
+  const stdinText = readReviewStdin();
+  const result = await runReviewLoop(parsed.maxRounds!, () => runReviewOnce(parsed, stdinText));
+  process.stdout.write(`${formatLoopSummary(result)}\n`);
+  process.exit(result.exitCode);
 } else {
   await runReview(parsed);
 }

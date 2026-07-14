@@ -42,6 +42,7 @@ pi-review -- @src/foo.ts
 pi-review --model openai/gpt-5.5 -- @src/foo.ts
 pi-review --mode plan -- @docs/architecture.md
 pi-review --mode challenge -- @docs/design.md
+pi-review loop --max-rounds 3 -- @src
 pi-review models
 ```
 
@@ -52,6 +53,18 @@ pi-review models
 | `code`（默认） | 代码、diff、MR、文件与仓库审查 |
 | `plan` | 多视角方案 / 架构审查 |
 | `challenge` | 对抗式审查，压测假设与证据缺口 |
+
+## Loop Review
+
+`pi-review loop` 会对当前工作树执行有上限的、彼此隔离的只读审查轮次：
+
+```bash
+pi-review loop --max-rounds 3 -- @src
+```
+
+每轮都是完整 review run；命令不会编辑、打补丁、等待文件变化，也不会让子会话修复问题。遇到 `clean`、`needs_human`、`blocked` 会提前停止；仍有 actionable finding 时，在预算耗尽后以非零状态退出并输出逐轮摘要。宿主 Agent 或人工负责筛选并修复任务范围内的问题，再重新调用命令。需要在每次修复之间留出宿主处理点时，使用 `--max-rounds 1`。
+
+`loop` 复用普通审查的 mode/model/progress/target 参数；v1 明确不支持 `--keep-session`、`--continue`、`--name`。
 
 ## Pi 包：`/rv` 命令
 
@@ -72,7 +85,17 @@ pi-review models
 
 ## 输出格式
 
-审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节，并以 **ASCII 页脚**（`── pi-review` 框线 + Verdict/Mode/Duration/Session）结尾；机器可读 JSON 在 **stderr** 一行 `PI_REVIEW_META_JSON:`（需写 stdout 时设 `PI_REVIEW_META_STDOUT=1`）。
+审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节。每条 finding 使用 `F1 + Severity + Path + Actionable + Evidence + Impact + Recommendation` 结构。ASCII 页脚会显示 Verdict、`Status`、finding 数量、Mode、Duration/Session。
+
+机器可读 JSON 仍在 **stderr** 的单行 `PI_REVIEW_META_JSON:` 中，并以新增字段提供：
+
+- `status`: `clean | has_findings | needs_human | blocked`
+- `findings`: `{ id?, severity?, path?, summary, actionable }[]`
+- `actionableCount`: 可操作问题数量
+
+旧字段不删除；需改为写入 stdout 时设 `PI_REVIEW_META_STDOUT=1`。解析器优先识别上述 `### F1` 格式，也兼容旧的三级标题和顶层列表；缺少 `Actionable` 时，`request_changes` 下默认可操作，其它 verdict 默认不可操作。无法识别 verdict 时会回退到 `needs_human` 并附带 `parseError`，运行时失败始终保持 `blocked`。
+
+退出码：`0` clean、`1` 最终状态为 `has_findings` / loop 预算耗尽、`2` 参数错误、`3` needs human、`4` blocked / 运行时失败。
 
 ## 配置
 

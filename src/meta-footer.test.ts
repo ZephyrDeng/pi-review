@@ -7,6 +7,17 @@ const sample: ReviewMeta = {
   reviewMode: "code",
   verdict: "request_changes",
   verdictSource: "parsed",
+  status: "has_findings",
+  findings: [
+    {
+      id: "F1",
+      severity: "high",
+      path: "src/cli.ts",
+      summary: "Dirty reviews exit zero",
+      actionable: true,
+    },
+  ],
+  actionableCount: 1,
   durationMs: 383_500,
   model: "zai/glm-5.2",
   sessionHandle: "/tmp/sessions/run-abc/session.jsonl",
@@ -20,6 +31,8 @@ test("formatDurationMs formats sub-minute and minutes", () => {
 test("formatReviewMetaAscii includes verdict and session hint", () => {
   const ascii = formatReviewMetaAscii(sample);
   assert.match(ascii, /REQUEST CHANGES/);
+  assert.match(ascii, /HAS FINDINGS/);
+  assert.match(ascii, /1 actionable/);
   assert.match(ascii, /6m 24s/);
   assert.match(ascii, /session\.jsonl/);
   assert.match(ascii, /--continue/);
@@ -30,5 +43,13 @@ test("formatReviewMetaJsonLine is one JSON line", () => {
   const line = formatReviewMetaJsonLine(sample);
   assert.ok(line.startsWith("PI_REVIEW_META_JSON: "));
   const json = JSON.parse(line.slice("PI_REVIEW_META_JSON: ".length).trim());
+  assert.equal(json.reviewMode, "code");
   assert.equal(json.verdict, "request_changes");
+  assert.equal(json.verdictSource, "parsed");
+  assert.equal(json.durationMs, 383_500);
+  assert.equal(json.model, "zai/glm-5.2");
+  assert.equal(json.sessionHandle, "/tmp/sessions/run-abc/session.jsonl");
+  assert.equal(json.status, "has_findings");
+  assert.equal(json.actionableCount, 1);
+  assert.deepEqual(json.findings, sample.findings);
 });

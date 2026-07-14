@@ -34,7 +34,17 @@ One of: approve | request_changes | needs_clarification | blocked
 Short conclusion in 2-5 bullets.
 
 ## Findings
-Prioritized findings. Each finding should include severity, evidence, impact, and recommendation. If there are no material findings, write "No material findings."
+Prioritized findings. For every material finding, use this exact shape (increment IDs as F1, F2, ...):
+
+### F1: <summary>
+- Severity: critical | high | medium | low
+- Path: <path or none>
+- Actionable: yes | no
+- Evidence: <concrete evidence>
+- Impact: <why it matters>
+- Recommendation: <specific next step>
+
+Set Actionable to yes when the host must fix or consciously reject the finding before clean closeout. Use no for informational or explicitly out-of-scope follow-up findings. If there are no material findings, write "No material findings."
 
 ## Risks and Blind Spots
 What could still be wrong, missing, or unverified.

@@ -2,18 +2,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import type { ParsedArgs, ReviewMeta } from "./types.js";
+import type { ParsedArgs, ReviewMeta, ReviewRunResult } from "./types.js";
 import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./child-process.js";
 import { loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
+import { parseReviewResult, reviewExitCode } from "./review-result.js";
 import { extractFinalText } from "./json-events.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig } from "./config.js";
 import { formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
 
-function readStdin(): string {
+export function readReviewStdin(): string {
   if (process.stdin.isTTY) return "";
   try {
     return fs.readFileSync(0, "utf8").trim();
@@ -64,7 +65,7 @@ export function runModels(piBin: string, args: string[]): never {
   process.exit(result.status ?? (result.error ? 1 : 0));
 }
 
-export async function runReview(parsed: ParsedArgs): Promise<void> {
+export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewStdin()): Promise<ReviewRunResult> {
   const config = resolveConfig();
   const presets = loadPresets(config.presetsFile);
   const preset = presets[parsed.mode];
@@ -73,7 +74,6 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
     fail(`unknown review mode: ${parsed.mode}\nAvailable modes: ${Object.keys(presets).join(", ")}`);
   }
 
-  const stdinText = readStdin();
   const payload = splitPayload(parsed.payload);
   const prompt = buildPrompt(parsed.mode, preset, payload, stdinText);
   const args: string[] = ["-p"];
@@ -184,14 +184,13 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
     };
   }
 
+  const structuredResult = parseReviewResult(stdout, verdictInfo);
   const meta: ReviewMeta = {
     reviewMode: parsed.mode,
-    verdict: verdictInfo.verdict,
-    verdictSource: verdictInfo.verdictSource,
+    ...structuredResult,
     durationMs,
     model: parsed.model || preset.model || null,
     sessionHandle: sessionHandle || undefined,
-    parseError: verdictInfo.parseError || undefined,
   };
 
   const metaPrefix = metaLinePrefix(stdout, !bufferedPrint);
@@ -204,5 +203,14 @@ export async function runReview(parsed: ParsedArgs): Promise<void> {
   } else {
     process.stderr.write(jsonLine);
   }
-  process.exit(child.status ?? (child.error || child.signal ? 1 : 0));
+  return {
+    meta,
+    exitCode: reviewExitCode(meta.status),
+  };
+}
+
+/** CLI-compatible single review entrypoint. */
+export async function runReview(parsed: ParsedArgs): Promise<never> {
+  const result = await runReviewOnce(parsed);
+  process.exit(result.exitCode);
 }

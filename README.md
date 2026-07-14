@@ -18,7 +18,8 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 - **Isolated review sessions** — each review runs in a clean child process with no shared state
 - **Multiple review modes** — code review, multi-lens plan review, adversarial challenge review
-- **Structured output** — human-readable ASCII footer on stdout; `PI_REVIEW_META_JSON` on stderr for automation
+- **Structured output** — explicit `status`, structured findings, and a human-readable ASCII footer; one-line `PI_REVIEW_META_JSON` on stderr for automation
+- **Loop review gate** — bounded, isolated review rounds with `pi-review loop --max-rounds <n>`; the host remains the only editor
 - **Model-agnostic** — use any model available in your Pi installation
 - **Live streaming** — child review output is forwarded as it arrives (use `--no-stream` to buffer)
 - **Progress logging for AI hosts** — `--progress-log <path>` writes a live JSON event log so agent hosts that buffer tool stdout (Claude Code, Codex, ...) can still show real-time progress
@@ -102,6 +103,9 @@ pi-review --mode plan -- @docs/architecture.md
 # Adversarial challenge review
 pi-review --mode challenge -- @docs/design.md
 
+# Bounded review-only gate (default: 3 rounds)
+pi-review loop --max-rounds 3 -- @src
+
 # List available models
 pi-review models
 ```
@@ -114,6 +118,19 @@ pi-review models
 | `plan` | Broad plan/architecture review through multiple expert lenses: engineering, product, security, QA, operations, and DX. |
 | `challenge` | Adversarial review that pressure-tests assumptions, dependencies, reversibility, failure modes, and migration paths. |
 
+## Loop Review
+
+`pi-review loop` runs a bounded sequence of full, isolated review runs against the current working tree:
+
+```bash
+pi-review loop --max-rounds 3 -- @src
+pi-review loop --mode challenge --max-rounds 2 -- @docs/design.md
+```
+
+Each round is review-only. The process never edits, patches, waits for filesystem changes, or asks the child session to fix findings. It stops immediately on `clean`, `needs_human`, or `blocked`; otherwise it stops when the round budget is exhausted. Every round emits one `PI_REVIEW_META_JSON` line in order, and the final human summary lists each round's status, verdict, duration, and finding counts.
+
+This is a **host-driven gate**: if findings remain, the host or human fixes only accepted in-scope findings and invokes `loop` again. For patch-by-patch agent closeout, `--max-rounds 1` gives the host a fix point after each review; use a larger budget only when repeated review of the unchanged tree is intentional. `loop` accepts normal review target/model/progress options but rejects `--keep-session`, `--continue`, and `--name` in v1.
+
 ## Output Format
 
 Every review produces Markdown with these sections:
@@ -124,6 +141,14 @@ approve | request_changes | needs_clarification | blocked
 
 ## Summary
 ## Findings
+### F1: <summary>
+- Severity: critical | high | medium | low
+- Path: <path or none>
+- Actionable: yes | no
+- Evidence: <concrete evidence>
+- Impact: <why it matters>
+- Recommendation: <specific next step>
+
 ## Risks and Blind Spots
 ## Open Questions
 ```
@@ -133,12 +158,32 @@ The CLI appends a readable ASCII footer on **stdout**:
 ```
 ── pi-review ────────────────────────────
   Verdict     ! REQUEST CHANGES
+  Status      HAS FINDINGS
   Mode        code
+  Findings    1 actionable / 1 total
   Duration    42.3s
 ──────────────────────────────────────────
 ```
 
-For scripts, parse **`PI_REVIEW_META_JSON:`** from **stderr** (same fields as before). Set `PI_REVIEW_META_STDOUT=1` to also emit that JSON line on stdout.
+For scripts, parse **`PI_REVIEW_META_JSON:`** from **stderr**. Existing keys remain, with additive fields:
+
+```json
+{"reviewMode":"code","verdict":"request_changes","verdictSource":"parsed","status":"has_findings","findings":[{"id":"F1","severity":"high","path":"src/cli.ts","summary":"Dirty reviews exit zero","actionable":true}],"actionableCount":1,"durationMs":42300,"model":"provider/model"}
+```
+
+`status` is one of `clean`, `has_findings`, `needs_human`, or `blocked`: `approve` with no actionable findings is `clean`; `request_changes` or actionable findings are `has_findings`; `needs_clarification` is `needs_human`; runtime/fatal failures are `blocked`. Each finding always has `summary` and `actionable`; `id`, `severity`, and `path` are present when parsed. The line remains a single additive JSON record, so older consumers can ignore unknown keys. Set `PI_REVIEW_META_STDOUT=1` to emit it on stdout instead.
+
+The parser prefers the exact `### F1` shape above but also accepts legacy `###` headings and top-level finding lists. When `Actionable` is missing, findings under `request_changes` default to actionable and other verdicts default to non-actionable. A missing/unrecognized verdict falls back to `needs_clarification` / `needs_human` and includes `parseError`; runtime failures always remain `blocked`.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Final status is `clean` |
+| `1` | Final status is `has_findings` / loop budget exhausted |
+| `2` | CLI usage or argument error |
+| `3` | `needs_human` — clarification or a decision is required |
+| `4` | `blocked` — child/runtime failure or review cannot proceed |
 
 ## Session Management
 
@@ -173,7 +218,8 @@ The JSON event schema is pi CLI's own internal format, not a contract `pi-review
 ## CLI Reference
 
 ```
-pi-review [options] -- <@files|text...>
+pi-review [review] [options] -- <@files|text...>
+pi-review loop [options] -- <@files|text...>
 pi-review models [search]
 ```
 
@@ -190,6 +236,9 @@ pi-review models [search]
 | `--name <name>` | Session name (with `--keep-session`) |
 | `--no-stream` | Buffer child output until exit (default: stream live) |
 | `--progress-log <path>` | Stream child `--mode json` events to this file (cannot combine with `--no-stream`) |
+| `--max-rounds <n>` | Positive loop review budget (default: `3`; `loop` only) |
+
+Session flags (`--keep-session`, `--continue`, `--name`) are intentionally unsupported by `loop` in v1; invalid combinations print usage and exit `2`.
 
 ## Configuration
 
@@ -202,7 +251,7 @@ Override defaults via environment variables:
 | `PI_REVIEW_PRESETS` | Path to presets JSON file |
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
-| `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to also print `PI_REVIEW_META_JSON` on stdout (default: stderr only) |
+| `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |
 
 ## Pi Package Usage
 
@@ -235,7 +284,7 @@ Completions are a hint layer only; execution remains skill-driven. When the mode
 
 ## Security
 
-- Each review runs in an isolated child Pi session
+- Each review and every loop round runs in an isolated child Pi session
 - Default runs use `--no-session` — no child context is stored
 - `--keep-session` stores only the child review session for explicit follow-up
 - The review session is read-only: no file edits, patches, commits, or deployments

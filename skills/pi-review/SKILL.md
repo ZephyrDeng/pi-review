@@ -1,6 +1,6 @@
 ---
 name: pi-review
-description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to a fresh Pi session and return only the review conclusion. Model selection presets for code, frontend, and plan review (see references/model-selection.md). On Claude Code or Codex, default to --progress-log with a background shell run and tail the log (chat tools buffer stdout). Use when the user asks for Pi review, isolated review, code review, plan review, challenge review, review status/progress, or wants to avoid context pollution.
+description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to fresh Pi sessions and return review conclusions. Also use for loop review, review-fix-re-review closeout, structured review gates, and review status/progress. Model selection presets for code, frontend, and plan review are in references/model-selection.md. On Claude Code or Codex, default to --progress-log with a background shell run and tail the log (chat tools buffer stdout).
 ---
 
 # Pi Review
@@ -78,6 +78,34 @@ There is **no** `/status` slash in this skill. When the user asks for **review s
 
 Do not implement findings from a status check; status is informational only.
 
+## Loop closeout protocol
+
+Use this protocol when the host is closing out implementation work and may edit between reviews. `pi-review` and every child session remain review-only; the host agent owns all fixes.
+
+1. **Freeze the scope baseline before the first review.** Record the originating task, accepted files/modules, required behavior, and proof commands. Do not silently expand this baseline because a reviewer noticed adjacent cleanup.
+2. **Run a bounded structured gate.** Prefer the productized command:
+   ```bash
+   pi-review loop --max-rounds 1 [shared review options] -- <@files|text...>
+   ```
+   A one-round invocation gives the host a fix point between reviews. Increase `--max-rounds` only when repeated independent review of the unchanged tree is intentional; the CLI never waits for edits. Re-invocation after a host fix is a new process. On Claude Code / Codex, compose `loop` with the normal `--progress-log <path>` background + tail workflow. On Pi, retain default foreground streaming. `loop` rejects `--keep-session`, `--continue`, and `--name`.
+3. **Read the gate signals.** Parse `status`, `findings`, and `actionableCount` from each `PI_REVIEW_META_JSON` line and use the final loop summary. Expected statuses are `clean`, `has_findings`, `needs_human`, and `blocked`.
+4. **Apply the scope governor to every finding:**
+   - **in-scope blocker** — accepted, actionable, and required by the frozen task; the host may fix it now.
+   - **follow-up** — valid but outside the baseline or not required for safe closeout; record it without drive-by edits.
+   - **stop-and-escalate** — ambiguous intent, architectural expansion, unsafe migration, blocked tooling, or anything requiring a human decision; stop rather than guess.
+   - A rejected finding must be intentional and recorded with its rationale in the final report. Never silently ignore it.
+   - Check sibling instances of the same bug class only inside the frozen task/PR scope. Do not turn the check into a repository-wide refactor.
+5. **Fix only in-scope blockers in the host.** Never ask the child review session to implement fixes. After each host patch, rerun the narrowest relevant proof (focused test, typecheck, lint, or reproduction) before re-reviewing.
+6. **Re-review until a stop condition:**
+   - `clean` → gate open; proceed to final proof and closeout.
+   - `has_findings` → classify, fix accepted in-scope blockers, and re-invoke within the agreed host-cycle budget.
+   - `needs_human` or `blocked` → stop early and escalate with the review history.
+   - budget exhausted → report remaining findings and ask for a decision; do not loop indefinitely.
+7. **Detect non-convergence.** After two non-converging patch cycles (the same finding persists, findings oscillate, or scope grows), pause and reclassify all remaining findings before any further edit.
+8. **Gate completion claims.** Never claim done, ship, commit-ready, or clean without a fresh `clean` result, unless the user gives explicit human acceptance of named remaining findings. Report accepted fixes, rejected findings with rationale, follow-ups, stop reason, and proof evidence.
+
+The shell exit policy is: `0` clean, `1` status is `has_findings`, `2` usage error, `3` needs human, `4` blocked/runtime failure. A non-zero loop result is a gate signal, not permission for the child reviewer to edit.
+
 ## Steps
 
 1. Prime the model catalog and pick a model:
@@ -116,8 +144,8 @@ Do not implement findings from a status check; status is informational only.
 
 4. Return the result:
    - Show the Markdown review body and the **ASCII footer** (`── pi-review` block on stdout). Do not paste raw `PI_REVIEW_META_JSON` to the user unless they ask for machine output.
-   - Scripts: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to also emit JSON on stdout).
-   - Do not apply findings automatically; implementation is a separate user decision.
+   - Scripts: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit JSON on stdout instead).
+   - For an ordinary review-only request, do not apply findings automatically; implementation is a separate user decision. When the user already requested implementation closeout, follow **Loop closeout protocol** and let only the host fix accepted in-scope blockers.
    Completion criterion: the user sees the review conclusion and readable footer.
 
 ## Examples
@@ -127,6 +155,8 @@ pi-review -- @src/foo.ts
 pi-review --model openai/gpt-5.5 -- @src/foo.ts
 pi-review --mode challenge --keep-session -- @docs/design.md
 pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
+pi-review loop --max-rounds 1 -- @src
+pi-review loop --max-rounds 1 --progress-log /tmp/pi-review-loop.jsonl -- @src
 ```
 
 ## Status examples (user phrasing)

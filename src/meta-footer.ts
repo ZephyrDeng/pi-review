@@ -7,6 +7,13 @@ const VERDICT_DISPLAY: Record<ReviewMeta["verdict"], { label: string; mark: stri
   blocked: { label: "BLOCKED", mark: "×" },
 };
 
+const STATUS_DISPLAY: Record<ReviewMeta["status"], string> = {
+  clean: "CLEAN",
+  has_findings: "HAS FINDINGS",
+  needs_human: "NEEDS HUMAN",
+  blocked: "BLOCKED",
+};
+
 export function formatDurationMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const sec = ms / 1000;
@@ -27,8 +34,12 @@ export function formatReviewMetaAscii(meta: ReviewMeta): string {
   const lines: string[] = [
     "── pi-review " + "─".repeat(28),
     `  ${padLabel("Verdict", labelW)}  ${v.mark} ${v.label}`,
+    `  ${padLabel("Status", labelW)}  ${STATUS_DISPLAY[meta.status]}`,
     `  ${padLabel("Mode", labelW)}  ${meta.reviewMode}`,
   ];
+  if (meta.findings.length > 0) {
+    lines.push(`  ${padLabel("Findings", labelW)}  ${meta.actionableCount} actionable / ${meta.findings.length} total`);
+  }
   if (meta.model) lines.push(`  ${padLabel("Model", labelW)}  ${meta.model}`);
   lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
   if (meta.sessionHandle) {

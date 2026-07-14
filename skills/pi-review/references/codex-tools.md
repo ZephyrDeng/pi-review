@@ -25,6 +25,16 @@ When the **pi-review** skill applies on Codex, Claude Code, or Cursor:
 
 See the parent skill: sections *Default workflow by host* and *Streaming vs agent hosts (Claude Code / Codex)*.
 
+### Loop closeout
+
+`loop` composes with the same background progress workflow:
+
+```bash
+pi-review loop --max-rounds 1 --progress-log /tmp/pi-review-loop.jsonl -- @src
+```
+
+A non-zero command exit is an expected gate result when findings remain. Wait for the process, read the final `PI_REVIEW_META_JSON` / loop summary, let the host fix only accepted in-scope findings, rerun focused proof, and invoke a new loop process. The child review session never edits. Reuse or truncate the progress log deliberately because every loop round appends events to the chosen path.
+
 **Model choice:** after `pi-review models`, use **[model-selection.md](./model-selection.md)** (code / frontend / plan presets)—same guidance as Pi `/rv` completions.
 
 Example tail (milestone events only):
