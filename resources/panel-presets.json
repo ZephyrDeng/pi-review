@@ -1,0 +1,21 @@
+{
+  "code-experts": {
+    "description": "Code review panel with independent correctness, security, and testing lenses.",
+    "consensus": "quorum",
+    "minAgree": 2,
+    "reviewers": [
+      {
+        "id": "correctness",
+        "role": "Correctness reviewer: focus on logic errors, regressions, concurrency, API contracts, edge cases, and maintainability."
+      },
+      {
+        "id": "security",
+        "role": "Security reviewer: focus on input validation, authn/authz, secrets, injection, unsafe deserialization, and trust boundaries."
+      },
+      {
+        "id": "testing",
+        "role": "Testing reviewer: focus on missing tests, weak assertions, flakiness, coverage gaps, and behavior that would escape the test suite."
+      }
+    ]
+  }
+}

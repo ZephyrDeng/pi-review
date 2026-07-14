@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { ReviewPreset } from "./types.js";
+import type { PanelPreset, ReviewPreset } from "./types.js";
 import { fail } from "./utils.js";
 
 export function loadPresets(presetsFile: string): Record<string, ReviewPreset> {
@@ -10,6 +10,15 @@ export function loadPresets(presetsFile: string): Record<string, ReviewPreset> {
     return JSON.parse(fs.readFileSync(presetsFile, "utf8"));
   } catch (error) {
     fail(`failed to read preset file ${presetsFile}: ${(error as Error).message}`);
+  }
+}
+
+export function loadPanelPresets(panelPresetsFile: string): Record<string, PanelPreset> {
+  if (!fs.existsSync(panelPresetsFile)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(panelPresetsFile, "utf8"));
+  } catch (error) {
+    fail(`failed to read panel preset file ${panelPresetsFile}: ${(error as Error).message}`);
   }
 }
 

@@ -67,7 +67,7 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "smoke": "node dist/cli.js --help >/dev/null",
-    "test": "npx --yes tsx --test src/args.test.ts src/cli-exit.test.ts src/child-process.test.ts src/review.meta.test.ts src/review-result.test.ts src/loop.test.ts src/meta-footer.test.ts src/prompt.test.ts src/skill-protocol.test.ts src/json-events.test.ts src/install-args.test.ts extensions/rv-prompts.test.ts extensions/rv-completions.test.ts extensions/rv-model-priorities.test.ts extensions/rv-locale.test.ts extensions/rv-semantic.test.ts",
+    "test": "npx --yes tsx --test src/args.test.ts src/cli-exit.test.ts src/child-process.test.ts src/review.meta.test.ts src/review-result.test.ts src/loop.test.ts src/meta-footer.test.ts src/prompt.test.ts src/skill-protocol.test.ts src/json-events.test.ts src/install-args.test.ts src/panel-aggregate.test.ts src/matcher.test.ts src/panel-config.test.ts src/panel-loop.test.ts src/panel-cli.test.ts extensions/rv-prompts.test.ts extensions/rv-completions.test.ts extensions/rv-model-priorities.test.ts extensions/rv-locale.test.ts extensions/rv-semantic.test.ts",
     "test:rv": "npx --yes tsx --test extensions/rv-prompts.test.ts extensions/rv-completions.test.ts extensions/rv-model-priorities.test.ts extensions/rv-locale.test.ts extensions/rv-semantic.test.ts",
     "prepublishOnly": "npm run build",
     "pack:dry": "npm pack --dry-run"

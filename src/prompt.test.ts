@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildPrompt } from "./prompt.js";
+import { buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
+import type { PanelReviewerSpec, ReviewPreset, SourceFinding } from "./types.js";
 
 test("review prompt requests the parseable finding contract", () => {
   const prompt = buildPrompt(
@@ -15,4 +16,39 @@ test("review prompt requests the parseable finding contract", () => {
   assert.match(prompt, /Path: <path or none>/);
   assert.match(prompt, /Actionable: yes \| no/);
   assert.match(prompt, /No material findings\./);
+});
+
+test("reviewer prompt injects stable reviewer identity and the shared contract", () => {
+  const reviewer: PanelReviewerSpec = { id: "security", role: "Security reviewer" };
+  const prompt = buildReviewerPrompt(
+    "code",
+    { description: "code", instructions: "Review the code." },
+    { fileRefs: ["@src/cli.ts"], userText: "" },
+    "",
+    reviewer,
+  );
+
+  assert.match(prompt, /Reviewer ID: security/);
+  assert.match(prompt, /Role: Security reviewer/);
+  assert.match(prompt, /cannot see other reviewers' findings/);
+  assert.match(prompt, /### F1: <summary>/);
+  assert.match(prompt, /## Verdict/);
+});
+
+test("adjudicator prompt enforces aggregation-only constraints and the strict clustering contract", () => {
+  const findings: SourceFinding[] = [
+    { id: "r1#F1", reviewerId: "r1", finding: { summary: "loop bound is wrong", actionable: true, path: "src/cli.ts" } },
+    { id: "r2#F1", reviewerId: "r2", finding: { summary: "off-by-one iteration", actionable: true, path: "src/cli.ts" } },
+  ];
+  const prompt = buildAdjudicatorPrompt([{ anchorPath: "src/cli.ts", findings }]);
+
+  assert.match(prompt, /consensus adjudicator/i);
+  assert.match(prompt, /aggregation-only/);
+  assert.match(prompt, /may not invent new findings/);
+  assert.match(prompt, /no write tools/);
+  assert.match(prompt, /"sourceFindingIds":\["r1#F1","r2#F1"\],"confidence"/);
+  assert.match(prompt, /must come from the candidates below/);
+  // Adjudicator receives structured findings, not free repo access.
+  assert.match(prompt, /r1#F1/);
+  assert.match(prompt, /loop bound is wrong/);
 });

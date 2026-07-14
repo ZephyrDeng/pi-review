@@ -23,7 +23,7 @@ export function readReviewStdin(): string {
   }
 }
 
-function childEnv(piBin: string): NodeJS.ProcessEnv {
+export function childEnv(piBin: string): NodeJS.ProcessEnv {
   const pathEntries = [
     hasPathSeparator(piBin) ? path.dirname(piBin) : undefined,
     path.join(os.homedir(), ".bun", "bin"),

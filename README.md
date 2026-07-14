@@ -131,6 +131,44 @@ Each round is review-only. The process never edits, patches, waits for filesyste
 
 This is a **host-driven gate**: if findings remain, the host or human fixes only accepted in-scope findings and invokes `loop` again. For patch-by-patch agent closeout, `--max-rounds 1` gives the host a fix point after each review; use a larger budget only when repeated review of the unchanged tree is intentional. `loop` accepts normal review target/model/progress options but rejects `--keep-session`, `--continue`, and `--name` in v1.
 
+## Panel Review
+
+Panel review runs multiple **independent** reviewers in isolated child sessions and aggregates their findings into one gate result. Reviewers cannot see one another's findings, so agreement represents independent discovery.
+
+```bash
+# Single panel review
+pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
+# Expert preset (correctness, security, testing lenses)
+pi-review --panel code-experts --consensus majority -- @src
+# Panel loop review (up to reviewer_count × max-rounds reviewer runs + adjudication)
+pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
+```
+
+### Consensus
+
+A finding becomes a **confirmed finding** (gate-relevant) only when enough independent reviewers mark the issue **actionable**. Otherwise it stays a non-blocking **advisory**. Multi-reviewer panels default to **quorum** with minimum agreement **2** so panel mode never silently becomes any-finding fail-closed; single-review stays threshold one.
+
+| Policy | Threshold |
+|--------|----------|
+| `any` | one actionable reviewer confirms |
+| `quorum` (default) | configured minimum agreement (default 2; `--min-agree`) |
+| `majority` | `floor(reviewers / 2) + 1` |
+| `unanimous` | every reviewer |
+
+Singleton (uncorroborated) findings remain visible as **advisories** but do not change clean status or fail the gate. Confirmed actionable clusters produce `has_findings`; no confirmed clusters produce `clean`.
+
+### Aggregation
+
+Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may not invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
+
+### Cost and failure
+
+Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication call may run per round when `--consensus-model` is set. Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean. Panel review rejects `--keep-session`, `--continue`, and `--name` (reviewers run `--no-session`); the host agent remains the only editor.
+
+### Machine output
+
+A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields.
+
 ## Output Format
 
 Every review produces Markdown with these sections:
@@ -237,8 +275,14 @@ pi-review models [search]
 | `--no-stream` | Buffer child output until exit (default: stream live) |
 | `--progress-log <path>` | Stream child `--mode json` events to this file (cannot combine with `--no-stream`) |
 | `--max-rounds <n>` | Positive loop review budget (default: `3`; `loop` only) |
+| `--reviewers <n>` | Panel: number of independent reviewers (2-8; activates panel mode) |
+| `--panel <name>` | Panel: named expert-panel preset (cannot combine with `--reviewers`) |
+| `--consensus <policy>` | Panel: `any \| quorum \| majority \| unanimous` (default: `quorum`) |
+| `--min-agree <n>` | Panel: minimum reviewers for quorum (default: `2`; quorum only) |
+| `--consensus-model <model>` | Panel: model for semantic consensus adjudication |
+| `--concurrency <n>` | Panel: bounded reviewer concurrency (default: reviewer count) |
 
-Session flags (`--keep-session`, `--continue`, `--name`) are intentionally unsupported by `loop` in v1; invalid combinations print usage and exit `2`.
+Session flags (`--keep-session`, `--continue`, `--name`) are unsupported by `loop` and panel in v1; invalid combinations print usage and exit `2`.
 
 ## Configuration
 
@@ -249,6 +293,7 @@ Override defaults via environment variables:
 | `PI_BIN` | Pi executable path (default: `pi`) |
 | `PI_REVIEW_HOME` | Directory containing `review-presets.json` and `system-prompt.md` |
 | `PI_REVIEW_PRESETS` | Path to presets JSON file |
+| `PI_REVIEW_PANEL_PRESETS` | Path to panel presets JSON file |
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
 | `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |

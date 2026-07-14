@@ -1,8 +1,18 @@
 import { formatDurationMs } from "./meta-footer.js";
 import { reviewExitCode } from "./review-result.js";
-import type { ReviewRunResult, ReviewStatus, Verdict } from "./types.js";
+import type { PanelReviewMeta, ReviewMeta, ReviewRunResult, ReviewStatus, Verdict } from "./types.js";
 
 export type LoopStopReason = "clean" | "budget_exhausted" | "needs_human" | "blocked";
+
+export interface LoopRoundPanelSummary {
+  configuredReviewers: number;
+  successfulReviewers: number;
+  confirmedCount: number;
+  advisoryCount: number;
+  consensusPolicy: string;
+  consensusThreshold: number;
+  panelHealth: string;
+}
 
 export interface LoopRoundSummary {
   index: number;
@@ -11,6 +21,8 @@ export interface LoopRoundSummary {
   durationMs: number;
   findingCount: number;
   actionableCount: number;
+  /** Present when the round evaluated a panel. */
+  panel?: LoopRoundPanelSummary;
 }
 
 export interface LoopReviewResult {
@@ -29,9 +41,15 @@ function displayEnum(value: string): string {
 export function formatLoopSummary(result: LoopReviewResult): string {
   const lines = ["── pi-review loop " + "─".repeat(23)];
   for (const round of result.rounds) {
-    lines.push(
-      `  Round ${round.index}  ${displayEnum(round.status)} | ${displayEnum(round.verdict)} | ${round.actionableCount} actionable / ${round.findingCount} total | ${formatDurationMs(round.durationMs)}`,
-    );
+    if (round.panel) {
+      lines.push(
+        `  Round ${round.index}  ${displayEnum(round.status)} | panel ${round.panel.successfulReviewers}/${round.panel.configuredReviewers} | ${round.panel.confirmedCount} confirmed / ${round.panel.advisoryCount} advisory | ${round.panel.consensusPolicy}≥${round.panel.consensusThreshold} | ${displayEnum(round.panel.panelHealth as string)} | ${formatDurationMs(round.durationMs)}`,
+      );
+    } else {
+      lines.push(
+        `  Round ${round.index}  ${displayEnum(round.status)} | ${displayEnum(round.verdict)} | ${round.actionableCount} actionable / ${round.findingCount} total | ${formatDurationMs(round.durationMs)}`,
+      );
+    }
   }
   lines.push(`  Stop     ${result.stopReason}`);
   lines.push(`  Exit     ${result.exitCode}`);
@@ -52,6 +70,17 @@ export async function runReviewLoop(
   for (let index = 1; index <= maxRounds; index += 1) {
     const run = await runOneReview(index);
     const { meta } = run;
+    const panel = isPanelMeta(meta)
+      ? {
+          configuredReviewers: meta.configuredReviewers,
+          successfulReviewers: meta.successfulReviewers,
+          confirmedCount: meta.confirmedClusters.length,
+          advisoryCount: meta.advisories.length,
+          consensusPolicy: meta.consensusPolicy,
+          consensusThreshold: meta.consensusThreshold,
+          panelHealth: meta.panelHealth,
+        }
+      : undefined;
     rounds.push({
       index,
       status: meta.status,
@@ -59,6 +88,7 @@ export async function runReviewLoop(
       durationMs: meta.durationMs,
       findingCount: meta.findings.length,
       actionableCount: meta.actionableCount,
+      ...(panel ? { panel } : {}),
     });
 
     if (meta.status === "clean" || meta.status === "needs_human" || meta.status === "blocked") {
@@ -77,4 +107,8 @@ export async function runReviewLoop(
     stopReason: "budget_exhausted",
     exitCode: reviewExitCode("has_findings"),
   };
+}
+
+function isPanelMeta(meta: ReviewMeta): meta is PanelReviewMeta {
+  return (meta as { strategy?: string }).strategy === "panel";
 }

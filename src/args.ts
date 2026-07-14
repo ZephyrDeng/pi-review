@@ -1,4 +1,5 @@
 import type { ParsedArgs } from "./types.js";
+import { CONSENSUS_POLICIES, MAX_REVIEWERS } from "./types.js";
 import { parseInstallCommand } from "./install-args.js";
 
 export function usage(exitCode = 0): never {
@@ -23,9 +24,15 @@ Options:
   --no-stream                                 Buffer child output until exit (default: stream live)
   --progress-log <path>                       Stream child --mode json events to this file (cannot combine with --no-stream)
   --max-rounds <n>                            Loop review budget (default: 3; loop only)
+  --reviewers <n>                             Panel: number of independent reviewers (2-8; activates panel mode)
+  --panel <name>                              Panel: named expert-panel preset (cannot combine with --reviewers)
+  --consensus <policy>                        Panel: any | quorum | majority | unanimous (default: quorum)
+  --min-agree <n>                             Panel: minimum reviewers for quorum (default: 2; quorum only)
+  --consensus-model <model>                   Panel: model for semantic consensus adjudication
+  --concurrency <n>                           Panel: bounded reviewer concurrency (default: reviewer count)
   -h, --help                                  Show help
 
-Session (single review only; rejected by loop):
+Session (single review only; rejected by loop and panel):
   --keep-session                              Persist the review session for follow-up
   --continue <sessionHandle>                  Continue an existing review session
   --name <name>                               Session name (with --keep-session)
@@ -33,11 +40,18 @@ Session (single review only; rejected by loop):
 Exit codes:
   0 clean | 1 findings remain | 2 usage | 3 needs human | 4 blocked/runtime failure
 
+Panel cost: reviewer runs = --reviewers <n> times --max-rounds (loop), plus one
+consensus-adjudication call per round when --consensus-model is set. Single-review
+commands (default, no --reviewers/--panel) keep the existing low-cost workflow.
+
 Examples:
   pi-review models
   pi-review -- @src/foo.ts
   pi-review --model openai/gpt-5.5 -- @src/foo.ts
   pi-review --mode challenge --keep-session -- @design.md
+  pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
+  pi-review --panel code-experts --consensus majority -- @src
+  pi-review loop --reviewers 3 --consensus quorum --max-rounds 3 -- @src
   pi-review loop --max-rounds 3 -- @src
   pi-review install
   pi-review install --agent claude-code codex -y
@@ -143,6 +157,24 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
       case "--max-rounds":
         options.maxRounds = parsePositiveInteger(arg, requireValue(arg, argv));
         break;
+      case "--reviewers":
+        options.reviewers = parsePositiveInteger(arg, requireValue(arg, argv));
+        break;
+      case "--panel":
+        options.panel = requireValue(arg, argv);
+        break;
+      case "--consensus":
+        options.consensus = requireValue(arg, argv);
+        break;
+      case "--min-agree":
+        options.minAgree = parsePositiveInteger(arg, requireValue(arg, argv));
+        break;
+      case "--consensus-model":
+        options.consensusModel = requireValue(arg, argv);
+        break;
+      case "--concurrency":
+        options.concurrency = parsePositiveInteger(arg, requireValue(arg, argv));
+        break;
       default:
         if (arg.startsWith("--")) {
           throw new ArgsParseError(`unknown option: ${arg}`);
@@ -166,7 +198,53 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
     throw new ArgsParseError("loop cannot be used with --keep-session, --continue, or --name");
   }
 
+  validatePanelOptions(options);
+
   return options;
+}
+
+function validatePanelOptions(options: ParsedArgs): void {
+  const hasReviewers = options.reviewers !== undefined;
+  const reviewerCount = options.reviewers ?? 1;
+  const panelActive = reviewerCount > 1 || options.panel !== undefined;
+  const anyPanelOption =
+    options.consensus !== undefined ||
+    options.minAgree !== undefined ||
+    options.consensusModel !== undefined ||
+    options.concurrency !== undefined;
+
+  if (hasReviewers && options.reviewers! > MAX_REVIEWERS) {
+    throw new ArgsParseError(`--reviewers must be between 1 and ${MAX_REVIEWERS}`);
+  }
+  if (hasReviewers && options.panel) {
+    throw new ArgsParseError("--reviewers cannot be used with --panel");
+  }
+  if (!panelActive && anyPanelOption) {
+    throw new ArgsParseError("panel options require --reviewers > 1 or --panel");
+  }
+  if (panelActive && (options.keepSession || options.continueHandle || options.name)) {
+    throw new ArgsParseError("panel cannot be used with --keep-session, --continue, or --name");
+  }
+  if (options.consensus !== undefined && !(CONSENSUS_POLICIES as readonly string[]).includes(options.consensus)) {
+    throw new ArgsParseError(
+      `unknown consensus policy: ${options.consensus}. Available: ${CONSENSUS_POLICIES.join(", ")}`,
+    );
+  }
+  if (options.minAgree !== undefined) {
+    if (options.consensus !== undefined && options.consensus !== "quorum") {
+      throw new ArgsParseError("--min-agree is only meaningful with --consensus quorum");
+    }
+    if (hasReviewers && !options.panel && options.minAgree > options.reviewers!) {
+      throw new ArgsParseError(`--min-agree ${options.minAgree} cannot exceed reviewer count ${options.reviewers}`);
+    }
+  }
+  if (options.concurrency !== undefined && hasReviewers && !options.panel && options.concurrency > options.reviewers!) {
+    throw new ArgsParseError(`--concurrency ${options.concurrency} cannot exceed reviewer count ${options.reviewers}`);
+  }
+}
+
+export function isPanelActive(options: Pick<ParsedArgs, "reviewers" | "panel">): boolean {
+  return (options.reviewers !== undefined && options.reviewers > 1) || options.panel !== undefined;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {

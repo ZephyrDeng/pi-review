@@ -63,3 +63,111 @@ test("loop rejects session reuse and review rejects loop-only flags", () => {
     /only be used with loop/,
   );
 });
+
+test("panel options parse for review and loop", () => {
+  const parsed = parseReviewCommand([
+    "--reviewers", "3", "--consensus", "quorum", "--min-agree", "2", "--concurrency", "2", "--", "@src",
+  ]);
+  assert.equal(parsed.reviewers, 3);
+  assert.equal(parsed.consensus, "quorum");
+  assert.equal(parsed.minAgree, 2);
+  assert.equal(parsed.concurrency, 2);
+
+  const loopParsed = parseReviewCommand([
+    "loop", "--reviewers", "3", "--consensus", "quorum", "--min-agree", "2", "--max-rounds", "2", "--", "@src",
+  ]);
+  assert.equal(loopParsed.command, "loop");
+  assert.equal(loopParsed.reviewers, 3);
+  assert.equal(loopParsed.maxRounds, 2);
+
+  const panelParsed = parseReviewCommand(["--panel", "code-experts", "--consensus", "majority", "--", "@src"]);
+  assert.equal(panelParsed.panel, "code-experts");
+  assert.equal(panelParsed.consensus, "majority");
+});
+
+test("reviewer count must be a positive integer within the limit", () => {
+  for (const value of ["0", "-1", "1.5", "many"]) {
+    assert.throws(
+      () => parseReviewCommand(["--reviewers", value, "--", "@src"]),
+      (error: unknown) => error instanceof ArgsParseError && /positive integer/.test(error.message),
+    );
+  }
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "9", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /between 1 and 8/.test(error.message),
+  );
+});
+
+test("minimum agreement must be a positive integer and cannot exceed reviewers", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "3", "--min-agree", "0", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /positive integer/.test(error.message),
+  );
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--consensus", "quorum", "--min-agree", "3", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /cannot exceed reviewer count 2/.test(error.message),
+  );
+});
+
+test("unsupported consensus policy is a usage error", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "3", "--consensus", "supermajority", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /unknown consensus policy/.test(error.message),
+  );
+});
+
+test("min-agree is only meaningful with quorum consensus", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "3", "--consensus", "majority", "--min-agree", "2", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /only meaningful with --consensus quorum/.test(error.message),
+  );
+});
+
+test("reviewers and panel cannot be combined (any reviewer count)", () => {
+  for (const count of ["3", "1"]) {
+    assert.throws(
+      () => parseReviewCommand(["--reviewers", count, "--panel", "code-experts", "--", "@src"]),
+      (error: unknown) => error instanceof ArgsParseError && /cannot be used with --panel/.test(error.message),
+    );
+  }
+});
+
+test("panel options require an active panel (reviewers > 1 or panel)", () => {
+  for (const args of [
+    ["--consensus", "any"],
+    ["--min-agree", "2"],
+    ["--concurrency", "2"],
+    ["--consensus-model", "openai/gpt-5.5"],
+  ]) {
+    assert.throws(
+      () => parseReviewCommand([...args, "--", "@src"]),
+      (error: unknown) => error instanceof ArgsParseError && /panel options require/.test(error.message),
+    );
+  }
+});
+
+test("panel cannot be used with session reuse flags", () => {
+  for (const sessionArgs of [
+    ["--keep-session"],
+    ["--continue", "/tmp/session.jsonl"],
+    ["--name", "gate"],
+  ]) {
+    assert.throws(
+      () => parseReviewCommand(["--reviewers", "3", ...sessionArgs, "--", "@src"]),
+      (error: unknown) => error instanceof ArgsParseError && /panel cannot be used with/.test(error.message),
+    );
+  }
+});
+
+test("concurrency cannot exceed reviewer count", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--concurrency", "5", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /--concurrency 5 cannot exceed reviewer count 2/.test(error.message),
+  );
+});
+
+test("single reviewer with no panel flags keeps existing single-review parsing", () => {
+  const parsed = parseReviewCommand(["--reviewers", "1", "--", "@src"]);
+  assert.equal(parsed.reviewers, 1);
+  assert.equal(parsed.panel, undefined);
+});

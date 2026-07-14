@@ -1,4 +1,4 @@
-import type { ReviewMeta } from "./types.js";
+import type { PanelReviewMeta, ReviewMeta } from "./types.js";
 
 const VERDICT_DISPLAY: Record<ReviewMeta["verdict"], { label: string; mark: string }> = {
   approve: { label: "APPROVE", mark: "✓" },
@@ -56,4 +56,39 @@ export function formatReviewMetaAscii(meta: ReviewMeta): string {
 /** Machine-readable line for scripts (written to stderr by default). */
 export function formatReviewMetaJsonLine(meta: ReviewMeta): string {
   return `PI_REVIEW_META_JSON: ${JSON.stringify(meta)}\n`;
+}
+
+/** Human-readable ASCII footer for a panel evaluation. */
+export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
+  const labelW = 10;
+  const lines: string[] = [
+    "── pi-review panel " + "─".repeat(21),
+    `  ${padLabel("Status", labelW)}  ${STATUS_DISPLAY[meta.status]}`,
+    `  ${padLabel("Health", labelW)}  ${meta.panelHealth.toUpperCase()}`,
+    `  ${padLabel("Mode", labelW)}  ${meta.reviewMode}`,
+    `  ${padLabel("Reviewers", labelW)}  ${meta.successfulReviewers}/${meta.configuredReviewers} successful`,
+    `  ${padLabel("Consensus", labelW)}  ${meta.consensusPolicy} (threshold ${meta.consensusThreshold})`,
+    `  ${padLabel("Confirmed", labelW)}  ${meta.confirmedClusters.length} actionable`,
+    `  ${padLabel("Advisories", labelW)}  ${meta.advisories.length} non-blocking`,
+  ];
+  if (meta.panelPreset) lines.push(`  ${padLabel("Panel", labelW)}  ${meta.panelPreset}`);
+  if (meta.adjudicationUsed) lines.push(`  ${padLabel("Adjudicator", labelW)}  used`);
+  if (meta.adjudicationErrors?.length) {
+    lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationErrors.join("; ")}`);
+  }
+  lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
+  lines.push("  Reviewers:");
+  for (const r of meta.reviewers) {
+    const bits = [
+      r.reviewerId,
+      STATUS_DISPLAY[r.status],
+      r.verdict,
+      ...(r.role ? [`role:${r.role.split(" ")[0]}`] : []),
+      ...(r.model ? [r.model] : []),
+      formatDurationMs(r.durationMs),
+    ];
+    lines.push(`    - ${bits.join(" | ")}`);
+  }
+  lines.push("─".repeat(42));
+  return lines.join("\n");
 }

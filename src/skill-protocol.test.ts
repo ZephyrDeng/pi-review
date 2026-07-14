@@ -20,3 +20,20 @@ test("shipped skill defines bounded host-owned loop closeout", () => {
     assert.match(skill, new RegExp(required, "i"));
   }
 });
+
+test("shipped skill documents Panel Review, consensus, and advisories", () => {
+  const skill = fs.readFileSync(skillPath, "utf8");
+
+  for (const required of [
+    "Panel review",
+    "confirmed finding",
+    "advisory",
+    "quorum",
+    "majority",
+    "unanimous",
+    "host-only fixes",
+    "cost multipl",
+  ]) {
+    assert.match(skill, new RegExp(required, "i"), `skill missing: ${required}`);
+  }
+});

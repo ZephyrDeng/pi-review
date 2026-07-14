@@ -66,6 +66,44 @@ pi-review loop --max-rounds 3 -- @src
 
 `loop` 复用普通审查的 mode/model/progress/target 参数；v1 明确不支持 `--keep-session`、`--continue`、`--name`。
 
+## Panel Review（面板审查）
+
+面板审查让多个**独立**审查者在隔离子会话中并行评审，再聚合为同一个门禁结论。审查者看不到彼此的发现，因此一致代表独立发现。
+
+```bash
+# 单次面板审查
+pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
+# 专家预设（正确性 / 安全 / 测试三视角）
+pi-review --panel code-experts --consensus majority -- @src
+# 面板 loop（最多 reviewer 数 × max-rounds 次审查 + 仲裁）
+pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
+```
+
+### 共识（Consensus）
+
+只有当足够多的独立审查者把同一问题标为 **actionable** 时，该 finding 才成为 **confirmed finding**（参与门禁）；否则保留为非阻塞的 **advisory**（建议）。多审查者面板默认 **quorum**，最低同意数 **2**，避免面板模式悄悄退化为"任一发现即 fail-closed"；单审查仍为阈值 1。
+
+| 策略 | 阈值 |
+|------|------|
+| `any` | 1 个 actionable 审查者即确认 |
+| `quorum`（默认） | 配置的最低同意数（默认 2，用 `--min-agree`） |
+| `majority` | `floor(审查者数 / 2) + 1` |
+| `unanimous` | 全体审查者 |
+
+单条（未被交叉印证的）发现作为 **advisory** 可见，但不改变 clean 状态、不会让门禁失败。确认的可操作簇产生 `has_findings`；无确认簇则产生 `clean`。
+
+### 聚合
+
+两阶段匹配：先用稳定锚点（路径 + 归一化摘要）做确定性匹配；只有路径相同、措辞不同的模糊候选才交给受限的**语义仲裁器**（用 `--consensus-model` 启用）。仲裁器只能聚类，不得发明 finding、丢弃 finding、补充证据或充当额外审查者，且没有写工具。低置信匹配保持为独立 advisory，避免靠"相似"制造虚假共识。
+
+### 成本与失败
+
+审查者运行数 = `--reviewers <n>` × `--max-rounds`（loop）；启用 `--consensus-model` 时每轮最多再跑一次仲裁。用 `--concurrency <n>` 限制并发（默认等于审查者数，不超过）。审查者运行时失败 → `blocked`；无法解析的脏输出或未决澄清 → `needs_human`；绝不悄悄 clean。面板审查 v1 不支持 `--keep-session`、`--continue`、`--name`（审查者用 `--no-session`）；宿主 Agent 仍是唯一可编辑者。
+
+### 机器输出
+
+一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。
+
 ## Pi 包：`/rv` 命令
 
 安装 Pi 包后可在 Pi 里使用 `/rv`：

@@ -106,6 +106,59 @@ Use this protocol when the host is closing out implementation work and may edit 
 
 The shell exit policy is: `0` clean, `1` status is `has_findings`, `2` usage error, `3` needs human, `4` blocked/runtime failure. A non-zero loop result is a gate signal, not permission for the child reviewer to edit.
 
+## Panel review
+
+Panel review runs multiple **independent** reviewers in isolated child sessions and aggregates their findings into one gate result. Reviewers cannot see one another's findings, so agreement represents independent discovery.
+
+### When to use panel vs single review
+
+- **Single review (default):** keep for small, low-cost changes. Reviewer count defaults to one; the existing execution, output, status mapping, and exit policy stay unchanged.
+- **Panel review:** use when a change deserves independent scrutiny. Activate it with `--reviewers <n>` (2-8) or `--panel <name>`.
+
+### Consensus
+
+A finding becomes a **confirmed finding** (gate-relevant) only when enough independent reviewers mark the issue **actionable**. Otherwise it stays a non-blocking **advisory**.
+
+Consensus policies (default `quorum` for multi-reviewer panels):
+
+| Policy | Threshold |
+|--------|----------|
+| `any` | one actionable reviewer confirms |
+| `quorum` | configured minimum agreement (default 2; set with `--min-agree`) |
+| `majority` | `floor(reviewers / 2) + 1` |
+| `unanimous` | every reviewer |
+
+Multi-reviewer panels default to **quorum with minimum agreement 2** so panel mode never silently becomes any-finding fail-closed. Single-review stays threshold one.
+
+### Advisories
+
+Singleton (uncorroborated) findings remain visible as **advisories** but do **not** change clean status or fail the gate. They are recorded as non-blocking follow-ups; the host promotes them only with explicit human acceptance. Confirmed actionable clusters produce `has_findings`; no confirmed clusters produce `clean`.
+
+### Aggregation
+
+Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may **not** invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
+
+### Cost multipliers
+
+Cost is visible before execution. Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop). One consensus-adjudication call may run per round when `--consensus-model` is set, tracked separately. Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it).
+
+### Host-only fixes
+
+Panel review composes with Loop Review: one loop round evaluates one **complete panel** with fresh reviewer sessions. The CLI never edits, patches, or waits for filesystem changes — the host agent remains the only actor allowed to fix between process invocations. Apply the scope governor to **confirmed** findings exactly as for single-review findings. Rejected confirmed findings must be recorded with rationale. `--max-rounds 1` keeps the patch-by-patch closeout workflow.
+
+Panel review rejects `--keep-session`, `--continue`, and `--name` in v1 (reviewers run `--no-session`). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean.
+
+### Examples
+
+```bash
+# Single panel review
+pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
+# Expert preset
+pi-review --panel code-experts --consensus majority -- @src
+# Panel loop review (up to 6 reviewer runs + adjudication)
+pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
+```
+
 ## Steps
 
 1. Prime the model catalog and pick a model:
