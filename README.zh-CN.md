@@ -117,9 +117,9 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 跟进审查时，`--continue` 与首次 `/rv` 一样可**选填** `--mode`、`--model`（以及后续 CLI 支持的其它选项由 skill 直接调用 CLI 时传入）。
 
-`/rv` 会向主会话注入**英文任务说明**（**仅 Pi 宿主**：默认流式、**不要**自动加 `--no-stream` / `--progress-log`），由主 Agent 调用 `pi-review` CLI。普通 `/rv @path` 无需额外参数。需要整段缓冲时显式 `/rv --no-stream`。
+`/rv` 会向主会话注入**英文任务说明**（**仅 Pi 宿主**：默认流式，无需 `--no-stream` / `--progress-log`），由主 Agent 调用 `pi-review` CLI。普通 `/rv @path` 无需额外参数。需要整段缓冲时显式 `/rv --no-stream`。
 
-**Claude Code / Codex 等 Agent 宿主**：Bash 工具会缓冲 stdout，不能指望“默认流式”在对话里逐字出现；**pi-review skill 默认建议** `--progress-log <path>` + 后台运行 + tail 日志。详见 `skills/pi-review/SKILL.md`、`skills/pi-review/references/codex-tools.md` 与英文 README。
+**Claude Code / Codex 等 Agent 宿主**：`pi-review` 默认把可读文本增量流到 stdout，把**语义化里程碑**写到 stderr（`pi-review: review started` / `pi-review: tool <name> started/finished` / `pi-review: review finished`）；token 用量默认就能拿到，无需 `--progress-log`。`--progress-log` 退化为可选的调试用全量事件日志。详见 `skills/pi-review/SKILL.md`、`skills/pi-review/references/codex-tools.md` 与英文 README。
 
 ## 输出格式
 

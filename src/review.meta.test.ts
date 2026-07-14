@@ -19,8 +19,8 @@ test("childRuntimeError treats spawn errors as runtime errors", () => {
   );
 });
 
-test("progressLogBuffersOutput buffers whenever streaming is off or a progress log is set", () => {
-  assert.equal(progressLogBuffersOutput(true, true), true);
+test("progressLogBuffersOutput buffers only in non-streaming mode", () => {
+  assert.equal(progressLogBuffersOutput(true, true), false);
   assert.equal(progressLogBuffersOutput(true, false), false);
   assert.equal(progressLogBuffersOutput(false, false), true);
   assert.equal(progressLogBuffersOutput(false, true), true);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extractFinalText, extractUsage } from "./json-events.js";
+import { extractFinalText, extractUsage, JsonEventStream } from "./json-events.js";
 
 function lines(...events: unknown[]): string {
   return events.map((e) => JSON.stringify(e)).join("\n");
@@ -136,4 +136,56 @@ test("extractUsage sums output across multiple assistant turns", () => {
   const result = extractUsage(input);
   assert.equal(result.usage!.output, 80);
   assert.equal(result.usage!.input, 100);
+});
+
+test("JsonEventStream forwards text deltas and emits milestones", () => {
+  const texts: string[] = [];
+  const milestones: string[] = [];
+  const stream = new JsonEventStream({ onText: (c) => texts.push(c), onMilestone: (l) => milestones.push(l) });
+  const input = lines(
+    { type: "agent_start" },
+    { type: "turn_start" },
+    { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello ", partial: { role: "assistant" } } },
+    { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "world", partial: { role: "assistant" } } },
+    { type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "Hello world" }], responseModel: "fake/model" }] },
+  );
+  stream.feed(input);
+  stream.flush();
+  assert.equal(texts.join(""), "Hello world");
+  assert.ok(milestones.some((m) => /review started/.test(m)));
+  assert.ok(milestones.some((m) => /review finished/.test(m)));
+  const usage = stream.usage();
+  assert.ok(usage.responseModel === "fake/model" || usage.responseModel === undefined);
+});
+
+test("JsonEventStream accumulates token usage from streamed events", () => {
+  const stream = new JsonEventStream({ onText: () => {}, onMilestone: () => {} });
+  stream.feed(lines(
+    { type: "message_end", message: { role: "assistant", usage: { input: 200, output: 50, cacheRead: 100, cacheWrite: 0, reasoning: 10, totalTokens: 260 } } },
+  ));
+  stream.flush();
+  const usage = stream.usage().usage;
+  assert.ok(usage);
+  assert.equal(usage!.input, 200);
+  assert.equal(usage!.output, 50);
+  assert.equal(usage!.cacheRead, 100);
+  assert.equal(usage!.reasoning, 10);
+});
+
+test("JsonEventStream handles partial lines across chunks", () => {
+  const texts: string[] = [];
+  const stream = new JsonEventStream({ onText: (c) => texts.push(c), onMilestone: () => {} });
+  // Feed a partial line, then complete it.
+  stream.feed('{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"par');
+  stream.feed('tial","partial":{"role":"assistant"}}}\n');
+  stream.flush();
+  assert.equal(texts.join(""), "partial");
+});
+
+test("JsonEventStream skips unparseable lines without throwing", () => {
+  const stream = new JsonEventStream({ onText: () => {}, onMilestone: () => {} });
+  stream.feed("not json\n");
+  stream.feed('{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ok","partial":{"role":"assistant"}}}\n');
+  stream.flush();
+  assert.equal(stream.usage().usage, undefined);
 });

@@ -238,19 +238,17 @@ pi-review --mode challenge --keep-session -- @docs/design.md
 pi-review --continue <sessionHandle> --mode challenge --model provider/model -- "expand finding 2"
 ```
 
-## Live Progress in AI Hosts
+## Live Progress and Token Usage
 
-Agent hosts like Claude Code, Cursor, and Codex typically buffer a Bash tool's stdout until the command exits, so a multi-minute review can look like a silent wait followed by one large dump — even though `pi-review` streams by default. `--progress-log <path>` sidesteps this: it runs the child in `--mode json` and writes its event log to a file in real time, independent of what the calling tool does with stdout.
+`pi-review` always runs the child in `--mode json` internally. In streaming mode it forwards **readable text deltas** to stdout live and writes **semantic milestone notices** to stderr — `pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`. Token usage (`input`/`output`/`cache`/`reasoning`) is accumulated by default and shown in the ASCII footer and `PI_REVIEW_META_JSON` — **no `--progress-log` required**.
 
-The bundled **pi-review** agent skill tells parent agents to use `--progress-log` by default on those hosts (Pi `/rv` stays on default streaming). Details: [`skills/pi-review/SKILL.md`](skills/pi-review/SKILL.md) and [`skills/pi-review/references/codex-tools.md`](skills/pi-review/references/codex-tools.md).
+Agent hosts like Claude Code, Cursor, and Codex typically buffer a Bash tool's stdout until the command exits. The stderr milestone notices give you progress signals without tailing a file. The final Markdown review + ASCII footer arrive on stdout when the process exits.
+
+`--progress-log <path>` is now an **optional** convenience for fine-grained debugging: it tees the raw `--mode json` event stream to a file. It no longer gates token visibility. Details: [`skills/pi-review/SKILL.md`](skills/pi-review/SKILL.md) and [`skills/pi-review/references/codex-tools.md`](skills/pi-review/references/codex-tools.md).
 
 ```bash
-# Start the review in the background, writing structured progress events to a file
+# Optional: capture the full event log for debugging
 pi-review --progress-log /tmp/pi-review.jsonl -- @src/foo.ts &
-
-# Tail it from another process/tool (e.g. Claude Code's Monitor tool) for live updates.
-# `message_update` and `tool_execution_update` carry high-frequency token-level deltas —
-# excluding them keeps the feed to milestone events (tool start/end, turn end, agent end).
 tail -f -n +1 /tmp/pi-review.jsonl | jq -c --unbuffered '
   select(.type != "message_update" and .type != "tool_execution_update")
 '

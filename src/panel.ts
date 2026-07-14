@@ -19,7 +19,7 @@ import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
-import { extractFinalText, extractUsage } from "./json-events.js";
+import { extractFinalText, JsonEventStream } from "./json-events.js";
 import type { TokenUsage } from "./types.js";
 import { fail, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
@@ -94,8 +94,7 @@ function buildReviewerArgs(
   progressLog: string | undefined,
   systemPrompt: string,
 ): string[] {
-  const args: string[] = ["-p"];
-  if (progressLog) args.push("--mode", "json");
+  const args: string[] = ["-p", "--mode", "json"];
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
 
   const provider = reviewer.provider || parsed.provider || preset.provider;
@@ -133,12 +132,28 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   const { config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt } = input;
   const args = buildReviewerArgs(config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt);
 
-  const sink = progressLog
-    ? (() => {
-        fs.mkdirSync(path.dirname(progressLog), { recursive: true });
-        return fs.createWriteStream(progressLog, { flags: "a" });
-      })()
-    : new Writable({ write(_chunk, _enc, cb) { cb(); } });
+  let progressStream: fs.WriteStream | undefined;
+  if (progressLog) {
+    fs.mkdirSync(path.dirname(progressLog), { recursive: true });
+    progressStream = fs.createWriteStream(progressLog, { flags: "a" });
+  }
+
+  // Reviewers always run in --mode json. A JsonEventStream accumulates token
+  // usage and emits reviewer-prefixed milestones to stderr; reviewer prose is
+  // NOT forwarded to stdout so concurrent reviewers never interleave (issue #2
+  // progress isolation). The raw json lines tee into the progress-log file.
+  const streamParser = new JsonEventStream({
+    onText: () => { /* reviewer prose is captured, not displayed */ },
+    onMilestone: (line) => process.stderr.write(`  [${reviewer.id}] ${line}`),
+  });
+  const stdoutSink = new Writable({
+    write(chunk, _enc, cb) {
+      const text = String(chunk);
+      if (progressStream) progressStream.write(text);
+      streamParser.feed(text);
+      cb();
+    },
+  });
 
   const stderrChunks: string[] = [];
   const stderrSink = new Writable({ write(chunk, _enc, cb) { stderrChunks.push(String(chunk)); cb(); } });
@@ -146,11 +161,12 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   const child = await spawnStreamingChild(config.piBin, args, {
     cwd: process.cwd(),
     env: childEnv(config.piBin),
-    stdoutSink: sink,
+    stdoutSink,
     stderrSink,
   });
-  if (progressLog) {
-    await new Promise<void>((resolve) => (sink as fs.WriteStream).end(() => resolve()));
+  streamParser.flush();
+  if (progressStream) {
+    await new Promise<void>((resolve) => progressStream!.end(() => resolve()));
   }
 
   let stdout = child.stdout || "";
@@ -159,17 +175,17 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   // concurrent reviewer diagnostics never interleave on the shared terminal.
   const reviewerStderr = stderrChunks.join("");
 
-  let verdictInfo: VerdictInfo = parseVerdict(stdout);
   let extractedError: string | undefined;
   let extractedFatal = false;
-  let reviewerUsage: TokenUsage | undefined;
-  if (progressLog) {
-    reviewerUsage = extractUsage(stdout).usage;
+  const reviewerUsage = streamParser.usage().usage;
+  {
     const extracted = extractFinalText(stdout);
     stdout = extracted.text;
     extractedError = extracted.error;
     extractedFatal = Boolean(extracted.fatal);
   }
+
+  let verdictInfo: VerdictInfo = parseVerdict(stdout);
 
   if (runtimeError) {
     const detail = [runtimeError, reviewerStderr.slice(-2000)].filter(Boolean).join("; ");

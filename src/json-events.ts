@@ -171,3 +171,139 @@ export function extractUsage(jsonLinesText: string): ExtractedUsage {
   if (responseModel) result.responseModel = responseModel;
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Streaming event parser (A + B): forwards readable text deltas to the
+// terminal, emits semantic milestone notices, and accumulates token usage —
+// all from pi's --mode json event stream, without requiring --progress-log.
+// ---------------------------------------------------------------------------
+
+export interface StreamEventEmitter {
+  /** Called for every text chunk that should be shown to the human. */
+  onText(chunk: string): void;
+  /** Called for every semantic milestone (already formatted, ends with \n). */
+  onMilestone(line: string): void;
+}
+
+export interface StreamedUsage {
+  usage?: TokenUsage;
+  responseModel?: string;
+}
+
+interface StreamLikeEvent {
+  type?: string;
+  toolName?: string;
+  message?: { role?: string; usage?: UsageLike; model?: string; responseModel?: string };
+  assistantMessageEvent?: {
+    type?: string;
+    delta?: string;
+    partial?: { role?: string; usage?: UsageLike; model?: string; responseModel?: string };
+  };
+}
+
+/**
+ * Feed one chunk of stdout from pi --mode json. Splits on newlines, buffers
+ * partial lines, and emits text deltas + milestone notices + usage updates.
+ * Returns nothing; the caller reads final usage via `streamedUsage()`.
+ */
+export class JsonEventStream {
+  private buffer = "";
+  private readonly emit: StreamEventEmitter;
+  private readonly accumulate: TokenUsage;
+  private sawAnyUsage = false;
+  private responseModel: string | undefined;
+  private turn = 0;
+  private inAssistantTurn = false;
+
+  constructor(emit: StreamEventEmitter) {
+    this.emit = emit;
+    this.accumulate = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0 };
+  }
+
+  /** Feed a raw stdout chunk (may contain partial JSON lines). */
+  feed(chunk: string): void {
+    this.buffer += chunk;
+    let nl: number;
+    while ((nl = this.buffer.indexOf("\n")) >= 0) {
+      const line = this.buffer.slice(0, nl);
+      this.buffer = this.buffer.slice(nl + 1);
+      this.processLine(line);
+    }
+  }
+
+  /** Flush any trailing partial line (call at end of stream). */
+  flush(): void {
+    if (this.buffer.trim()) this.processLine(this.buffer);
+    this.buffer = "";
+  }
+
+  /** Final accumulated token usage (undefined if no usage seen). */
+  usage(): StreamedUsage {
+    if (!this.sawAnyUsage) return {};
+    const result: StreamedUsage = { usage: this.accumulate };
+    if (this.responseModel) result.responseModel = this.responseModel;
+    return result;
+  }
+
+  private processLine(raw: string): void {
+    if (!raw.trim()) return;
+    let event: StreamLikeEvent;
+    try {
+      event = JSON.parse(raw);
+    } catch {
+      return; // unparseable lines are skipped gracefully
+    }
+    this.handle(event);
+  }
+
+  private handle(event: StreamLikeEvent): void {
+    const t = event.type;
+    // Accumulate usage from any message/turn/agent_end carrying it.
+    const usageSources: Array<{ usage?: UsageLike; model?: string; responseModel?: string }> = [];
+    if (event.message?.usage) usageSources.push(event.message);
+    if (event.assistantMessageEvent?.partial?.usage) usageSources.push(event.assistantMessageEvent.partial);
+    if (t === "agent_end" && Array.isArray((event as { messages?: unknown }).messages)) {
+      for (const m of (event as { messages: Array<{ usage?: UsageLike; responseModel?: string; model?: string }> }).messages) {
+        if (m?.usage) usageSources.push(m);
+      }
+    }
+    for (const s of usageSources) {
+      if (s.usage) {
+        accumulateUsage(this.accumulate, s.usage);
+        this.sawAnyUsage = true;
+      }
+      if (s.responseModel) this.responseModel = s.responseModel;
+      else if (s.model && !this.responseModel) this.responseModel = s.model;
+    }
+
+    // Text deltas -> forward to the human-readable terminal.
+    if (t === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+      const delta = event.assistantMessageEvent.delta;
+      if (typeof delta === "string" && delta) this.emit.onText(delta);
+    }
+
+    // Semantic milestones (B).
+    switch (t) {
+      case "agent_start":
+        this.emit.onMilestone("pi-review: review started\n");
+        break;
+      case "turn_start":
+        this.turn += 1;
+        this.inAssistantTurn = false;
+        if (this.turn > 1) this.emit.onMilestone(`pi-review: turn ${this.turn}\n`);
+        break;
+      case "message_start":
+        if (event.message?.role === "assistant") this.inAssistantTurn = true;
+        break;
+      case "tool_execution_start":
+        this.emit.onMilestone(`pi-review: tool ${event.toolName ?? "unknown"} started\n`);
+        break;
+      case "tool_execution_end":
+        this.emit.onMilestone(`pi-review: tool ${event.toolName ?? "unknown"} finished\n`);
+        break;
+      case "agent_end":
+        this.emit.onMilestone("pi-review: review finished\n");
+        break;
+    }
+  }
+}

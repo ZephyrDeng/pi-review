@@ -62,7 +62,19 @@ const verdict = process.env.FAKE_REVIEW_VERDICT;
 const findings = verdict === "request_changes"
   ? "### F1: Fix the gate\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes"
   : "No material findings.";
-process.stdout.write(\`## Verdict\\n\${verdict}\\n\\n## Summary\\n- Fixture.\\n\\n## Findings\\n\${findings}\\n\\n## Risks and Blind Spots\\nNone.\\n\\n## Open Questions\\nNone.\\n\`);
+const text = "## Verdict\\n" + verdict + "\\n\\n## Summary\\n- Fixture.\\n\\n## Findings\\n" + findings + "\\n\\n## Risks and Blind Spots\\nNone.\\n\\n## Open Questions\\nNone.\\n";
+function line(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
+line({ type: "session", version: 3, id: "s1" });
+line({ type: "agent_start" });
+line({ type: "turn_start" });
+line({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "review" }] } });
+line({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "review" }] } });
+line({ type: "message_start", message: { role: "assistant", content: [], model: "fake/model", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 } } });
+line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: text, partial: { role: "assistant" } } });
+line({ type: "message_update", assistantMessageEvent: { type: "text_end", content: text, partial: { role: "assistant" } } });
+line({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], model: "fake/model", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 }, stopReason: "stop" } });
+line({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text }], usage: { input: 100, output: 50, totalTokens: 150 } } });
+line({ type: "agent_end", messages: [{ role: "user", content: [{ type: "text", text: "review" }] }, { role: "assistant", content: [{ type: "text", text }], responseModel: "fake/model" }] });
 process.exit(Number(process.env.FAKE_REVIEW_EXIT ?? "0"));
 `);
   fs.chmodSync(fakePi, 0o755);

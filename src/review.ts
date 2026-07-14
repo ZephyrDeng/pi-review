@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { spawnSync } from "node:child_process";
 import type { ParsedArgs, ReviewMeta, ReviewRunResult } from "./types.js";
 import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./child-process.js";
@@ -8,7 +9,7 @@ import { loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
-import { extractFinalText, extractUsage } from "./json-events.js";
+import { extractFinalText, extractUsage, JsonEventStream } from "./json-events.js";
 import type { TokenUsage } from "./types.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
@@ -46,9 +47,11 @@ export function metaLinePrefix(childStdout: string, streamMode: boolean): string
   return childStdout.endsWith("\n") ? "" : "\n";
 }
 
-/** True when the final text must be printed after exit instead of having streamed live. */
-export function progressLogBuffersOutput(streamMode: boolean, hasProgressLog: boolean): boolean {
-  return !streamMode || hasProgressLog;
+/** True when the final text must be printed after exit instead of having streamed live.
+ * With --mode json streaming, text deltas are forwarded live in streaming mode;
+ * --progress-log no longer forces buffering (it only tees the raw event stream). */
+export function progressLogBuffersOutput(streamMode: boolean, _hasProgressLog: boolean): boolean {
+  return !streamMode;
 }
 
 export function childRuntimeError(child: Pick<ChildRunResult, "status" | "signal" | "error">): string | undefined {
@@ -77,8 +80,11 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
 
   const payload = splitPayload(parsed.payload);
   const prompt = buildPrompt(parsed.mode, preset, payload, stdinText);
-  const args: string[] = ["-p"];
-  if (parsed.progressLog) args.push("--mode", "json");
+  // Always run the child in --mode json so token usage and semantic milestones
+  // are available by default (no longer require --progress-log). The stream
+  // emitter forwards readable text deltas to the terminal so the human still
+  // sees the same live review prose.
+  const args: string[] = ["-p", "--mode", "json"];
   const systemPrompt = loadSystemPrompt(config.systemPromptFile);
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
 
@@ -124,16 +130,48 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
   }
 
   const startedAt = Date.now();
+
+  // In streaming mode the child always emits --mode json. A JsonEventStream
+  // forwards readable text deltas to stdout and semantic milestones to stderr
+  // while accumulating token usage; the same raw json lines also tee into the
+  // progress-log file when --progress-log is set.
+  let streamParser: JsonEventStream | undefined;
+  let streamUsage: TokenUsage | undefined;
+  const stdoutSink = parsed.stream
+    ? new Writable({
+        write(chunk, _enc, cb) {
+          const text = String(chunk);
+          if (progressStream) progressStream.write(text);
+          if (!streamParser) {
+            streamParser = new JsonEventStream({
+              onText: (c) => process.stdout.write(c),
+              onMilestone: (line) => process.stderr.write(line),
+            });
+          }
+          streamParser.feed(text);
+          cb();
+        },
+      })
+    : undefined;
+
   const spawnOpts = {
     cwd: process.cwd(),
     env: childEnv(config.piBin),
-    ...(progressStream ? { stdoutSink: progressStream } : {}),
+    ...(stdoutSink ? { stdoutSink } : {}),
   };
   const child = parsed.stream
     ? await spawnStreamingChild(config.piBin, args, spawnOpts)
     : spawnBufferedChild(config.piBin, args, spawnOpts);
   const durationMs = Date.now() - startedAt;
 
+  if (streamParser) {
+    streamParser.flush();
+    streamUsage = streamParser.usage().usage;
+  }
+  if (stdoutSink) {
+    // ensure newline separation after streamed text before the ASCII footer
+    if (child.stdout && !child.stdout.endsWith("\n")) process.stdout.write("\n");
+  }
   if (progressStream) {
     await new Promise<void>((resolve) => progressStream!.end(() => resolve()));
     if (progressStreamError) {
@@ -146,7 +184,16 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
   let extractedError: string | undefined;
   let extractedFatal = false;
   let extractedUsage: TokenUsage | undefined;
-  if (parsed.progressLog) {
+  if (parsed.stream) {
+    // Text was already forwarded live by the stream parser; derive final text
+    // and usage from the captured json stream.
+    extractedUsage = streamUsage ?? extractUsage(stdout).usage;
+    const extracted = extractFinalText(stdout);
+    stdout = extracted.text;
+    extractedError = extracted.error;
+    extractedFatal = Boolean(extracted.fatal);
+  } else {
+    // Buffered mode: parse the captured json stream for text + usage.
     extractedUsage = extractUsage(stdout).usage;
     const extracted = extractFinalText(stdout);
     stdout = extracted.text;
@@ -154,8 +201,9 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     extractedFatal = Boolean(extracted.fatal);
   }
 
-  const bufferedPrint = progressLogBuffersOutput(parsed.stream, Boolean(parsed.progressLog));
-  if (bufferedPrint && stdout) {
+  // Streaming mode already forwarded text deltas live via the stream parser,
+  // so we never reprint. Buffered mode prints the extracted final text once.
+  if (!parsed.stream && stdout) {
     process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
   }
   if (!parsed.stream && stderr) {
@@ -199,7 +247,9 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     sessionHandle: sessionHandle || undefined,
   };
 
-  const metaPrefix = metaLinePrefix(stdout, !bufferedPrint);
+  // In streaming mode text was forwarded live; the ASCII footer starts on its
+  // own line. In buffered mode the final text was just printed above.
+  const metaPrefix = metaLinePrefix(stdout, !parsed.stream);
   if (metaPrefix) process.stdout.write(metaPrefix);
   process.stdout.write(`${formatReviewMetaAscii(meta)}\n`);
   const metaJsonDest = process.env.PI_REVIEW_META_STDOUT?.toLowerCase();

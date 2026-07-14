@@ -45,15 +45,10 @@ When resolving this fallback, use the actual directory that contains this `SKILL
 
 ## Streaming vs agent hosts (Claude Code / Codex)
 
-- `pi-review` **streams** child `pi` stdout/stderr to the process terminal by default (`--no-stream` buffers until exit). That helps **Pi** and real terminals, not most agent chat UIs.
-- **Claude Code, Cursor, Codex**, and similar hosts **buffer tool stdout** until the bash command exits, so the chat shows the review **all at once** even though the CLI is streaming. That is expected—not a misconfiguration.
-- Default `text` mode also produces **no stdout** during tool-use/thinking (only the final answer), so even a local terminal stays quiet for most of a multi-minute review.
-- **Recommended for Claude Code / Codex (live progress):** always use `--progress-log <path>` unless the user explicitly wants a silent blocking wait:
-  1. Pick a writable path (e.g. `/tmp/pi-review-<id>.jsonl`).
-  2. Start `pi-review --progress-log <path> ...` in a **background** or **async** shell invocation (not a blocking foreground Bash that you wait on with no updates).
-  3. While the child runs, **tail** the log and summarize milestones to the user (filter out `message_update` / `tool_execution_update` unless they asked for token-level detail).
-  4. When the process exits, show the Markdown body and ASCII `── pi-review` footer from the command result (or re-read the final output as the skill’s step 4 describes).
-- Fall back to a **local terminal** with default streaming only if the host cannot run background commands or tail a file.
+- `pi-review` always runs the child in `--mode json` internally. In streaming mode it forwards **readable text deltas** to stdout live and writes **semantic milestone notices** (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`) to **stderr**. Token usage (`input`/`output`/`cache`/`reasoning`) is accumulated by default — no `--progress-log` required to see it in the ASCII footer or `PI_REVIEW_META_JSON`.
+- `--progress-log <path>` is now an **optional** convenience: it tees the raw `--mode json` event stream to a file for external observation (tail, debugging). It no longer gates token visibility.
+- **Claude Code, Cursor, Codex** and similar hosts still buffer a Bash tool's stdout until the command exits. The semantic milestone notices on stderr + the final Markdown + ASCII footer on stdout give you progress and the result without needing to tail a file. If you still want the full event log for fine-grained debugging, add `--progress-log <path>` and tail it.
+- **Pi interactive** sessions stream text deltas live to the terminal by default — no `--no-stream` or `--progress-log` needed.
 
 ## Review status (no slash command)
 
