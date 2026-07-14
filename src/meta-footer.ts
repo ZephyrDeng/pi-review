@@ -37,9 +37,9 @@ export function formatTokens(n: number): string {
   return `${value.toFixed(digits)}${units[unitIndex]}`;
 }
 
-/** Format a token-usage breakdown as "in/out/cache/reason" for compact display. */
+/** Format a token-usage breakdown as "in X · out Y · cache Z · reason W" for compact display. */
 export function formatUsage(usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }): string {
-  return `${formatTokens(usage.input)}in / ${formatTokens(usage.output)}out / ${formatTokens(usage.cacheRead + usage.cacheWrite)}cache / ${formatTokens(usage.reasoning)}reason`;
+  return `in ${formatTokens(usage.input)} · out ${formatTokens(usage.output)} · cache ${formatTokens(usage.cacheRead + usage.cacheWrite)} · reason ${formatTokens(usage.reasoning)}`;
 }
 
 function padLabel(label: string, width: number): string {

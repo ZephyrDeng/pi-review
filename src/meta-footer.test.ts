@@ -65,15 +65,15 @@ test("formatTokens scales with K/M/B units", () => {
 
 test("formatUsage renders in/out/cache/reason breakdown", () => {
   const text = formatUsage({ input: 1024, output: 512, cacheRead: 2048, cacheWrite: 0, reasoning: 100 });
-  assert.match(text, /1\.0Kin/);
-  assert.match(text, /512out/);
-  assert.match(text, /2\.0Kcache/);
-  assert.match(text, /100reason/);
+  assert.match(text, /in 1\.0K/);
+  assert.match(text, /out 512/);
+  assert.match(text, /cache 2\.0K/);
+  assert.match(text, /reason 100/);
 });
 
 test("ASCII footer shows thinking and tokens when present", () => {
   const meta = { ...sample, thinking: "xhigh", usage: { input: 1024, output: 512, cacheRead: 2048, cacheWrite: 0, reasoning: 0, totalTokens: 3584 } };
   const ascii = formatReviewMetaAscii(meta);
   assert.match(ascii, /Thinking\s+xhigh/);
-  assert.match(ascii, /Tokens\s+.*in.*out.*cache/);
+  assert.match(ascii, /Tokens\s+in .*out .*cache/);
 });

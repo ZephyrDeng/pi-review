@@ -201,7 +201,7 @@ The CLI appends a readable ASCII footer on **stdout**:
   Findings    1 actionable / 1 total
   Model       provider/model
   Thinking    xhigh
-  Tokens      17.6Kin / 512out / 2.0Kcache / 0reason
+  Tokens      in 17.6K · out 512 · cache 2.0K · reason 0
   Duration    42.3s
 ──────────────────────────────────────────
 ```
