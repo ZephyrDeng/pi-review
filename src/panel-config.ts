@@ -163,9 +163,9 @@ export function resolveReviewerModelThinking(
   shared: { model?: string; thinking?: string } = {},
 ): { model?: string; thinking?: string } {
   const raw = reviewer.model ?? shared.model;
-  const fromRaw = raw ? splitModelThinking(raw) : {};
-  const fromReviewerModel = reviewer.model ? splitModelThinking(reviewer.model) : {};
-  const fromSharedModel = !reviewer.model && shared.model ? splitModelThinking(shared.model) : {};
+  const fromRaw: { model?: string; thinking?: string } = raw ? splitModelThinking(raw) : {};
+  const fromReviewerModel: { model?: string; thinking?: string } = reviewer.model ? splitModelThinking(reviewer.model) : {};
+  const fromSharedModel: { model?: string; thinking?: string } = !reviewer.model && shared.model ? splitModelThinking(shared.model) : {};
   const thinking =
     reviewer.thinking ??
     fromReviewerModel.thinking ??

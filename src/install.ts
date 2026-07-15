@@ -1,9 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { installSkill } from "./skill.js";
+import { DEFAULT_AGENT_SKILL_ARGS, installSkill } from "./skill.js";
 
 const PI_PACKAGE = "npm:@zephyrdeng/pi-review";
-
-const DEFAULT_AGENT_ARGS = ["-y", "--agent", "claude-code", "codex", "cursor"];
 
 function hasPiCli(): boolean {
   const result = spawnSync("pi", ["--version"], {
@@ -56,7 +54,7 @@ export function runInstall(options: InstallOptions): never {
   }
 
   if (options.agents) {
-    const args = options.agentArgs.length > 0 ? options.agentArgs : DEFAULT_AGENT_ARGS;
+    const args = options.agentArgs.length > 0 ? options.agentArgs : DEFAULT_AGENT_SKILL_ARGS;
     process.stdout.write(`Running: pi-review install-skill ${args.join(" ")}\n`);
     installSkill(args);
   }

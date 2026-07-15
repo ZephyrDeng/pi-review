@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { runUpdateSkill } from "./skill.js";
 
 const PKG_NAME = "@zephyrdeng/pi-review";
 
 function getCurrentVersion(): string {
   const require = createRequire(import.meta.url);
-  const pkg = require("../package.json");
+  const pkg = require("../package.json") as { version: string };
   return pkg.version;
 }
 
@@ -27,6 +28,22 @@ function box(lines: string[]): string {
   return `${top}\n${empty}\n${body}\n${empty}\n${bot}\n`;
 }
 
+function refreshSkill(): boolean {
+  const skill = runUpdateSkill();
+  if (!skill.ok) {
+    process.stderr.write(
+      box([
+        "Skill refresh failed.",
+        "",
+        "Retry with:",
+        "  pi-review install-skill",
+      ]),
+    );
+    return false;
+  }
+  return true;
+}
+
 export function runUpdate(): void {
   const current = getCurrentVersion();
 
@@ -36,39 +53,64 @@ export function runUpdate(): void {
     process.exit(1);
   }
 
+  let packageLine: string;
   if (current === latest) {
-    process.stdout.write(box([
-      `pi-review v${current}`,
-      "",
-      "Already up to date ✓",
-    ]));
-    return;
+    packageLine = `Package already up to date (v${current})`;
+    process.stdout.write(
+      box([
+        `pi-review v${current}`,
+        "",
+        "Package already up to date ✓",
+        "Refreshing agent skill...",
+      ]),
+    );
+  } else {
+    process.stdout.write(
+      box([
+        `Update available: ${current} → ${latest}`,
+        "",
+        "Updating package...",
+      ]),
+    );
+
+    const install = spawnSync("npm", ["install", "-g", `${PKG_NAME}@latest`], {
+      encoding: "utf8",
+      stdio: "inherit",
+      timeout: 60_000,
+    });
+
+    if (install.status !== 0) {
+      process.stderr.write(
+        box([
+          "Update failed. Run manually:",
+          "",
+          `npm install -g ${PKG_NAME}@latest`,
+        ]),
+      );
+      process.exit(1);
+    }
+
+    packageLine = `Package updated: ${current} → ${latest}`;
+    process.stdout.write(
+      box([
+        packageLine,
+        "",
+        "Refreshing agent skill...",
+      ]),
+    );
   }
 
-  process.stdout.write(box([
-    `Update available: ${current} → ${latest}`,
-    "",
-    "Updating...",
-  ]));
+  // skills CLI pulls latest skill content from the source repo; the direct
+  // fallback copies from this package tree (refreshed on disk after npm -g).
+  const skillOk = refreshSkill();
 
-  const install = spawnSync("npm", ["install", "-g", `${PKG_NAME}@latest`], {
-    encoding: "utf8",
-    stdio: "inherit",
-    timeout: 60_000,
-  });
-
-  if (install.status !== 0) {
-    process.stderr.write(box([
-      "Update failed. Run manually:",
+  process.stdout.write(
+    box([
+      packageLine,
+      skillOk ? "Skill refreshed ✓" : "Skill refresh failed",
       "",
-      `npm install -g ${PKG_NAME}@latest`,
-    ]));
-    process.exit(1);
-  }
-
-  process.stdout.write(box([
-    `Updated: ${current} → ${latest}`,
-    "",
-    "Done ✓",
-  ]));
+      skillOk ? "Done ✓" : "Package ok; skill needs manual install-skill",
+    ]),
+  );
+  process.exit(skillOk ? 0 : 1);
 }

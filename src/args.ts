@@ -7,7 +7,7 @@ export function usage(exitCode = 0): never {
   pi-review models [search]
   pi-review [review] [options] -- <@files|text...>
   pi-review loop [options] -- <@files|text...>
-  pi-review update                      Update to the latest version
+  pi-review update                      Update package + agent skill content
   pi-review install [options]           Pi package + agent skills (one-shot)
   pi-review install-skill [options]     Install skill to AI agents only
   pi-review uninstall-skill [options]  Remove skill from AI agents

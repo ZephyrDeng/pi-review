@@ -79,6 +79,14 @@ To remove:
 pi-review uninstall-skill
 ```
 
+### Update package + skill
+
+```bash
+pi-review update
+```
+
+Updates the global npm package when a newer version is available, then refreshes the installed agent skill content (via `skills update pi-review`, with a reinstall / Claude direct-copy fallback).
+
 ### From source
 
 ```bash

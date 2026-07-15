@@ -35,6 +35,14 @@ npx @zephyrdeng/pi-review install-skill
 
 `install` 会在有 Pi CLI 时执行 `pi install npm:@zephyrdeng/pi-review`，再通过 [skills CLI](https://www.npmjs.com/package/skills) 非交互安装 agent skill。只用 Pi 时**不要**再跑 `install-skill`，避免与 `pi.skills` 重复冲突。可用 `--pi-only` / `--agents-only` 拆分。
 
+升级全局包并同步 agent skill 内容：
+
+```bash
+pi-review update
+```
+
+即使包已是最新，也会刷新 skill（`skills update pi-review`；无 skills CLI 时回退到包内 skill 直拷）。
+
 ## 快速开始
 
 ```bash
