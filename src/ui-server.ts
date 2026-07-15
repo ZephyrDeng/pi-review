@@ -114,7 +114,7 @@ export interface DashboardServerContext {
   eventsPath: string;
   html: string;
   staticAssets: Record<string, DashboardAsset>;
-  /** Invoked when the page POSTs /run/:token/shutdown (countdown finished or tab closed after completion). */
+  /** Invoked when the page POSTs /run/:token/shutdown (fired when the closer countdown finishes). */
   onShutdown?: () => void;
   /** Test-only: shrink the tail-poll interval below the 200ms production default. */
   pollIntervalMs?: number;

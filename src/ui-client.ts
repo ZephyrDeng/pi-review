@@ -509,7 +509,7 @@ class Closer {
     if (this.cancelled || !this.started) return;
     this.cancelled = true;
     if (this.timer !== undefined) clearInterval(this.timer);
-    if (this.text) this.text.textContent = "Staying open · closing this tab stops the server";
+    if (this.text) this.text.textContent = "Staying open · you can close this tab any time";
     const root = this.root;
     if (root) {
       root.querySelector("#closer-ring")?.remove();
@@ -616,10 +616,6 @@ function bootstrap(): void {
   setInterval(() => {
     if (state.phase === "running" || state.phase === "aggregating") render();
   }, 1000);
-
-  window.addEventListener("pagehide", () => {
-    if (state.phase === "completed") closer.requestShutdown();
-  });
 
   const source = new EventSource(eventsUrl);
   source.onopen = () => {
