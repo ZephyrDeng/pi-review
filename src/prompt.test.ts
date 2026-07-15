@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
-import { buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
-import type { PanelReviewerSpec, ReviewPreset, SourceFinding } from "./types.js";
+import { buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt, normalizePayloadRefs, splitPayload } from "./prompt.js";
+import type { PanelReviewerSpec, SourceFinding } from "./types.js";
 
 test("review prompt requests the parseable finding contract", () => {
   const prompt = buildPrompt(
@@ -33,6 +36,23 @@ test("reviewer prompt injects stable reviewer identity and the shared contract",
   assert.match(prompt, /cannot see other reviewers' findings/);
   assert.match(prompt, /### F1: <summary>/);
   assert.match(prompt, /## Verdict/);
+});
+
+test("directory @refs stay as tool targets and are not attached as Pi file arguments", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-refs-"));
+  const filePath = path.join(tempDir, "note.ts");
+  fs.writeFileSync(filePath, "export {}\n");
+  const dirRef = `@${tempDir}`;
+  const fileRef = `@${filePath}`;
+  const normalized = normalizePayloadRefs(splitPayload([dirRef, fileRef, "focus on races"]));
+  assert.deepEqual(normalized.attachableFileRefs, [fileRef]);
+  assert.deepEqual(normalized.pathTargets, [tempDir]);
+  assert.equal(normalized.userText, "focus on races");
+  const prompt = buildPrompt("code", { description: "code", instructions: "Review the code." }, normalized, "");
+  assert.match(prompt, /Review these path targets with read-only tools/);
+  assert.match(prompt, new RegExp(tempDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(prompt, /attached file reference/);
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 test("adjudicator prompt enforces aggregation-only constraints and the strict clustering contract", () => {

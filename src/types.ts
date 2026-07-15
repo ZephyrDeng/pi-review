@@ -93,6 +93,10 @@ export interface ReviewRunResult {
 export interface SplitPayload {
   fileRefs: string[];
   userText: string;
+  /** Absolute/relative path targets that must be inspected with tools, not attached as Pi files. */
+  pathTargets?: string[];
+  /** File refs safe to pass as Pi `@file` attachments (never directories). */
+  attachableFileRefs?: string[];
 }
 
 // ---------------------------------------------------------------------------

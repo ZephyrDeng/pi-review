@@ -44,6 +44,8 @@ export function spawnBufferedChild(
   };
 }
 
+export const DEFAULT_ABORT_KILL_GRACE_MS = 2_000;
+
 export async function spawnStreamingChild(
   command: string,
   argv: string[],
@@ -51,11 +53,14 @@ export async function spawnStreamingChild(
     stdoutSink?: NodeJS.WritableStream;
     stderrSink?: NodeJS.WritableStream;
     maxCaptureChars?: number;
+    /** After SIGTERM, escalate to SIGKILL if the process is still alive. */
+    abortKillGraceMs?: number;
   },
 ): Promise<ChildRunResult> {
   const stdoutSink = options.stdoutSink ?? process.stdout;
   const stderrSink = options.stderrSink ?? process.stderr;
   const maxCaptureChars = options.maxCaptureChars ?? DEFAULT_STREAM_CAPTURE_LIMIT;
+  const abortKillGraceMs = options.abortKillGraceMs ?? DEFAULT_ABORT_KILL_GRACE_MS;
 
   return new Promise((resolve) => {
     const spawnOpts: SpawnOptions = {
@@ -70,27 +75,43 @@ export async function spawnStreamingChild(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let killTimer: NodeJS.Timeout | undefined;
 
     const finish = (result: ChildRunResult) => {
       if (settled) return;
       settled = true;
+      if (killTimer) clearTimeout(killTimer);
       options.signal?.removeEventListener("abort", abort);
       resolve(result);
     };
 
-    const abort = () => {
-      if (child.pid === undefined || child.killed) return;
+    const sendSignal = (signal: NodeJS.Signals) => {
+      if (child.pid === undefined) return;
       try {
         if (options.processGroup && process.platform === "win32") {
           spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
         } else if (options.processGroup) {
-          process.kill(-child.pid, "SIGTERM");
+          process.kill(-child.pid, signal);
         } else {
-          child.kill("SIGTERM");
+          child.kill(signal);
         }
       } catch {
-        child.kill("SIGTERM");
+        try {
+          child.kill(signal);
+        } catch {
+          // Process already gone.
+        }
       }
+    };
+
+    const abort = () => {
+      if (child.pid === undefined || settled) return;
+      sendSignal("SIGTERM");
+      if (process.platform === "win32") return;
+      killTimer = setTimeout(() => {
+        if (!settled) sendSignal("SIGKILL");
+      }, Math.max(0, abortKillGraceMs));
+      killTimer.unref?.();
     };
 
     if (options.signal?.aborted) abort();

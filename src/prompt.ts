@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { PanelReviewerSpec, ReviewPreset, SplitPayload } from "./types.js";
 import { VERDICTS } from "./types.js";
 import type { AdjudicationCandidate } from "./matcher.js";
@@ -13,16 +15,23 @@ function contractSections(mode: string, preset: ReviewPreset): string[] {
 
 function targetSections(payload: SplitPayload, stdinText: string): string[] {
   const sections: string[] = [];
+  const attachable = payload.attachableFileRefs ?? payload.fileRefs;
+  const pathTargets = payload.pathTargets ?? [];
   if (payload.userText) {
     sections.push(`<user-request>\n${payload.userText}\n</user-request>`);
   }
   if (stdinText) {
     sections.push(`<stdin>\n${stdinText}\n</stdin>`);
   }
-  if (payload.fileRefs.length > 0) {
-    sections.push(`Review the attached file reference(s): ${payload.fileRefs.join(" ")}`);
+  if (pathTargets.length > 0) {
+    sections.push(
+      `Review these path targets with read-only tools (directories are not attached as files): ${pathTargets.join(" ")}`,
+    );
   }
-  if (!payload.userText && !stdinText && payload.fileRefs.length === 0) {
+  if (attachable.length > 0) {
+    sections.push(`Review the attached file reference(s): ${attachable.join(" ")}`);
+  }
+  if (!payload.userText && !stdinText && attachable.length === 0 && pathTargets.length === 0) {
     sections.push("No explicit target was provided. Return blocked and explain what input is required.");
   }
   return sections;
@@ -36,6 +45,30 @@ export function splitPayload(payload: string[]): SplitPayload {
     else textParts.push(item);
   }
   return { fileRefs, userText: textParts.join(" ").trim() };
+}
+
+/** Classify @refs so directories become tool path targets instead of Pi file attachments. */
+export function normalizePayloadRefs(payload: SplitPayload, cwd = process.cwd()): SplitPayload {
+  const attachableFileRefs: string[] = [];
+  const pathTargets: string[] = [];
+  for (const ref of payload.fileRefs) {
+    const raw = ref.startsWith("@") ? ref.slice(1) : ref;
+    const resolved = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
+    try {
+      if (fs.statSync(resolved).isDirectory()) {
+        pathTargets.push(raw);
+        continue;
+      }
+    } catch {
+      // Missing paths still go as file refs so Pi/reviewer can report them.
+    }
+    attachableFileRefs.push(ref);
+  }
+  return {
+    ...payload,
+    attachableFileRefs,
+    pathTargets,
+  };
 }
 
 export function buildPrompt(mode: string, preset: ReviewPreset, payload: SplitPayload, stdinText: string): string {

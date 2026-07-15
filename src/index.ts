@@ -2,9 +2,9 @@ export { ArgsParseError, DEFAULT_MAX_ROUNDS, isPanelActive, parseArgs, parseRevi
 export { resolveConfig } from "./config.js";
 export type { Config } from "./config.js";
 export { loadPresets, loadPanelPresets, loadSystemPrompt } from "./presets.js";
-export { splitPayload, buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
+export { splitPayload, normalizePayloadRefs, buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 export { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.js";
-export { runPanelReview, runPanelReviewOnce, emitPanelFooter } from "./panel.js";
+export { runPanelReview, runPanelReviewOnce, emitPanelFooter, shouldPreserveSubmissionOnAbort } from "./panel.js";
 export { spawnStreamingChild } from "./child-process.js";
 export { createPanelViewState, reducePanelEvent } from "./panel-view.js";
 export type { PanelViewState, PanelReviewerView, PanelPhase, ReviewerViewStatus } from "./panel-view.js";

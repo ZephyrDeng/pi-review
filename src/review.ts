@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import type { ParsedArgs, ReviewMeta, ReviewRunResult } from "./types.js";
 import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./child-process.js";
 import { loadPresets, loadSystemPrompt } from "./presets.js";
-import { splitPayload, buildPrompt } from "./prompt.js";
+import { splitPayload, normalizePayloadRefs, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
 import { extractFinalText, extractUsage, JsonEventStream } from "./json-events.js";
@@ -78,7 +78,7 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     fail(`unknown review mode: ${parsed.mode}\nAvailable modes: ${Object.keys(presets).join(", ")}`);
   }
 
-  const payload = splitPayload(parsed.payload);
+  const payload = normalizePayloadRefs(splitPayload(parsed.payload));
   const prompt = buildPrompt(parsed.mode, preset, payload, stdinText);
   // Always run the child in --mode json so token usage and semantic milestones
   // are available by default (no longer require --progress-log). The stream
@@ -113,7 +113,7 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     args.push("--no-session");
   }
 
-  args.push(...payload.fileRefs, prompt);
+  args.push(...(payload.attachableFileRefs ?? payload.fileRefs), prompt);
 
   let progressStream: fs.WriteStream | undefined;
   let progressStreamError: Error | undefined;

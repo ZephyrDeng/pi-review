@@ -76,3 +76,26 @@ test("spawnStreamingChild terminates an opted-in process group when aborted", as
   const child = await result;
   assert.equal(child.signal, "SIGTERM");
 });
+
+test("spawnStreamingChild escalates ignored SIGTERM to SIGKILL after the abort grace period", async () => {
+  const controller = new AbortController();
+  const { stream, chunks } = collectSink();
+  // Register the ignore handler first, then stay alive until SIGKILL.
+  const script = [
+    "process.on('SIGTERM', () => { process.stdout.write('ignored\\n'); });",
+    "process.stdout.write('ready\\n');",
+    "setInterval(() => {}, 1000);",
+  ].join("");
+  const result = spawnStreamingChild(process.execPath, ["-e", script], {
+    stdoutSink: stream,
+    stderrSink: stream,
+    signal: controller.signal,
+    processGroup: false,
+    abortKillGraceMs: 50,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  controller.abort();
+  const child = await result;
+  assert.equal(child.signal, "SIGKILL");
+  assert.match(chunks.join("") + child.stdout, /ready/);
+});

@@ -145,6 +145,8 @@ function piHostRules(): string {
     "Follow the pi-review skill.",
     "Host: Pi interactive session (/rv).",
     "For new review runs, call the pi_review custom tool. It launches pi-review in isolated reviewer sessions and renders panel progress live.",
+    "Pass directory targets as text (e.g. @src). pi-review keeps directory paths as tool targets and only attaches real files to the child Pi process.",
+    "Do not invent long multi-file target lists unless the user asked; prefer the user's target as given.",
     "CLI defaults: stream child output live. Do NOT add --no-stream or --progress-log unless the user explicitly asked.",
     "Do not edit, patch, commit, or implement findings unless the user asks separately.",
     "For pi_review panel runs, report the tool's rendered panel result and status. For CLI fallback and --continue runs, show the ASCII pi-review footer (lines starting with ── pi-review). Do not paste PI_REVIEW_META_JSON to the user; use Session from a CLI footer for /rv --continue.",

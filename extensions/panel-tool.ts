@@ -113,7 +113,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
     description: "Run an isolated read-only pi-review panel and render each reviewer live.",
     renderShell: "self",
     parameters: Type.Object({
-      target: Type.String({ description: "Review target, such as @src or a code-review brief." }),
+      target: Type.String({ description: "Review target as given by the user, such as @src, @src/foo.ts, or a free-text brief. Directories stay tool path targets; only real files are attached." }),
       mode: Type.Optional(Type.String({ description: "Review mode; defaults to code." })),
       panel: Type.Optional(Type.String({ description: "Named panel preset; defaults to code-experts." })),
       model: Type.Optional(Type.String({ description: "Optional reviewer model." })),

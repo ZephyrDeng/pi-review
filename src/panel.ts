@@ -19,7 +19,7 @@ export { PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { spawnStreamingChild } from "./child-process.js";
 import { childEnv, childRuntimeError, readReviewStdin } from "./review.js";
 import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
-import { splitPayload, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
+import { splitPayload, normalizePayloadRefs, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
 import { extractFinalText, JsonEventStream } from "./json-events.js";
@@ -336,6 +336,11 @@ function cancelledSubmission(
   };
 }
 
+/** Keep finished reviewer results on abort; only rewrite interrupted/runtime-cancelled work. */
+export function shouldPreserveSubmissionOnAbort(submission: ReviewerSubmission): boolean {
+  return submission.result.verdictSource !== "runtime_error";
+}
+
 /** Run one complete panel evaluation and return the aggregate result (no exit). */
 export async function runPanelReviewOnce(
   parsed: ParsedArgs,
@@ -358,7 +363,7 @@ export async function runPanelReviewOnce(
     if (error instanceof Error) fail(error.message);
     throw error;
   }
-  const payload = splitPayload(parsed.payload);
+  const payload = normalizePayloadRefs(splitPayload(parsed.payload));
   const emit = createReviewEventEmitter(randomUUID(), (event) => {
     if (parsed.outputFormat === "events-jsonl") process.stdout.write(`${JSON.stringify(event)}\n`);
     options.onEvent?.(event);
@@ -391,7 +396,7 @@ export async function runPanelReviewOnce(
         parsed,
         preset,
         prompt,
-        fileRefs: payload.fileRefs,
+        fileRefs: payload.attachableFileRefs ?? payload.fileRefs,
         reviewer,
         progressLog,
         systemPrompt,
@@ -401,6 +406,10 @@ export async function runPanelReviewOnce(
       });
       const completed = { ...submission, durationMs: Date.now() - reviewerStart };
       if (options.signal?.aborted) {
+        if (shouldPreserveSubmissionOnAbort(completed)) {
+          emit("reviewer.completed", { reviewerId: reviewer.id, submission: completed });
+          return completed;
+        }
         emit("reviewer.cancelled", { reviewerId: reviewer.id, message: "panel review cancelled" });
         return cancelledSubmission(reviewer, "panel review cancelled", completed.durationMs, completed.usage);
       } else if (completed.result.verdictSource === "runtime_error") {
