@@ -75,6 +75,35 @@ describe("parseRvArgs / validateRvParsed", () => {
     assert.doesNotMatch(prompt, /PI_REVIEW_META:/);
   });
 
+  it("new /rv runs pass the user target as natural-language text without expanding paths", () => {
+    const prompt = buildRvOrchestrationPrompt(parseRvArgs("@src"));
+    assert.match(prompt, /Call pi_review with target="@src"/);
+    assert.match(prompt, /natural-language review request/);
+    assert.match(prompt, /Do not expand directory targets into multi-file lists/);
+    assert.match(prompt, /Follow the pi-review skill for remaining strategy matching/);
+    assert.match(prompt, /Slash commands select strategy only/);
+    assert.doesNotMatch(prompt, /@src\/panel\.ts|@src\/json-events\.ts/);
+  });
+
+  it("/rv-loop selects the loop strategy while keeping the target as natural language", () => {
+    const parsed = parseRvArgs("@src", "loop");
+    assert.equal(parsed.strategy, "loop");
+    assert.equal(parsed.target, "@src");
+    assert.deepEqual(buildPiReviewArgv(parsed, "@src"), ["pi-review", "loop", "--", "@src"]);
+    const prompt = buildRvOrchestrationPrompt(parsed);
+    assert.match(prompt, /Strategy: loop closeout/);
+    assert.match(prompt, /Execute:\npi-review loop -- @src/);
+    assert.doesNotMatch(prompt, /Call pi_review with target/);
+  });
+
+  it("/rv-models selects the models strategy", () => {
+    const parsed = parseRvArgs("", "models");
+    assert.equal(parsed.strategy, "models");
+    assert.equal(parsed.modelsOnly, true);
+    const prompt = buildRvOrchestrationPrompt(parsed);
+    assert.match(prompt, /Execute: pi-review models/);
+  });
+
   it("continuations retain the session-aware CLI path", () => {
     const prompt = buildRvOrchestrationPrompt(parseRvArgs("--continue /tmp/review.jsonl @src/foo.ts"));
     assert.match(prompt, /Execute:\npi-review --continue \/tmp\/review\.jsonl -- @src\/foo\.ts/);

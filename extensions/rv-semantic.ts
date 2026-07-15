@@ -77,7 +77,10 @@ export function mergeSemanticIntoParsed(parsed: RvParsed, apply: SemanticApply):
   const out = { ...parsed };
   if (apply.mode) out.mode = apply.mode;
   if (apply.keepSession) out.keepSession = true;
-  if (apply.modelsOnly) out.modelsOnly = true;
+  if (apply.modelsOnly) {
+    out.modelsOnly = true;
+    out.strategy = "models";
+  }
   if (apply.noStream) out.noStream = true;
   return out;
 }

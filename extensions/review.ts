@@ -9,6 +9,7 @@ import {
   parseRvArgs,
   RV_COMPLETIONS,
   validateRvParsed,
+  type RvStrategy,
 } from "./rv-prompts.js";
 import { registerPanelReviewTool } from "./panel-tool.js";
 
@@ -91,45 +92,64 @@ export default function piReviewExtension(pi: ExtensionAPI) {
     }
   }
 
+  function argumentCompletions(prefix: string): ReturnType<typeof buildRvCompletions> {
+    if (capturedModels && capturedModels.length > 0) {
+      const dynamic = buildRvCompletions(prefix, {
+        models: capturedModels,
+        primaryProvider: capturedPrimaryProvider,
+        locale: capturedLocale,
+      });
+      if (dynamic && dynamic.length) return dynamic;
+    }
+    const filtered = RV_COMPLETIONS.filter((item) => item.value.startsWith(prefix));
+    return filtered.length
+      ? filtered.map(({ value, hint }) => ({ value, label: value, description: hint }))
+      : null;
+  }
+
+  function handleRvCommand(strategy: RvStrategy, rawArgs: string, ctx: { ui: { notify: (message: string, level?: "warning" | "info" | "error") => void }; sessionManager?: Parameters<typeof sampleSessionText>[0] }): void {
+    const trimmed = rawArgs.trim();
+    if (strategy !== "models" && !trimmed) {
+      ctx.ui.notify(
+        strategy === "loop"
+          ? "/rv-loop needs a natural-language target. Try: /rv-loop @src"
+          : "/rv needs a natural-language target or `models`. Try: /rv @src | /rv-models",
+        "warning",
+      );
+      return;
+    }
+
+    const parsed = parseRvArgs(trimmed, strategy);
+    const validation = validateRvParsed(parsed);
+    if (!validation.ok) {
+      ctx.ui.notify(validation.message, "warning");
+      return;
+    }
+
+    if (!parsed.modelsOnly && !parsed.target && !parsed.continueHandle) {
+      ctx.ui.notify("/rv needs a natural-language target, --continue <handle>, or /rv-models.", "warning");
+      return;
+    }
+
+    pi.sendUserMessage(buildRvOrchestrationPrompt(parsed, localeForHandler(ctx)));
+  }
+
   pi.registerCommand("rv", {
     description:
-      "Delegate pi-review to the agent. Usage: /rv [--mode plan|challenge] [--model id] [--thinking level] [--keep-session] [--no-stream] @target | /rv --continue <handle> [opts] [text] | models",
-    getArgumentCompletions: (prefix): ReturnType<typeof buildRvCompletions> => {
-      // Try dynamic completion first (models + thinking + scene templates).
-      if (capturedModels && capturedModels.length > 0) {
-        const dynamic = buildRvCompletions(prefix, {
-          models: capturedModels,
-          primaryProvider: capturedPrimaryProvider,
-          locale: capturedLocale,
-        });
-        if (dynamic && dynamic.length) return dynamic;
-      }
-      // Graceful fallback to static hint list when registry is unavailable.
-      const filtered = RV_COMPLETIONS.filter((item) => item.value.startsWith(prefix));
-      return filtered.length
-        ? filtered.map(({ value, hint }) => ({ value, label: value, description: hint }))
-        : null;
-    },
-    handler: async (rawArgs, ctx) => {
-      const trimmed = rawArgs.trim();
-      if (!trimmed) {
-        ctx.ui.notify("/rv needs a target or `models`. Try: /rv @path or /rv models", "warning");
-        return;
-      }
+      "Panel review. Usage: /rv [--mode plan|challenge] [--model id] [--thinking level] [--keep-session] <natural-language target> | /rv --continue <handle> [opts] [text] | /rv models",
+    getArgumentCompletions: argumentCompletions,
+    handler: async (rawArgs, ctx) => handleRvCommand("panel", rawArgs, ctx),
+  });
 
-      const parsed = parseRvArgs(trimmed);
-      const validation = validateRvParsed(parsed);
-      if (!validation.ok) {
-        ctx.ui.notify(validation.message, "warning");
-        return;
-      }
+  pi.registerCommand("rv-loop", {
+    description:
+      "Loop closeout review. Usage: /rv-loop [--mode plan|challenge] [--model id] [--max-rounds n] <natural-language target>",
+    getArgumentCompletions: argumentCompletions,
+    handler: async (rawArgs, ctx) => handleRvCommand("loop", rawArgs, ctx),
+  });
 
-      if (!parsed.modelsOnly && !parsed.target && !parsed.continueHandle) {
-        ctx.ui.notify("/rv needs a target, --continue <handle>, or `models`.", "warning");
-        return;
-      }
-
-      pi.sendUserMessage(buildRvOrchestrationPrompt(parsed, localeForHandler(ctx)));
-    },
+  pi.registerCommand("rv-models", {
+    description: "List pi-review models. Usage: /rv-models",
+    handler: async (_rawArgs, ctx) => handleRvCommand("models", "", ctx),
   });
 }

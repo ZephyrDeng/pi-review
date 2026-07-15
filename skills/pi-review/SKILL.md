@@ -38,10 +38,25 @@ When resolving this fallback, use the actual directory that contains this `SKILL
 | **Claude Code, Codex, Cursor**, and similar AI agents | **Default: `--progress-log <path>` + background run + tail** (see below). Do **not** rely on foreground Bash stdout for “streaming” — the tool buffers until exit. |
 | Scripts / CI | Foreground is fine; use `--no-stream` only when you must buffer until exit. |
 
-## Pi host (`/rv`)
+## Pi host (`/rv*`)
 
-- In **Pi interactive** sessions, ordinary `/rv @path` calls the native `pi_review` tool and needs no streaming flags. The tool owns normalized events, live rendering, and the packaged CLI process.
-- `--continue`, `--keep-session`, and explicit `--no-stream` use the shell CLI path because they retain single-review session semantics.
+Slash commands select **strategy only**. Everything after the command is a **natural-language target**.
+
+| Command | Strategy |
+|---------|----------|
+| `/rv <natural-language target>` | Panel review via native `pi_review` |
+| `/rv-loop <natural-language target>` | Loop closeout via shell `pi-review loop` |
+| `/rv-models` | Model catalog only |
+| `/rv --continue <handle> [text]` | Continue a kept single-review session |
+
+- Pass the user target **as given**. Path mentions like `@src` or `@src/foo.ts` are fine as text. Do **not** expand directories into multi-file lists in the parent agent.
+- Remaining strategy matching lives here and in the CLI:
+  - mode defaults (`code` / `plan` / `challenge`)
+  - model choice from `pi-review models` + `references/model-selection.md`
+  - panel preset (`code-experts` by default for `/rv`)
+  - path-vs-file handling: directories stay tool path targets; only real files are attached
+- `/rv` needs no streaming flags. The tool owns normalized events, live rendering, and the packaged CLI process.
+- `/rv-loop`, `--continue`, `--keep-session`, and explicit `--no-stream` use the shell CLI path.
 
 ## Streaming vs agent hosts (Claude Code / Codex)
 
@@ -176,19 +191,22 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 3. Run an isolated review:
    ```bash
-   pi-review [--mode <name>] [--model <provider/model[:thinking]>] [--keep-session|--continue <handle>] [--progress-log <path>] -- <@files|text...>
+   pi-review [--mode <name>] [--model <provider/model[:thinking]>] [--keep-session|--continue <handle>] [--progress-log <path>] -- <natural-language target...>
    ```
    Rules:
    - Use the model decision from step 1; do not invent model IDs.
    - Omit `--mode` for normal code review; the command defaults to `code`.
    - Use `--keep-session` only when the user wants follow-up questions on this review.
    - Use `--continue <handle>` only with a **Session** path from a prior ASCII footer or `sessionHandle` in `PI_REVIEW_META_JSON`.
-   - Put file references as `@path` after `--`.
+   - Pass the review request as natural language after `--`. Path mentions (`@src`, `@src/foo.ts`) are allowed as text.
+   - Do **not** expand directories into long multi-file attachment lists. The CLI keeps directory `@refs` as tool path targets and only attaches real files.
+   - On Pi `/rv`, call `pi_review` with that same natural-language target.
+   - On Pi `/rv-loop`, run the shell `pi-review loop` path with that same natural-language target and follow **Loop closeout protocol**.
    - Do not ask `pi-review` to edit, patch, commit, or implement.
    - **Pi `/rv`:** default streaming; no `--progress-log` unless the user asked.
    - **Claude Code / Codex / Cursor:** **include `--progress-log <path>` by default**; background the CLI and tail the log for user-visible progress. Foreground Bash alone does not stream in chat.
    - Add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`).
-   Completion criterion: the command includes the resolved model/default choice and a concrete review target.
+   Completion criterion: the command includes the resolved model/default choice and a concrete natural-language review target.
 
 4. Return the result:
    - Show the Markdown review body and the **ASCII footer** (`── pi-review` block on stdout). Do not paste raw `PI_REVIEW_META_JSON` to the user unless they ask for machine output.
@@ -199,8 +217,9 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 ## Examples
 
 ```bash
+pi-review -- @src
 pi-review -- @src/foo.ts
-pi-review --model openai/gpt-5.5 -- @src/foo.ts
+pi-review --model openai/gpt-5.5 -- "review the auth changes under @src"
 pi-review --mode challenge --keep-session -- @docs/design.md
 pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
 pi-review loop --max-rounds 1 -- @src

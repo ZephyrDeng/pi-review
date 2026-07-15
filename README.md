@@ -171,7 +171,13 @@ A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with add
 
 ### Live Pi progress and event replay
 
-In Pi, `/rv @target` calls the native `pi_review` tool. It renders each reviewer as an independent live row with lifecycle state, active tool, elapsed time, and token usage; expand the tool result with `Ctrl+O` for bounded activity and final findings/provenance.
+In Pi, slash commands select strategy only:
+
+- `/rv <natural-language target>` → panel review via native `pi_review`
+- `/rv-loop <natural-language target>` → loop closeout via shell CLI
+- `/rv-models` → model catalog
+
+Targets stay natural language as given. Path mentions like `@src` remain text; the CLI keeps directories as tool path targets and only attaches real files. Remaining strategy matching lives in the skill/CLI. Panel runs render each reviewer as an independent live row with lifecycle state, active tool, elapsed time, and token usage; expand the tool result with `Ctrl+O` for bounded activity and final findings/provenance.
 
 Renderer adapters can consume the stable, versioned event stream directly:
 
@@ -325,7 +331,7 @@ After installing as a Pi package, use the `/rv` slash command:
 /rv --mode challenge @docs/design.md
 ```
 
-The `/rv` command injects a task message for the parent agent. New Pi reviews call the native `pi_review` tool, which launches the packaged `pi-review` CLI in normalized event mode and renders live Panel rows. Use plain `/rv @path` in Pi — no extra streaming flags needed. `--continue`, `--keep-session`, and explicit `--no-stream` retain the single-review CLI path.
+Slash commands inject a task message for the parent agent. Strategy is selected by the command (`/rv`, `/rv-loop`, `/rv-models`); the remainder is the natural-language target. Use plain `/rv @src`, `/rv review the auth changes`, or `/rv-loop fix until clean @src` in Pi — no extra streaming flags needed for panel runs. `--continue`, `--keep-session`, loop, and explicit `--no-stream` retain the shell CLI path.
 
 ```
 /rv models
