@@ -6,6 +6,125 @@ function lines(...events: unknown[]): string {
   return events.map((e) => JSON.stringify(e)).join("\n");
 }
 
+const firstUsageSnapshot = {
+  input: 100,
+  output: 20,
+  cacheRead: 50,
+  cacheWrite: 2,
+  reasoning: 5,
+  totalTokens: 172,
+  cost: { total: 0.1 },
+};
+
+const secondUsageSnapshot = {
+  input: 30,
+  output: 10,
+  cacheRead: 170,
+  cacheWrite: 0,
+  reasoning: 2,
+  totalTokens: 210,
+  cost: { total: 0.12 },
+};
+
+function repeatedUsageEvents(): unknown[] {
+  return [
+    { type: "message_start", message: { role: "assistant", usage: firstUsageSnapshot } },
+    {
+      type: "message_update",
+      message: { role: "assistant", usage: firstUsageSnapshot },
+      assistantMessageEvent: { type: "text_delta", delta: "first", partial: { role: "assistant", usage: firstUsageSnapshot } },
+    },
+    { type: "message_end", message: { role: "assistant", usage: firstUsageSnapshot, model: "provider/model" } },
+    { type: "turn_end", message: { role: "assistant", usage: firstUsageSnapshot } },
+    {
+      type: "message_update",
+      message: { role: "assistant", usage: secondUsageSnapshot },
+      assistantMessageEvent: { type: "text_delta", delta: "second", partial: { role: "assistant", usage: secondUsageSnapshot } },
+    },
+    { type: "message_end", message: { role: "assistant", usage: secondUsageSnapshot, responseModel: "provider/model" } },
+    { type: "turn_end", message: { role: "assistant", usage: secondUsageSnapshot } },
+    {
+      type: "agent_end",
+      messages: [
+        { role: "assistant", usage: firstUsageSnapshot },
+        { role: "assistant", usage: secondUsageSnapshot, responseModel: "provider/model" },
+      ],
+    },
+  ];
+}
+
+const repeatedUsageExpected = {
+  usage: {
+    input: 130,
+    output: 30,
+    cacheRead: 220,
+    cacheWrite: 2,
+    reasoning: 7,
+    totalTokens: 382,
+    costTotal: 0.22,
+  },
+  responseModel: "provider/model",
+};
+
+const firstFallbackUsage = { input: 10, output: 2, totalTokens: 12 };
+const secondFallbackUsage = { input: 20, output: 3, totalTokens: 23 };
+const fallbackUsageExpected = {
+  input: 30,
+  output: 5,
+  cacheRead: 0,
+  cacheWrite: 0,
+  reasoning: 0,
+  totalTokens: 35,
+};
+
+function fullAgentEndFallbackEvents(): unknown[] {
+  return [{
+    type: "agent_end",
+    messages: [
+      { role: "assistant", usage: { ...firstFallbackUsage, cost: { total: 0.01 } } },
+      {
+        role: "assistant",
+        usage: { ...secondFallbackUsage, cost: { total: 0.02 } },
+        responseModel: "fallback/model",
+      },
+    ],
+  }];
+}
+
+function missingMessageEndUsageEvents(): unknown[] {
+  return [
+    {
+      type: "message_end",
+      message: { role: "assistant", responseId: "response-1", usage: firstFallbackUsage },
+    },
+    { type: "message_end", message: { role: "assistant", responseId: "response-2" } },
+    {
+      type: "agent_end",
+      messages: [
+        { role: "assistant", responseId: "response-1", usage: firstFallbackUsage },
+        { role: "assistant", responseId: "response-2", usage: secondFallbackUsage },
+      ],
+    },
+  ];
+}
+
+function multipleAgentFallbackEvents(): unknown[] {
+  return [
+    { type: "agent_start" },
+    { type: "message_end", message: { role: "assistant", usage: firstFallbackUsage } },
+    { type: "agent_end", messages: [{ role: "assistant", usage: firstFallbackUsage }] },
+    { type: "agent_start" },
+    { type: "agent_end", messages: [{ role: "assistant", usage: secondFallbackUsage }] },
+  ];
+}
+
+function parseStreamUsage(events: unknown[]) {
+  const stream = new JsonEventStream({ onText: () => {}, onMilestone: () => {} });
+  stream.feed(lines(...events));
+  stream.flush();
+  return stream.usage();
+}
+
 test("extractFinalText reads the final assistant text from agent_end", () => {
   const input = lines(
     { type: "session", id: "s1" },
@@ -105,7 +224,7 @@ test("extractFinalText uses the last agent_end when the child retries", () => {
   assert.equal(result.fatal, undefined);
 });
 
-test("extractUsage accumulates tokens from message_end and agent_end", () => {
+test("extractUsage uses message_end usage and agent_end response model", () => {
   const input = lines(
     { type: "session", id: "s1" },
     { type: "message_end", message: { role: "assistant", usage: { input: 44, output: 3, cacheRead: 17984, cacheWrite: 0, reasoning: 0, totalTokens: 18031, cost: { total: 0.025 } }, model: "hf:zai-org/GLM-5.2" } },
@@ -121,6 +240,21 @@ test("extractUsage accumulates tokens from message_end and agent_end", () => {
   assert.equal(result.responseModel, "zai-org/GLM-5.2");
 });
 
+test("extractUsage falls back to agent_end usage when message_end usage is absent", () => {
+  assert.deepEqual(extractUsage(lines(...fullAgentEndFallbackEvents())), {
+    usage: { ...fallbackUsageExpected, costTotal: 0.03 },
+    responseModel: "fallback/model",
+  });
+});
+
+test("extractUsage fills missing message_end usage from unseen agent_end response ids", () => {
+  assert.deepEqual(extractUsage(lines(...missingMessageEndUsageEvents())).usage, fallbackUsageExpected);
+});
+
+test("extractUsage applies no-id agent_end fallback independently per agent run", () => {
+  assert.deepEqual(extractUsage(lines(...multipleAgentFallbackEvents())).usage, fallbackUsageExpected);
+});
+
 test("extractUsage returns undefined when no usage events exist", () => {
   const input = lines({ type: "session", id: "s1" }, { type: "agent_end", messages: [{ role: "assistant" }] });
   const result = extractUsage(input);
@@ -128,14 +262,19 @@ test("extractUsage returns undefined when no usage events exist", () => {
   assert.equal(result.responseModel, undefined);
 });
 
-test("extractUsage sums output across multiple assistant turns", () => {
+test("extractUsage sums separately billed usage across multiple assistant turns", () => {
   const input = lines(
     { type: "message_end", message: { role: "assistant", usage: { input: 100, output: 50, totalTokens: 150 } } },
     { type: "message_end", message: { role: "assistant", usage: { input: 100, output: 30, totalTokens: 130 } } },
   );
   const result = extractUsage(input);
   assert.equal(result.usage!.output, 80);
-  assert.equal(result.usage!.input, 100);
+  assert.equal(result.usage!.input, 200);
+  assert.equal(result.usage!.totalTokens, 280);
+});
+
+test("extractUsage counts repeated usage snapshots once per completed assistant message", () => {
+  assert.deepEqual(extractUsage(lines(...repeatedUsageEvents())), repeatedUsageExpected);
 });
 
 test("JsonEventStream forwards text deltas and emits milestones", () => {
@@ -170,6 +309,38 @@ test("JsonEventStream accumulates token usage from streamed events", () => {
   assert.equal(usage!.output, 50);
   assert.equal(usage!.cacheRead, 100);
   assert.equal(usage!.reasoning, 10);
+});
+
+test("JsonEventStream counts repeated usage snapshots once per completed assistant message", () => {
+  const usageCosts: Array<number | undefined> = [];
+  const stream = new JsonEventStream({
+    onText: () => {},
+    onMilestone: () => {},
+    onActivity: (event) => {
+      if (event.type === "usage") usageCosts.push(event.usage.costTotal);
+    },
+  });
+
+  stream.feed(lines(...repeatedUsageEvents()));
+  stream.flush();
+
+  assert.deepEqual(stream.usage(), repeatedUsageExpected);
+  assert.equal(usageCosts.at(-1), 0.22);
+});
+
+test("JsonEventStream falls back to agent_end usage when message_end usage is absent", () => {
+  assert.deepEqual(parseStreamUsage(fullAgentEndFallbackEvents()), {
+    usage: { ...fallbackUsageExpected, costTotal: 0.03 },
+    responseModel: "fallback/model",
+  });
+});
+
+test("JsonEventStream fills missing message_end usage from unseen agent_end response ids", () => {
+  assert.deepEqual(parseStreamUsage(missingMessageEndUsageEvents()).usage, fallbackUsageExpected);
+});
+
+test("JsonEventStream applies no-id agent_end fallback independently per agent run", () => {
+  assert.deepEqual(parseStreamUsage(multipleAgentFallbackEvents()).usage, fallbackUsageExpected);
 });
 
 test("JsonEventStream handles partial lines across chunks", () => {

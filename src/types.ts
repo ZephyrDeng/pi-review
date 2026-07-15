@@ -102,7 +102,7 @@ export interface SplitPayload {
 export const CONSENSUS_POLICIES = ["any", "quorum", "majority", "unanimous"] as const;
 export type ConsensusPolicy = (typeof CONSENSUS_POLICIES)[number];
 
-/** Token usage accumulated across an agent turn (from pi's --mode json stream). */
+/** Token usage accumulated across completed requests in one review run. */
 export interface TokenUsage {
   input: number;
   output: number;

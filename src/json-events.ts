@@ -33,21 +33,28 @@ interface UsageLike {
   cost?: { total?: number };
 }
 
+interface UsageMessageLike {
+  role?: string;
+  usage?: UsageLike;
+  model?: string;
+  responseModel?: string;
+  responseId?: string;
+}
+
 function num(value: unknown): number {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function accumulateUsage(into: TokenUsage, usage: UsageLike | undefined): void {
+function addUsage(into: TokenUsage, usage: UsageLike | undefined): void {
   if (!usage) return;
-  // input/cacheRead are prompt-scoped maxima (reported per message, not summed);
-  // output is additive across assistant turns.
-  into.input = Math.max(into.input, num(usage.input));
-  into.cacheRead = Math.max(into.cacheRead, num(usage.cacheRead));
-  into.cacheWrite = Math.max(into.cacheWrite, num(usage.cacheWrite));
+  // Each completed assistant message represents a separately billed request.
+  into.input += num(usage.input);
   into.output += num(usage.output);
-  into.reasoning = Math.max(into.reasoning, num(usage.reasoning));
-  into.totalTokens = Math.max(into.totalTokens, num(usage.totalTokens));
+  into.cacheRead += num(usage.cacheRead);
+  into.cacheWrite += num(usage.cacheWrite);
+  into.reasoning += num(usage.reasoning);
+  into.totalTokens += num(usage.totalTokens);
   if (typeof usage.cost?.total === "number") {
     into.costTotal = (into.costTotal ?? 0) + usage.cost.total;
   }
@@ -123,8 +130,9 @@ export function extractFinalText(jsonLinesText: string): ExtractedFinalText {
 
 /**
  * Extract token usage and the response model from a pi `--mode json` event
- * stream. Usage is accumulated from assistant message/turn/agent_end events.
- * Degrades gracefully (returns undefined) when usage fields are absent.
+ * stream. Completed assistant `message_end` events are authoritative because
+ * Pi repeats the same usage snapshot in update, turn_end, and agent_end events.
+ * `agent_end` is used as a fallback when message_end usage is absent.
  */
 export function extractUsage(jsonLinesText: string): ExtractedUsage {
   const usage: TokenUsage = {
@@ -136,33 +144,56 @@ export function extractUsage(jsonLinesText: string): ExtractedUsage {
     totalTokens: 0,
   };
   let sawAnyUsage = false;
+  let sawMessageEndUsageInCurrentAgent = false;
   let responseModel: string | undefined;
+  const completedResponseIds = new Set<string>();
+
+  const captureModel = (message: UsageMessageLike): void => {
+    if (message.responseModel) responseModel = message.responseModel;
+    else if (message.model && !responseModel) responseModel = message.model;
+  };
 
   for (const line of jsonLinesText.split("\n")) {
     if (!line.trim()) continue;
-    let event: { type?: string; message?: { role?: string; usage?: UsageLike; model?: string; responseModel?: string }; messages?: Array<{ role?: string; usage?: UsageLike; model?: string; responseModel?: string }> };
+    let event: { type?: string; message?: UsageMessageLike; messages?: UsageMessageLike[] };
     try {
       event = JSON.parse(line);
     } catch {
       continue;
     }
 
-    const candidates: Array<{ usage?: UsageLike; model?: string; responseModel?: string }> = [];
-    if (event?.message?.usage) candidates.push(event.message);
-    else if (event?.message?.responseModel || event?.message?.model) candidates.push(event.message);
-    if (event?.type === "agent_end" && Array.isArray(event.messages)) {
-      for (const m of event.messages) {
-        if (m?.usage || m?.responseModel || m?.model) candidates.push(m);
+    if (event?.type === "agent_start") {
+      sawMessageEndUsageInCurrentAgent = false;
+    }
+
+    if (event?.type === "message_end" && event.message?.role === "assistant") {
+      captureModel(event.message);
+      const responseId = event.message.responseId;
+      if (event.message.usage) {
+        sawMessageEndUsageInCurrentAgent = true;
+      }
+      if (event.message.usage && (!responseId || !completedResponseIds.has(responseId))) {
+        addUsage(usage, event.message.usage);
+        sawAnyUsage = true;
+        if (responseId) completedResponseIds.add(responseId);
       }
     }
 
-    for (const c of candidates) {
-      if (c.usage) {
-        accumulateUsage(usage, c.usage);
+    if (event?.type === "agent_end" && Array.isArray(event.messages)) {
+      const assistantMessages = event.messages.filter((message) => message?.role === "assistant");
+      for (const message of assistantMessages) captureModel(message);
+
+      const useAllFallback = !sawMessageEndUsageInCurrentAgent;
+      for (const message of assistantMessages) {
+        if (!message.usage) continue;
+        const responseId = message.responseId;
+        if (responseId && completedResponseIds.has(responseId)) continue;
+        if (!useAllFallback && !responseId) continue;
+        addUsage(usage, message.usage);
         sawAnyUsage = true;
+        if (responseId) completedResponseIds.add(responseId);
       }
-      if (c.responseModel) responseModel = c.responseModel;
-      else if (c.model && !responseModel) responseModel = c.model;
+      sawMessageEndUsageInCurrentAgent = false;
     }
   }
 
@@ -203,7 +234,8 @@ export interface StreamedUsage {
 interface StreamLikeEvent {
   type?: string;
   toolName?: string;
-  message?: { role?: string; usage?: UsageLike; model?: string; responseModel?: string };
+  message?: UsageMessageLike;
+  messages?: UsageMessageLike[];
   assistantMessageEvent?: {
     type?: string;
     delta?: string;
@@ -220,7 +252,9 @@ export class JsonEventStream {
   private buffer = "";
   private readonly emit: StreamEventEmitter;
   private readonly accumulate: TokenUsage;
+  private readonly completedResponseIds = new Set<string>();
   private sawAnyUsage = false;
+  private sawMessageEndUsageInCurrentAgent = false;
   private responseModel: string | undefined;
   private turn = 0;
   private inAssistantTurn = false;
@@ -268,23 +302,40 @@ export class JsonEventStream {
 
   private handle(event: StreamLikeEvent): void {
     const t = event.type;
-    // Accumulate usage from any message/turn/agent_end carrying it.
-    const usageSources: Array<{ usage?: UsageLike; model?: string; responseModel?: string }> = [];
-    if (event.message?.usage) usageSources.push(event.message);
-    if (event.assistantMessageEvent?.partial?.usage) usageSources.push(event.assistantMessageEvent.partial);
-    if (t === "agent_end" && Array.isArray((event as { messages?: unknown }).messages)) {
-      for (const m of (event as { messages: Array<{ usage?: UsageLike; responseModel?: string; model?: string }> }).messages) {
-        if (m?.usage) usageSources.push(m);
+
+    if (t === "agent_start") {
+      this.sawMessageEndUsageInCurrentAgent = false;
+    }
+
+    // message_update usage is a live snapshot of the current request. Publish
+    // it for renderers without committing it to the final billed totals.
+    if (t === "message_update") {
+      const snapshot = event.assistantMessageEvent?.partial?.usage ?? event.message?.usage;
+      if (snapshot) this.emitUsagePreview(snapshot);
+    }
+
+    // Pi repeats final usage in turn_end and agent_end. message_end is the
+    // authoritative completion boundary for each separately billed request.
+    if (t === "message_end" && event.message?.role === "assistant") {
+      this.captureResponseModel(event.message);
+      if (event.message.usage) {
+        this.sawMessageEndUsageInCurrentAgent = true;
+        this.commitUsage(event.message.usage, event.message.responseId);
       }
     }
-    for (const s of usageSources) {
-      if (s.usage) {
-        accumulateUsage(this.accumulate, s.usage);
-        this.sawAnyUsage = true;
+
+    if (t === "agent_end" && Array.isArray(event.messages)) {
+      const assistantMessages = event.messages.filter((message) => message?.role === "assistant");
+      for (const message of assistantMessages) this.captureResponseModel(message);
+      const useAllFallback = !this.sawMessageEndUsageInCurrentAgent;
+      for (const message of assistantMessages) {
+        if (!message.usage) continue;
+        const responseId = message.responseId;
+        if (responseId && this.completedResponseIds.has(responseId)) continue;
+        if (!useAllFallback && !responseId) continue;
+        this.commitUsage(message.usage, responseId);
       }
-      if (s.responseModel) this.responseModel = s.responseModel;
-      else if (s.model && !this.responseModel) this.responseModel = s.model;
-      if (s.usage) this.emit.onActivity?.({ type: "usage", usage: { ...this.accumulate } });
+      this.sawMessageEndUsageInCurrentAgent = false;
     }
 
     // Text deltas -> forward to the human-readable terminal.
@@ -323,5 +374,24 @@ export class JsonEventStream {
         this.emit.onActivity?.({ type: "agent.finished" });
         break;
     }
+  }
+
+  private captureResponseModel(message: UsageMessageLike): void {
+    if (message.responseModel) this.responseModel = message.responseModel;
+    else if (message.model && !this.responseModel) this.responseModel = message.model;
+  }
+
+  private commitUsage(usage: UsageLike, responseId?: string): void {
+    if (responseId && this.completedResponseIds.has(responseId)) return;
+    addUsage(this.accumulate, usage);
+    this.sawAnyUsage = true;
+    if (responseId) this.completedResponseIds.add(responseId);
+    this.emit.onActivity?.({ type: "usage", usage: { ...this.accumulate } });
+  }
+
+  private emitUsagePreview(usage: UsageLike): void {
+    const preview = { ...this.accumulate };
+    addUsage(preview, usage);
+    this.emit.onActivity?.({ type: "usage", usage: preview });
   }
 }
