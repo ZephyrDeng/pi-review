@@ -5,7 +5,19 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, keyHint } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
-import { createPanelViewState, formatCost, formatDurationMs, formatTokens, formatUsage, reducePanelEvent, spawnStreamingChild, type PanelViewState, type ReviewEvent } from "@zephyrdeng/pi-review";
+import {
+  createPanelViewState,
+  formatCost,
+  formatDurationMs,
+  formatPanelFindingsMarkdown,
+  formatPanelMetaAscii,
+  formatTokens,
+  formatUsage,
+  reducePanelEvent,
+  spawnStreamingChild,
+  type PanelViewState,
+  type ReviewEvent,
+} from "@zephyrdeng/pi-review";
 
 type Theme = { fg: (color: "toolTitle" | "muted" | "error" | "success" | "accent", text: string) => string; bold: (text: string) => string };
 type PanelToolDetails = { state: PanelViewState; error?: string };
@@ -131,39 +143,28 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
   });
 }
 
-/** Full panel conclusion for the parent LLM (and expanded TUI markdown). */
+/**
+ * Full panel conclusion for the parent LLM and expanded TUI.
+ * Leads with the classic CLI ASCII chrome (`── pi-review panel ──`) so the
+ * in-Pi tool path matches the shell footer users already know, then appends
+ * findings markdown and per-reviewer summaries for the host agent.
+ */
 export function buildPanelResultContent(state: PanelViewState, error?: string): string {
   const meta = state.meta;
   if (!meta && !error) return "Panel completed: unknown";
   if (!meta) return error ?? "Panel completed: unknown";
 
-  const confirmed = meta.confirmedClusters.map((finding) => `- ${finding.summary} (${finding.supportingReviewerIds.join(", ")})`);
-  const advisories = meta.advisories.map((finding) => `- ${finding.summary} (${finding.supportingReviewerIds.join(", ")})`);
-  const provenance = meta.reviewers.map((reviewer) => {
-    const role = reviewer.role ? ` · ${reviewer.role}` : "";
-    const model = reviewer.model ? ` · ${reviewer.model}` : "";
-    const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
-    const usage = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok` : "";
-    const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
-    return `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status} · ${formatDurationMs(reviewer.durationMs)}${usage}${cost}`;
-  });
-  const metrics = [
-    "### Run metrics",
-    `- Duration: ${formatDurationMs(meta.durationMs)}`,
-    meta.usage ? `- Tokens: ${formatTokens(meta.usage.totalTokens)} total (${formatUsage(meta.usage)})` : "- Tokens: not reported",
-    `- Cost: ${meta.usage && typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "not reported"}`,
-  ].join("\n");
+  const findingsMd = formatPanelFindingsMarkdown(meta);
+  // Fenced so Markdown renderers keep monospacing / don't mangle the box lines.
+  const ascii = "```\n" + formatPanelMetaAscii(meta) + "\n```";
   const summaries = reviewerSummaryLines(state);
-  const body = [
-    `### ${PANEL_TOOL_DISPLAY_NAME} result`,
-    `Health: ${meta.panelHealth}; status: ${meta.status}.`,
-    metrics,
-    confirmed.length ? `### Confirmed findings\n${confirmed.join("\n")}` : "### Confirmed findings\nNone.",
-    advisories.length ? `### Advisories\n${advisories.join("\n")}` : "### Advisories\nNone.",
-    provenance.length ? `### Provenance\n${provenance.join("\n")}` : "### Provenance\nNone.",
-    summaries.length ? `### Reviewer summaries\n${summaries.join("\n")}` : "### Reviewer summaries\nNone.",
-  ].join("\n\n");
-  return error ? `${body}\n\n### Error\n${error}` : body;
+  const parts = [
+    findingsMd,
+    ascii,
+    summaries.length ? `### Reviewer summaries\n${summaries.join("\n")}` : "",
+    error ? `### Error\n${error}` : "",
+  ].filter(Boolean);
+  return parts.join("\n\n");
 }
 
 function finalMarkdown(state: PanelViewState): string {

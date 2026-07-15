@@ -176,12 +176,14 @@ test("Pi panel renderer expands final findings and reviewer provenance", () => {
     },
   });
   const expanded = renderPanelResult({ state }, true, theme).render(120).join("\n");
-  assert.match(expanded, /Confirmed findings/);
+  assert.match(expanded, /── pi-review panel/);
+  assert.match(expanded, /Panel Findings \(confirmed\)|Auth bypass/);
   assert.match(expanded, /Auth bypass/);
-  assert.match(expanded, /Advisories/);
+  assert.match(expanded, /Panel Advisories|Naming nit/);
   assert.match(expanded, /Naming nit/);
-  assert.match(expanded, /Provenance/);
-  assert.match(expanded, /security · Security · openai\/gpt · high · has_findings/);
+  assert.match(expanded, /security/);
+  assert.match(expanded, /openai\/gpt/);
+  assert.match(expanded, /HAS FINDINGS|has_findings/);
 
   state = reducePanelEvent(createPanelViewState(), {
     v: 1,
@@ -211,9 +213,11 @@ test("Pi panel renderer expands final findings and reviewer provenance", () => {
     },
   });
   const empty = renderPanelResult({ state }, true, theme).render(120).join("\n");
-  assert.match(empty, /Confirmed findings[\s\S]*None\./);
-  assert.match(empty, /Advisories[\s\S]*None\./);
-  assert.match(empty, /Provenance[\s\S]*None\./);
+  // Clean panel with no findings: ASCII footer only (no empty ### sections).
+  assert.match(empty, /── pi-review panel/);
+  assert.match(empty, /Status\s+CLEAN|CLEAN/);
+  assert.match(empty, /Confirmed\s+0 actionable/);
+  assert.match(empty, /Advisories\s+0 non-blocking/);
 });
 
 test("Pi panel result content includes duration, token, and cost metrics", () => {
@@ -263,11 +267,13 @@ test("Pi panel result content includes duration, token, and cost metrics", () =>
   assert.match(compact, /\$0\.1234/);
 
   const content = buildPanelResultContent(state);
-  assert.match(content, /### Run metrics/);
-  assert.match(content, /Duration: 1\.2s/);
-  assert.match(content, /Tokens: 1\.2K total/);
-  assert.match(content, /Cost: \$0\.1234/);
-  assert.match(content, /r1[\s\S]*1\.1s[\s\S]*600 tok[\s\S]*\$0\.0617/);
+  // Classic CLI-style ASCII footer (not the old ### Run metrics markdown table).
+  assert.match(content, /── pi-review panel/);
+  assert.match(content, /Duration\s+1\.2s/);
+  assert.match(content, /Tokens\s+.*total 1\.2K|Tokens\s+.*1\.2K total|total:1\.2K|total 1\.2K/);
+  assert.match(content, /Cost\s+\$0\.1234|cost:\$0\.1234/);
+  assert.match(content, /r1/);
+  assert.match(content, /\$0\.0617/);
 });
 
 test("panel tool updates and clears ambient footer status during execute", async () => {
@@ -363,16 +369,19 @@ test("panel tool content carries full conclusion for the parent LLM", () => {
   });
 
   const content = buildPanelResultContent(state);
-  assert.match(content, /### Confirmed findings/);
+  assert.match(content, /── pi-review panel/);
+  assert.match(content, /Panel Findings \(confirmed\)|Auth bypass/);
   assert.match(content, /Auth bypass/);
-  assert.match(content, /### Advisories/);
+  assert.match(content, /Panel Advisories|Naming nit/);
   assert.match(content, /Naming nit/);
-  assert.match(content, /### Provenance/);
-  assert.match(content, /security · Security · openai\/gpt · high · has_findings/);
+  assert.match(content, /Status\s+has findings|has_findings/);
+  assert.match(content, /security/);
+  assert.match(content, /openai\/gpt/);
   assert.match(content, /### Reviewer summaries/);
   assert.match(content, /Auth bypass in session cookie/);
 
   const expanded = renderPanelResult({ state }, true, theme).render(160).join("\n");
+  assert.match(expanded, /── pi-review panel/);
   assert.match(expanded, /Reviewer summaries/);
   assert.match(expanded, /Auth bypass in session cookie/);
 });
