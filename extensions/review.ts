@@ -23,6 +23,8 @@ import { registerPanelReviewTool } from "./panel-tool.js";
 let capturedModels: ModelInfo[] | undefined;
 let capturedPrimaryProvider: string | undefined;
 let capturedLocale: ReturnType<typeof detectRvLocale> = "en";
+/** Keep a registry handle so completions can refresh models lazily if session_start saw none yet. */
+let capturedModelRegistry: { getAvailable?: () => unknown[] } | undefined;
 
 function sampleSessionText(
   sessionManager: { getEntries?: () => Array<{ type?: string; content?: unknown }> },
@@ -70,14 +72,31 @@ function toModelInfo(m: {
   };
 }
 
+function refreshCapturedModels(
+  registry?: { getAvailable?: () => unknown[] },
+  primaryProvider?: string,
+): ModelInfo[] {
+  if (registry) capturedModelRegistry = registry;
+  if (primaryProvider) capturedPrimaryProvider = primaryProvider;
+  try {
+    const available = (capturedModelRegistry?.getAvailable?.() ?? []) as Array<Parameters<typeof toModelInfo>[0]>;
+    if (available.length > 0) {
+      capturedModels = available.map((m) => toModelInfo(m));
+    }
+  } catch {
+    // keep previous capture
+  }
+  return capturedModels ?? [];
+}
+
 export default function piReviewExtension(pi: ExtensionAPI) {
   registerPanelReviewTool(pi);
   pi.on("session_start", (_event, ctx) => {
     try {
-      const available = ctx.modelRegistry?.getAvailable?.() ?? [];
-      capturedModels = available.map((m) => toModelInfo(m as unknown as Parameters<typeof toModelInfo>[0]));
+      capturedModelRegistry = ctx.modelRegistry;
       capturedPrimaryProvider = ctx.model?.provider;
       capturedLocale = detectRvLocale(sampleSessionText(ctx.sessionManager));
+      refreshCapturedModels(ctx.modelRegistry, ctx.model?.provider);
     } catch {
       capturedModels = undefined;
       capturedPrimaryProvider = undefined;
@@ -97,34 +116,71 @@ export default function piReviewExtension(pi: ExtensionAPI) {
     prefix: string,
     strategy: RvStrategy = "panel",
   ): ReturnType<typeof buildRvCompletions> {
-    if (capturedModels && capturedModels.length > 0) {
-      const dynamic = buildRvCompletions(prefix, {
-        models: capturedModels,
-        primaryProvider: capturedPrimaryProvider,
-        locale: capturedLocale,
-        strategy,
-      });
-      if (dynamic && dynamic.length) return dynamic;
-    }
-    // Strategy-aware static fallback when the live registry is unavailable.
-    const filtered = RV_COMPLETIONS.filter((item) => {
-      if (!item.value.startsWith(prefix) && !prefix.startsWith(item.value.trim())) {
-        // still allow bare model-ish typing to show --model hint
-        if (strategy !== "models" && !prefix.includes(" ") && !prefix.startsWith("-") && item.value.startsWith("--model")) {
-          return true;
-        }
-        return item.value.startsWith(prefix);
-      }
-      if (strategy === "loop" && (item.value.includes("--keep-session") || item.value.includes("--continue") || item.value === "models")) {
-        return false;
-      }
-      if (strategy === "models") return item.value === "models" || item.value.startsWith("models");
-      if (strategy !== "loop" && item.value.startsWith("--max-rounds")) return false;
-      return true;
+    // Always try a lazy refresh. session_start can race before providers finish loading.
+    const models = refreshCapturedModels();
+    const dynamic = buildRvCompletions(prefix, {
+      models,
+      primaryProvider: capturedPrimaryProvider,
+      locale: capturedLocale,
+      strategy,
     });
-    return filtered.length
-      ? filtered.map(({ value, hint }) => ({ value, label: value, description: hint }))
-      : null;
+    if (dynamic && dynamic.length) return dynamic;
+
+    // Strategy-aware static fallback when the live registry is unavailable.
+    const q = prefix.trim().toLowerCase();
+    const staticItems: { value: string; label: string; description?: string }[] = [];
+    if (strategy === "models") {
+      staticItems.push({ value: "", label: "list models", description: "No args needed · runs pi-review models" });
+      return staticItems;
+    }
+    if (strategy === "loop") {
+      staticItems.push(
+        { value: "--model ", label: "--model", description: "Pick reviewer model (short ids ok)" },
+        { value: "--thinking ", label: "--thinking", description: "off|minimal|low|medium|high|xhigh" },
+        { value: "--max-rounds 1 ", label: "--max-rounds 1", description: "One gate, then host fix point" },
+        { value: "--max-rounds 2 ", label: "--max-rounds 2", description: "Two review gates" },
+        { value: "--mode code ", label: "--mode code", description: "Code closeout" },
+        { value: "@src", label: "@src", description: "Natural-language / path target" },
+      );
+    } else {
+      staticItems.push(
+        { value: "--model ", label: "--model", description: "Pick panel model (short ids ok)" },
+        { value: "--thinking ", label: "--thinking", description: "off|minimal|low|medium|high|xhigh" },
+        { value: "--mode code ", label: "--mode code", description: "Code / diff review" },
+        { value: "--mode plan ", label: "--mode plan", description: "Architecture / plan review" },
+        { value: "--mode challenge ", label: "--mode challenge", description: "Adversarial plan review" },
+        { value: "--keep-session ", label: "--keep-session", description: "Persist for /rv --continue" },
+        { value: "@src", label: "@src", description: "Natural-language / path target" },
+        { value: "models", label: "models", description: "Or use /rv-models" },
+      );
+    }
+    // Bare model-ish text: still offer to wrap as --model <typed>
+    if (q && !q.startsWith("-") && !q.startsWith("@") && !q.includes(" ")) {
+      staticItems.unshift({
+        value: `--model ${prefix.trim()}`,
+        label: `--model ${prefix.trim()}`,
+        description: "Use typed model token (resolved against catalog at run time)",
+      });
+      if (prefix.includes("/") && !prefix.includes(":")) {
+        for (const level of ["high", "xhigh", "medium"]) {
+          staticItems.unshift({
+            value: `--model ${prefix.trim()}:${level}`,
+            label: `${prefix.trim()}:${level}`,
+            description: `thinking ${level}`,
+          });
+        }
+      }
+    }
+    const filtered = staticItems.filter((item) => {
+      if (!q) return true;
+      return (
+        item.value.toLowerCase().includes(q) ||
+        item.label.toLowerCase().includes(q) ||
+        item.value.startsWith(prefix) ||
+        q.startsWith(item.value.trim().toLowerCase())
+      );
+    });
+    return filtered.length ? filtered : staticItems.slice(0, 6);
   }
 
   function handleRvCommand(strategy: RvStrategy, rawArgs: string, ctx: { ui: { notify: (message: string, level?: "warning" | "info" | "error") => void }; sessionManager?: Parameters<typeof sampleSessionText>[0] }): void {
