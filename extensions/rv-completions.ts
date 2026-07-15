@@ -290,17 +290,23 @@ function modelItems(
         .join(" · "),
     };
   });
-  // Contiguous matching for model ids (subsequence is too loose for ids like
-  // "claude-opus" which would match "ope" via o-p...-e).
-  const q = tail;
+  // Contiguous + separator-insensitive matching for human short names
+  // (gpt55 / gpt-5.5 / openai/gpt-5.5). Avoid raw subsequence matching.
+  const q = tail.toLowerCase();
+  const qKey = q.replace(/[^a-z0-9/]+/g, "");
   const filtered = items.filter((it) => {
-    const label = it.label;
+    const label = it.label.toLowerCase();
+    const labelKey = label.replace(/[^a-z0-9/]+/g, "");
+    const id = label.split("/")[1] ?? "";
+    const provider = label.split("/")[0] ?? "";
+    const idKey = id.replace(/[^a-z0-9]+/g, "");
     return (
       label.startsWith(q) ||
       label.includes(q) ||
-      // also allow matching by bare id / provider segment
-      label.split("/")[1]?.startsWith(q) ||
-      label.split("/")[0]?.startsWith(q)
+      id.startsWith(q) ||
+      provider.startsWith(q) ||
+      labelKey.includes(qKey) ||
+      idKey.includes(qKey.replace(/\//g, ""))
     );
   });
   return filtered.length ? filtered : null;

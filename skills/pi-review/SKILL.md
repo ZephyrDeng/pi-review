@@ -177,7 +177,13 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
    ```
    Rules:
    - Run this before building the review command.
-   - If the user named a model, use that text as `[search]` and verify the **exact** listed `provider/model` from the output.
+   - If the user named a model, use that text as `[search]` and resolve it against the catalog:
+     - exact `provider/model` wins
+     - short ids like `gpt-5.5` / `kimi` may uniquely match a listed id
+     - ambiguous matches: show top candidates and ask, do not guess across model families
+     - never invent a provider/model that is not listed
+   - Thinking shortcuts are allowed (`最高`/`max` → `xhigh`, `高` → `high`). If the model does not support the requested level, fall back to the nearest supported level and say so.
+   - On Pi `/rv*`, the extension already resolves short model/thinking tokens against the live registry when possible; still verify unresolved names via `pi-review models`.
    - If the user did not name a model, follow **[references/model-selection.md](./references/model-selection.md)**: infer profile (code / frontend / plan), match the priority list against catalog ids, then set `--model` with optional `:thinking` when supported.
    - On **Claude Code / Codex / Cursor**, state the chosen model in one line (match the user's language) before running the review command.
    - If nothing in the priority list matches, omit `--model` (Pi default) or pick a listed reasoning model with large context—say which and why.

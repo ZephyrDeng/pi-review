@@ -191,7 +191,11 @@ function piHostRules(strategy: RvStrategy): string {
   ].join(" ");
 }
 
-export function buildRvOrchestrationPrompt(parsed: RvParsed, locale: RvLocale = "en"): string {
+export function buildRvOrchestrationPrompt(
+  parsed: RvParsed,
+  locale: RvLocale = "en",
+  resolutionNotes: string[] = [],
+): string {
   const localeNote = orchestrationLocaleNote(locale);
   if (parsed.modelsOnly || parsed.strategy === "models") {
     return [
@@ -239,8 +243,12 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed, locale: RvLocale = 
 
   const cliLine = buildPiReviewArgv(parsed, target).join(" ");
 
+  const resolutionStep = resolutionNotes.length
+    ? `Resolved user shortcuts against the live model catalog:\n${resolutionNotes.map((note) => `- ${note}`).join("\n")}`
+    : "";
+
   const modelStep = parsed.model
-    ? `Use model exactly as given: ${parsed.model}${parsed.thinking ? ` at thinking ${parsed.thinking}` : ""} (model must appear in pi-review models output).`
+    ? `Use model exactly as resolved: ${parsed.model}${parsed.thinking ? ` at thinking ${parsed.thinking}` : ""}. Prefer this exact catalog id; do not invent a different provider/model.`
     : parsed.thinking
       ? `Run pi-review models first if needed; pick using skill references/model-selection.md (code / frontend / plan) or omit --model for Pi default. Use thinking ${parsed.thinking}.`
       : "Run pi-review models first if needed; pick using skill references/model-selection.md (code / frontend / plan) or omit --model for Pi default.";
@@ -276,6 +284,7 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed, locale: RvLocale = 
     strategyNote,
     modeBlock[parsed.mode] ??
       `Mode: ${parsed.mode}. Follow the preset named in review-presets.json when present.`,
+    resolutionStep,
     modelStep,
     continueNote,
     execution,

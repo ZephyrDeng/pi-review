@@ -11,6 +11,7 @@ import {
   validateRvParsed,
   type RvStrategy,
 } from "./rv-prompts.js";
+import { resolveRvParsed } from "./rv-resolve.js";
 import { registerPanelReviewTool } from "./panel-tool.js";
 
 /**
@@ -131,7 +132,16 @@ export default function piReviewExtension(pi: ExtensionAPI) {
       return;
     }
 
-    pi.sendUserMessage(buildRvOrchestrationPrompt(parsed, localeForHandler(ctx)));
+    const resolved = resolveRvParsed(parsed, capturedModels ?? [], capturedPrimaryProvider);
+    if (resolved.ambiguousModels?.length) {
+      ctx.ui.notify(
+        `Model "${parsed.model}" is ambiguous. Candidates: ${resolved.ambiguousModels.join(", ")}. Re-run with an exact provider/model.`,
+        "warning",
+      );
+      return;
+    }
+
+    pi.sendUserMessage(buildRvOrchestrationPrompt(resolved.parsed, localeForHandler(ctx), resolved.notes));
   }
 
   pi.registerCommand("rv", {

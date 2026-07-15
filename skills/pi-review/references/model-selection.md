@@ -65,7 +65,15 @@ pi-review --mode plan --model px:anthropic/claude-opus-4-8 -- @docs/architecture
 
 ## User-named model
 
-If the user specifies a model, run `pi-review models <fragment>` and use the **exact** listed id. Do not normalize or guess provider prefixes.
+If the user specifies a model, resolve against the catalog instead of inventing an id:
+
+1. Exact `provider/model` match wins.
+2. Bare id / family fragment (`gpt-5.5`, `kimi`, `opus`) may uniquely match one listed id. Prefer the host session's primary provider when the same id exists on multiple providers.
+3. If several unrelated families match, show the top candidates and ask. Do not silently jump from `gpt` to `claude`.
+4. Thinking aliases are allowed: `max`/`最高` → `xhigh`, `高` → `high`, `中` → `medium`, `快`/`off` → `off`. If unsupported by the chosen model, fall back to the nearest supported level.
+5. Inline form `provider/model:thinking` is valid.
+
+On Pi `/rv*`, short model/thinking tokens are resolved against the live registry before the review starts. On other hosts, run `pi-review models <fragment>` and apply the same rules.
 
 ## Language
 

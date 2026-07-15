@@ -104,6 +104,18 @@ describe("parseRvArgs / validateRvParsed", () => {
     assert.match(prompt, /Execute: pi-review models/);
   });
 
+  it("orchestration includes catalog resolution notes when provided", () => {
+    const prompt = buildRvOrchestrationPrompt(
+      parseRvArgs("--model openai-codex/gpt-5.5 @src"),
+      "en",
+      ["model gpt-5.5 → openai-codex/gpt-5.5", "thinking 最高 → xhigh"],
+    );
+    assert.match(prompt, /Resolved user shortcuts against the live model catalog/);
+    assert.match(prompt, /model gpt-5\.5 → openai-codex\/gpt-5\.5/);
+    assert.match(prompt, /thinking 最高 → xhigh/);
+    assert.match(prompt, /Use model exactly as resolved: openai-codex\/gpt-5\.5/);
+  });
+
   it("continuations retain the session-aware CLI path", () => {
     const prompt = buildRvOrchestrationPrompt(parseRvArgs("--continue /tmp/review.jsonl @src/foo.ts"));
     assert.match(prompt, /Execute:\npi-review --continue \/tmp\/review\.jsonl -- @src\/foo\.ts/);
