@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { childRuntimeError, metaLinePrefix, progressLogBuffersOutput } from "./review.js";
 
 test("metaLinePrefix adds newline when streamed stdout lacks trailing newline", () => {

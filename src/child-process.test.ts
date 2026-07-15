@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
-import { test } from "node:test";
+import { test } from "vitest";
 import { spawnBufferedChild, spawnStreamingChild } from "./child-process.js";
 
 function collectSink(): { stream: Writable; chunks: string[] } {
@@ -12,6 +12,20 @@ function collectSink(): { stream: Writable; chunks: string[] } {
     },
   });
   return { stream, chunks };
+}
+
+/** Resolve once the collected chunks match `pattern`, with a generous timeout
+ *  so we never hang forever if the child never emits. */
+function waitForOutput(chunks: string[], pattern: RegExp, timeoutMs = 2000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      if (pattern.test(chunks.join(""))) return resolve();
+      if (Date.now() - start > timeoutMs) return reject(new Error(`timed out waiting for ${pattern}`));
+      setTimeout(tick, 5);
+    };
+    tick();
+  });
 }
 
 test("spawnBufferedChild captures stdout", () => {
@@ -93,7 +107,11 @@ test("spawnStreamingChild escalates ignored SIGTERM to SIGKILL after the abort g
     processGroup: false,
     abortKillGraceMs: 50,
   });
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  // Wait until the child has actually registered its SIGTERM handler and
+  // signalled readiness, rather than a fixed delay — under parallel load the
+  // child can take longer to start, and aborting before the handler is
+  // installed would let SIGTERM kill it (observed as SIGTERM instead of SIGKILL).
+  await waitForOutput(chunks, /ready/);
   controller.abort();
   const child = await result;
   assert.equal(child.signal, "SIGKILL");

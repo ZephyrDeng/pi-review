@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { aggregatePanel, effectiveThreshold } from "./panel-aggregate.js";
 import { DeterministicMatcher, SemanticMatcher, type FindingMatcher } from "./matcher.js";
 import type {

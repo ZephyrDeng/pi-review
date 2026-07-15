@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { runPanelReviewOnce, shouldPreserveSubmissionOnAbort } from "./panel.js";
 import type { ParsedArgs, ReviewEvent, ReviewerSubmission } from "./index.js";
 

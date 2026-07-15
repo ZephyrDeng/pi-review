@@ -1,4 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
 import {
   buildRvCompletions,
   type ModelInfo,
@@ -16,6 +17,7 @@ import {
   shouldRunInteractiveWizard,
   stripInteractiveToken,
 } from "./rv-interactive.js";
+import { RvModelPickerComponent, type ModelPickerResult } from "./rv-model-picker.js";
 import { registerPanelReviewTool } from "./panel-tool.js";
 
 /**
@@ -149,6 +151,15 @@ export default function piReviewExtension(pi: ExtensionAPI) {
         select?: (title: string, options: string[]) => Promise<string | undefined>;
         input?: (title: string, placeholder?: string) => Promise<string | undefined>;
         confirm?: (title: string, message: string) => Promise<boolean>;
+        custom?: <T>(
+          factory: (
+            tui: TUI,
+            theme: Theme,
+            keybindings: KeybindingsManager,
+            done: (result: T) => void,
+          ) => Component & { dispose?(): void },
+          options?: { overlay?: boolean },
+        ) => Promise<T>;
       };
       sessionManager?: Parameters<typeof sampleSessionText>[0];
     },
@@ -174,6 +185,22 @@ export default function piReviewExtension(pi: ExtensionAPI) {
           input: (title, placeholder) => ctx.ui.input!(title, placeholder),
           confirm: (title, message) => ctx.ui.confirm!(title, message),
           notify: (message, type) => ctx.ui.notify(message, type),
+          // Inline searchable picker, available only in TUI mode (ctx.ui.custom).
+          // The factory builds the component; the host grants focus and forwards
+          // keystrokes. print/RPC modes have no `custom` → wizard falls back to
+          // the select-based flow.
+          customModelPicker: ctx.ui.custom
+            ? (pickerInput) =>
+                ctx.ui.custom!<ModelPickerResult>((tui, theme, keybindings, done) =>
+                  RvModelPickerComponent.create(
+                    tui,
+                    theme as unknown as Theme,
+                    keybindings,
+                    done,
+                    pickerInput,
+                  ),
+                )
+            : undefined,
         },
         {
           strategy: strategy === "loop" ? "loop" : "panel",

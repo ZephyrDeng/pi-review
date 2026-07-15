@@ -7,6 +7,10 @@ import type { ModelInfo } from "./rv-completions.js";
 import type { RvLocale } from "./rv-locale.js";
 import { rvUi } from "./rv-locale.js";
 import {
+  MODEL_PICKER_SKIP,
+  type ModelPickerResult,
+} from "./rv-model-picker.js";
+import {
   RV_CLEAN_GOAL,
   RV_CONSENSUS_POLICIES,
   RV_LOOP_DEFAULT_MAX_ROUNDS,
@@ -23,11 +27,23 @@ import {
   type ReviewProfile,
 } from "./rv-model-priorities.js";
 
+export type CustomModelPickerInput = {
+  /** Models already ranked for the active mode (presets first). */
+  ranked: ModelInfo[];
+  locale: RvLocale;
+  allowSkip: boolean;
+  title: string;
+};
+
 export type InteractiveUi = {
   select: (title: string, options: string[]) => Promise<string | undefined>;
   input: (title: string, placeholder?: string) => Promise<string | undefined>;
   confirm: (title: string, message: string) => Promise<boolean>;
   notify: (message: string, type?: "info" | "warning" | "error") => void;
+  /** Inline searchable model picker (TUI only). When present, the wizard uses
+   *  it instead of the select-based flow. Returns a label, `MODEL_PICKER_SKIP`,
+   *  or `undefined` (cancel). */
+  customModelPicker?: (input: CustomModelPickerInput) => Promise<ModelPickerResult>;
 };
 
 export type InteractiveWizardInput = {
@@ -126,6 +142,16 @@ async function pickModelLabel(
   const zh = locale === "zh";
   const ranked = rankedModels(models, mode);
   if (ranked.length === 0) return CANCEL;
+
+  // Inline searchable picker (TUI only) — one box, live fuzzy filter, Tab to
+  // cycle provider scope. Preferred over the select-based flow whenever the
+  // host provides it; print/RPC modes have no `custom` and fall through.
+  if (ui.customModelPicker) {
+    const result = await ui.customModelPicker({ ranked, locale, allowSkip, title });
+    if (result === undefined) return CANCEL; // user cancelled (Esc)
+    if (result === MODEL_PICKER_SKIP) return undefined; // skip (Pi default)
+    return result; // chosen label
+  }
 
   const labels = ranked.map((m) => m.label);
   const skipOption = allowSkip ? [zh ? "跳过（用 Pi 默认）" : "Skip (Pi default)"] : [];

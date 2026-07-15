@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import type { ModelInfo } from "./rv-completions.js";
 import {
   runRvInteractiveWizard,
@@ -67,10 +67,12 @@ function scriptedUi(answers: {
   selects?: string[];
   inputs?: string[];
   confirms?: boolean[];
+  customModelPickerResults?: (string | "__skip__" | undefined)[];
 }): InteractiveUi & { log: string[] } {
   const selects = [...(answers.selects ?? [])];
   const inputs = [...(answers.inputs ?? [])];
   const confirms = [...(answers.confirms ?? [])];
+  const pickerResults = [...(answers.customModelPickerResults ?? [])];
   const log: string[] = [];
   return {
     log,
@@ -90,6 +92,14 @@ function scriptedUi(answers: {
     notify(message) {
       log.push(`notify:${message}`);
     },
+    ...(answers.customModelPickerResults
+      ? {
+          async customModelPicker(input: { title: string; ranked: unknown[]; allowSkip: boolean }) {
+            log.push(`customModelPicker:${input.title} :: ranked=${input.ranked.length} skip=${input.allowSkip}`);
+            return pickerResults.shift();
+          },
+        }
+      : {}),
   };
 }
 
@@ -430,4 +440,123 @@ test("wizard model picker supports skip for a large catalog", async () => {
   assert.ok(result);
   assert.equal(result!.model, undefined);
   assert.equal(result!.thinking, undefined);
+});
+
+// --- Inline searchable model picker (custom component, TUI path) ---
+// When the host provides `customModelPicker`, the wizard uses the inline
+// searchable picker for every catalog size (it supersedes the select-based
+// flow). These tests stub `customModelPicker` and verify the wizard maps its
+// result to model / skip / cancel correctly.
+
+test("inline picker: chosen label sets model + thinking", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      // thinking select still happens after the picker resolves to a label
+      "xhigh",
+    ],
+    confirms: [true],
+    customModelPickerResults: ["anthropic/claude-sonnet-4-5"],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, "anthropic/claude-sonnet-4-5");
+  assert.equal(result!.thinking, "xhigh");
+  assert.ok(ui.log.some((e) => e.startsWith("customModelPicker:Model ")), ui.log.join("\n"));
+});
+
+test("inline picker: skip sentinel leaves model unset", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+    ],
+    confirms: [true],
+    customModelPickerResults: ["__skip__"],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, undefined);
+  assert.equal(result!.thinking, undefined);
+});
+
+test("inline picker: cancel (undefined) cancels the whole wizard", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+    ],
+    confirms: [true],
+    customModelPickerResults: [undefined],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.equal(result, undefined);
+});
+
+test("inline picker: per-reviewer models resolve through repeated picker calls", async () => {
+  const uiPanel = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single gate (fix then re-run /rv-loop) · recommended",
+      "1 · host fix point (recommended)",
+      "Custom reviewer count 2–8 (r1..rN, pick models)",
+      "3",
+      "Pick separately for each reviewer",
+      // thinking selects for r1, r2, r3
+      "xhigh",
+      "high",
+      "xhigh",
+      "quorum · at least min-agree agree (default)",
+      "2",
+    ],
+    confirms: [true, true],
+    customModelPickerResults: [
+      "openai/gpt-5.6-luna",
+      "anthropic/claude-opus-4",
+      "google/gemini-3-pro",
+    ],
+  });
+
+  const result = await runRvInteractiveWizard(uiPanel, {
+    strategy: "loop",
+    seed: seed(),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.deepEqual(result!.reviewerModels, [
+    "r1=openai/gpt-5.6-luna:xhigh",
+    "r2=anthropic/claude-opus-4:high",
+    "r3=google/gemini-3-pro:xhigh",
+  ]);
+  // The picker was invoked once per reviewer.
+  const pickerCalls = uiPanel.log.filter((e) => e.startsWith("customModelPicker:"));
+  assert.equal(pickerCalls.length, 3, uiPanel.log.join("\n"));
 });

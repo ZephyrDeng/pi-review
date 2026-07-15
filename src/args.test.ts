@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { ArgsParseError, parseReviewCommand } from "./args.js";
 
 test("review remains the default and explicit command", () => {
@@ -153,6 +153,47 @@ test("loop rejects events-jsonl because its human loop summary has a separate st
   assert.throws(
     () => parseReviewCommand(["loop", "--reviewers", "2", "--output-format", "events-jsonl", "--", "@src"]),
     (error: unknown) => error instanceof ArgsParseError && /loop cannot be used/.test(error.message),
+  );
+});
+
+test("panel dashboard flags parse for an active panel", () => {
+  const parsed = parseReviewCommand([
+    "--reviewers", "2", "--ui", "web", "--ui-url-file", "/tmp/url.txt", "--ui-ttl", "60", "--", "@src",
+  ]);
+  assert.equal(parsed.ui, "web");
+  assert.equal(parsed.uiUrlFile, "/tmp/url.txt");
+  assert.equal(parsed.uiTtlSeconds, 60);
+});
+
+test("--ui only accepts web", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--ui", "terminal", "--", "@src"]),
+    /--ui must be web/,
+  );
+});
+
+test("--ui web requires an active panel", () => {
+  assert.throws(
+    () => parseReviewCommand(["--ui", "web", "--", "@src"]),
+    /--ui web requires an active panel/,
+  );
+});
+
+test("loop rejects --ui web because the dashboard tracks one panel run, not a loop", () => {
+  assert.throws(
+    () => parseReviewCommand(["loop", "--reviewers", "2", "--ui", "web", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /loop cannot be used/.test(error.message),
+  );
+});
+
+test("--ui-url-file and --ui-ttl require --ui web", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--ui-url-file", "/tmp/url.txt", "--", "@src"]),
+    /require --ui web/,
+  );
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--ui-ttl", "60", "--", "@src"]),
+    /require --ui web/,
   );
 });
 

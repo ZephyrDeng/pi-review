@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { test } from "vitest";
 import { buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt, normalizePayloadRefs, splitPayload } from "./prompt.js";
 import type { PanelReviewerSpec, SourceFinding } from "./types.js";
 

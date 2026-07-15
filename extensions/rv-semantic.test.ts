@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { parseRvArgs } from "./rv-prompts.js";
 import { stripSemanticPhrases } from "./rv-semantic.js";
 

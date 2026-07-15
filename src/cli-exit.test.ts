@@ -4,9 +4,19 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test, afterEach } from "vitest";
+
+let tempDir = "";
+afterEach(() => {
+  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  tempDir = "";
+});
 
 function tsxLoaderArgs(): string[] {
+  // Reuse an already-loaded tsx loader when present (e.g. running tests via
+  // `npx tsx --test`), so we don't double-register. Under vitest the worker's
+  // execArgv has no tsx, so fall back to the project-local tsx package which
+  // Node resolves from node_modules via `--import tsx`.
   const args: string[] = [];
   for (let index = 0; index < process.execArgv.length - 1; index += 1) {
     const flag = process.execArgv[index];
@@ -16,7 +26,7 @@ function tsxLoaderArgs(): string[] {
       index += 1;
     }
   }
-  return args;
+  return args.length ? args : ["--import", "tsx"];
 }
 
 function runCli(fakePi: string, verdict: string, childExit = "0") {
@@ -53,9 +63,8 @@ test("invalid loop arguments print usage and exit 2", () => {
   assert.match(result.stderr, /pi-review loop/);
 });
 
-test("single-review CLI maps structured status to gate exit codes", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-cli-exit-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("single-review CLI maps structured status to gate exit codes", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-cli-exit-"));
   const fakePi = path.join(tempDir, "fake-pi");
   fs.writeFileSync(fakePi, `#!/usr/bin/env node
 const verdict = process.env.FAKE_REVIEW_VERDICT;

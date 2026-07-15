@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { extractFinalText, extractUsage, JsonEventStream } from "./json-events.js";
 
 function lines(...events: unknown[]): string {

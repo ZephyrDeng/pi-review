@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { parseInstallCommand } from "./install-args.js";
 
 test("install defaults to pi + agents", () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
 
 test("approve with no material findings is clean", () => {

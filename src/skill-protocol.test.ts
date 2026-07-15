@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test } from "vitest";
 
 const skillPath = fileURLToPath(new URL("../skills/pi-review/SKILL.md", import.meta.url));
 

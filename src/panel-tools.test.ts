@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { PANEL_READ_ONLY_TOOLS, resolvePanelReviewerTools } from "./panel.js";
 
 test("panel reviewers default to the hard read-only allowlist", () => {

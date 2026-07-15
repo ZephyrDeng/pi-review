@@ -4,9 +4,19 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { test, afterEach } from "vitest";
+
+let tempDir = "";
+afterEach(() => {
+  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  tempDir = "";
+});
 
 function tsxLoaderArgs(): string[] {
+  // Reuse an already-loaded tsx loader when present (e.g. running tests via
+  // `npx tsx --test`), so we don't double-register. Under vitest the worker's
+  // execArgv has no tsx, so fall back to the project-local tsx package which
+  // Node resolves from node_modules via `--import tsx`.
   const args: string[] = [];
   for (let index = 0; index < process.execArgv.length - 1; index += 1) {
     const flag = process.execArgv[index];
@@ -16,7 +26,7 @@ function tsxLoaderArgs(): string[] {
       index += 1;
     }
   }
-  return args;
+  return args.length ? args : ["--import", "tsx"];
 }
 
 function cliPath(): string {
@@ -94,9 +104,8 @@ function metaRecord(result: { stderr: string; stdout: string }): Record<string, 
   return JSON.parse(metaLine.slice("PI_REVIEW_META_JSON: ".length));
 }
 
-test("panel review with two corroborating reviewers confirms one finding and exits 1", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel review with two corroborating reviewers confirms one finding and exits 1", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "agree-bug", ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"]);
@@ -115,9 +124,8 @@ test("panel review with two corroborating reviewers confirms one finding and exi
   assert.equal((meta!.confirmedClusters as Array<{ supportCount: number }>)[0]!.supportCount, 2);
 });
 
-test("panel review where all reviewers approve is clean and exits 0", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel review where all reviewers approve is clean and exits 0", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "all-clean", ["--reviewers", "3"]);
@@ -129,9 +137,8 @@ test("panel review where all reviewers approve is clean and exits 0", (t) => {
   assert.equal((meta!.advisories as unknown[]).length, 0);
 });
 
-test("panel review with a singleton finding keeps it advisory and stays clean under quorum", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel review with a singleton finding keeps it advisory and stays clean under quorum", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "singleton", ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"]);
@@ -144,9 +151,8 @@ test("panel review with a singleton finding keeps it advisory and stays clean un
   assert.equal((meta!.advisories as Array<{ supportCount: number }>)[0]!.supportCount, 1);
 });
 
-test("panel review with a reviewer runtime failure is blocked and exits 4", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel review with a reviewer runtime failure is blocked and exits 4", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "runtime-fail", ["--reviewers", "3"]);
@@ -158,9 +164,8 @@ test("panel review with a reviewer runtime failure is blocked and exits 4", (t) 
   assert.equal((meta!.confirmedClusters as unknown[]).length, 0);
 });
 
-test("panel review emits exactly one aggregate metadata record", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel review emits exactly one aggregate metadata record", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "agree-bug", ["--reviewers", "3"]);
@@ -170,16 +175,15 @@ test("panel review emits exactly one aggregate metadata record", (t) => {
 });
 
 test("panel rejects session reuse flags with usage exit 2", () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   fs.rmSync(tempDir, { recursive: true, force: true });
   const result = runPanelCli("pi", "agree-bug", ["--reviewers", "3", "--keep-session"]);
   assert.equal(result.status, 2);
   assert.match(result.stderr, /panel cannot be used with/);
 });
 
-test("panel loop runs one full panel per round and reports a panel summary", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel loop runs one full panel per round and reports a panel summary", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = spawnSync(
@@ -192,9 +196,8 @@ test("panel loop runs one full panel per round and reports a panel summary", (t)
   assert.match(result.stdout, /panel 3\/3/);
 });
 
-test("named panel preset propagates panelPreset to metadata and output", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("named panel preset propagates panelPreset to metadata and output", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "agree-bug", ["--panel", "code-experts", "--consensus", "quorum", "--min-agree", "2"]);
@@ -210,9 +213,8 @@ test("named panel preset propagates panelPreset to metadata and output", (t) => 
   assert.match(result.stdout, /Panel\s+code-experts/);
 });
 
-test("named panel preset reviewer ids appear in supporting reviewer ids", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("named panel preset reviewer ids appear in supporting reviewer ids", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "agree-bug", ["--panel", "code-experts", "--consensus", "quorum", "--min-agree", "2"]);
@@ -222,9 +224,8 @@ test("named panel preset reviewer ids appear in supporting reviewer ids", (t) =>
   assert.deepEqual(cluster.supportingReviewerIds.sort(), ["correctness", "security"]);
 });
 
-test("panel events-jsonl emits only normalized lifecycle events and carries the final metadata", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel events-jsonl emits only normalized lifecycle events and carries the final metadata", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
 
   const result = runPanelCli(fakePi, "agree-bug", ["--reviewers", "3", "--output-format", "events-jsonl"]);
@@ -237,9 +238,8 @@ test("panel events-jsonl emits only normalized lifecycle events and carries the 
   assert.doesNotMatch(result.stdout, /PI_REVIEW_META_JSON|── pi-review/);
 });
 
-test("panel events-jsonl keeps the default CLI gate metadata semantics", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel events-jsonl keeps the default CLI gate metadata semantics", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
   const args = ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"];
   const human = runPanelCli(fakePi, "agree-bug", args);
@@ -253,9 +253,8 @@ test("panel events-jsonl keeps the default CLI gate metadata semantics", (t) => 
   assert.equal(eventMeta.panelHealth, humanMeta!.panelHealth);
 });
 
-test("panel keeps full redacted findings for the CLI while bounding renderer events", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel keeps full redacted findings for the CLI while bounding renderer events", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
   const args = ["--reviewers", "2", "--consensus", "quorum", "--min-agree", "2"];
   const human = runPanelCli(fakePi, "long-finding", args);
@@ -265,9 +264,8 @@ test("panel keeps full redacted findings for the CLI while bounding renderer eve
   assert.ok(completed.meta.confirmedClusters[0]!.summary.length <= 512);
 });
 
-test("panel rejects disallowed tools before writing a partial event stream", (t) => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
-  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+test("panel rejects disallowed tools before writing a partial event stream", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
   const fakePi = writeFakePi(tempDir);
   const result = runPanelCli(fakePi, "agree-bug", ["--reviewers", "2", "--tools", "bash", "--output-format", "events-jsonl"]);
   assert.equal(result.status, 2);

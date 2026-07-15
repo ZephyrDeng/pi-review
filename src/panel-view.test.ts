@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { createPanelViewState, reducePanelEvent } from "./panel-view.js";
 import type { ReviewEvent } from "./review-events.js";
 
