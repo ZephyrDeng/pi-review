@@ -18,6 +18,25 @@ function getLatestVersion(): string | null {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+/** Compare numeric semver cores (1.2.3[-tag] → major.minor.patch). Returns -1/0/1. */
+export function compareSemver(a: string, b: string): number {
+  const parse = (v: string): number[] => {
+    const core = v.trim().replace(/^v/i, "").split("-")[0] ?? "";
+    const parts = core.split(".").map((p) => {
+      const n = Number.parseInt(p, 10);
+      return Number.isFinite(n) ? n : 0;
+    });
+    return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i]! < pb[i]!) return -1;
+    if (pa[i]! > pb[i]!) return 1;
+  }
+  return 0;
+}
+
 function box(lines: string[]): string {
   const width = Math.max(...lines.map((l) => l.length));
   const pad = (s: string) => s + " ".repeat(width - s.length);
@@ -53,14 +72,27 @@ export function runUpdate(): void {
     process.exit(1);
   }
 
+  const cmp = compareSemver(current, latest);
   let packageLine: string;
-  if (current === latest) {
+
+  if (cmp === 0) {
     packageLine = `Package already up to date (v${current})`;
     process.stdout.write(
       box([
         `pi-review v${current}`,
         "",
         "Package already up to date ✓",
+        "Refreshing agent skill...",
+      ]),
+    );
+  } else if (cmp > 0) {
+    // Local/dev build is ahead of the registry — do not reinstall @latest (would downgrade).
+    packageLine = `Local v${current} is newer than npm v${latest}`;
+    process.stdout.write(
+      box([
+        packageLine,
+        "",
+        "Skipping package install (would downgrade)",
         "Refreshing agent skill...",
       ]),
     );
