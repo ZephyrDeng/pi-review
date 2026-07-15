@@ -449,12 +449,23 @@ export async function runPanelReviewOnce(
     matcher,
   });
 
+  // Panel-level thinking: only surface a single value when every reviewer agrees;
+  // otherwise omit (footer used to show shared/preset high while rows were :low).
+  const reviewerThinkings = submissions.map((s) => s.thinking).filter((t): t is string => Boolean(t));
+  const uniqueThinkings = [...new Set(reviewerThinkings)];
+  const panelThinking =
+    uniqueThinkings.length === 1
+      ? uniqueThinkings[0]
+      : uniqueThinkings.length > 1
+        ? "mixed"
+        : parsed.thinking || preset.thinking;
+
   const panelMeta: PanelReviewMeta = {
     ...aggregate,
     reviewMode: parsed.mode,
     durationMs: Date.now() - startedAt,
     model: parsed.model || preset.model || null,
-    thinking: parsed.thinking || preset.thinking,
+    thinking: panelThinking,
     usage: sumPanelUsage(submissions.map((s) => s.usage)),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
   };

@@ -3,18 +3,18 @@ import { fileURLToPath } from "node:url";
 import { Writable } from "node:stream";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getMarkdownTheme, keyHint } from "@earendil-works/pi-coding-agent";
-import { Markdown, Text, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { keyHint } from "@earendil-works/pi-coding-agent";
+import { Text, type Component } from "@earendil-works/pi-tui";
 import {
   createPanelViewState,
   formatCost,
   formatDurationMs,
-  formatPanelFindingsMarkdown,
   formatPanelMetaAscii,
   formatTokens,
   formatUsage,
   reducePanelEvent,
   spawnStreamingChild,
+  type PanelReviewMeta,
   type PanelViewState,
   type ReviewEvent,
 } from "@zephyrdeng/pi-review";
@@ -65,40 +65,6 @@ function compactText(state: PanelViewState, theme: Theme, now = Date.now()): str
   return [header, ...rows].join("\n");
 }
 
-function fallbackMarkdownTheme(theme: Theme): MarkdownTheme {
-  return {
-    heading: theme.bold,
-    link: (text) => text,
-    linkUrl: (text) => text,
-    code: (text) => text,
-    codeBlock: (text) => text,
-    codeBlockBorder: (text) => text,
-    quote: (text) => text,
-    quoteBorder: (text) => text,
-    hr: (text) => text,
-    listBullet: (text) => text,
-    bold: theme.bold,
-    italic: (text) => text,
-    strikethrough: (text) => text,
-    underline: (text) => text,
-  };
-}
-
-/** Prefer Pi host markdown theme; keep a portable fallback for unit tests / partial hosts. */
-export function resolveMarkdownTheme(theme: Theme): MarkdownTheme {
-  try {
-    const hostTheme = getMarkdownTheme();
-    if (hostTheme && typeof hostTheme.heading === "function") {
-      // getMarkdownTheme() can return wrappers that throw until initTheme() runs.
-      hostTheme.heading("probe");
-      return hostTheme;
-    }
-  } catch {
-    // Outside a fully initialized Pi interactive theme.
-  }
-  return fallbackMarkdownTheme(theme);
-}
-
 /** Expand hint that respects configured keybindings when available. */
 export function expandHint(): string {
   try {
@@ -106,6 +72,38 @@ export function expandHint(): string {
   } catch {
     return "ctrl+o to expand";
   }
+}
+
+/** Plain-text findings list (no markdown). Pi TUI does not render markdown. */
+export function formatFindingsPlain(meta: PanelReviewMeta): string {
+  const lines: string[] = [];
+  if (meta.confirmedClusters.length > 0) {
+    lines.push("Confirmed findings:");
+    for (const c of meta.confirmedClusters) {
+      const bits = [
+        c.summary,
+        c.severity,
+        c.path,
+        `${c.supportCount}/${meta.configuredReviewers} reviewers`,
+        c.supportingReviewerIds.join(", "),
+      ].filter(Boolean);
+      lines.push(`  - ${bits.join(" · ")}`);
+    }
+  }
+  if (meta.advisories.length > 0) {
+    lines.push("Advisories (non-blocking):");
+    for (const c of meta.advisories) {
+      const bits = [
+        c.summary,
+        c.severity,
+        c.path,
+        `${c.supportCount}/${meta.configuredReviewers} reviewers`,
+        c.supportingReviewerIds.join(", "),
+      ].filter(Boolean);
+      lines.push(`  - ${bits.join(" · ")}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function reviewerSummaryLines(state: PanelViewState): string[] {
@@ -145,30 +143,23 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
 
 /**
  * Full panel conclusion for the parent LLM and expanded TUI.
- * Leads with the classic CLI ASCII chrome (`── pi-review panel ──`) so the
- * in-Pi tool path matches the shell footer users already know, then appends
- * findings markdown and per-reviewer summaries for the host agent.
+ * Pure plain text / ASCII only — Pi does not render markdown in tool results.
  */
 export function buildPanelResultContent(state: PanelViewState, error?: string): string {
   const meta = state.meta;
   if (!meta && !error) return "Panel completed: unknown";
   if (!meta) return error ?? "Panel completed: unknown";
 
-  const findingsMd = formatPanelFindingsMarkdown(meta);
-  // Fenced so Markdown renderers keep monospacing / don't mangle the box lines.
-  const ascii = "```\n" + formatPanelMetaAscii(meta) + "\n```";
+  const findings = formatFindingsPlain(meta);
+  const ascii = formatPanelMetaAscii(meta);
   const summaries = reviewerSummaryLines(state);
   const parts = [
-    findingsMd,
+    findings,
     ascii,
-    summaries.length ? `### Reviewer summaries\n${summaries.join("\n")}` : "",
-    error ? `### Error\n${error}` : "",
+    summaries.length ? `Reviewer summaries:\n${summaries.join("\n")}` : "",
+    error ? `Error:\n${error}` : "",
   ].filter(Boolean);
   return parts.join("\n\n");
-}
-
-function finalMarkdown(state: PanelViewState): string {
-  return buildPanelResultContent(state);
 }
 
 function ambientStatus(state: PanelViewState, now = Date.now()): string {
@@ -194,16 +185,11 @@ function setAmbientStatus(ctx: PanelToolContext | undefined, text: string | unde
 export class PanelResultView implements Component {
   private readonly compact = new Text("", 0, 0);
   private readonly activity = new Text("", 0, 0);
+  private readonly conclusion = new Text("", 0, 0);
   private readonly error = new Text("", 0, 0);
-  private markdown: Markdown | undefined;
   private showActivity = false;
-  private showMarkdown = false;
+  private showConclusion = false;
   private showError = false;
-  private readonly mdTheme: MarkdownTheme;
-
-  constructor(mdTheme: MarkdownTheme) {
-    this.mdTheme = mdTheme;
-  }
 
   update(details: PanelToolDetails, expanded: boolean, theme: Theme, isPartial = false, now = Date.now()): void {
     const body = compactText(details.state, theme, now);
@@ -211,7 +197,7 @@ export class PanelResultView implements Component {
       // Discoverability: host expand binding (default ctrl+o).
       this.compact.setText(`${body}\n${expandHint()}`);
       this.showActivity = false;
-      this.showMarkdown = false;
+      this.showConclusion = false;
       this.showError = Boolean(details.error);
       if (details.error) this.error.setText(theme.fg("error", details.error));
       return;
@@ -224,12 +210,10 @@ export class PanelResultView implements Component {
     this.showActivity = activityBlocks.length > 0;
     if (this.showActivity) this.activity.setText(activityBlocks.join("\n\n"));
 
-    const markdown = !isPartial && details.state.meta ? finalMarkdown(details.state) : "";
-    this.showMarkdown = Boolean(markdown);
-    if (markdown) {
-      if (!this.markdown) this.markdown = new Markdown(markdown, 0, 0, this.mdTheme);
-      else this.markdown.setText(markdown);
-    }
+    // Plain Text only — Pi does not render markdown in tool result components.
+    const conclusion = !isPartial && details.state.meta ? buildPanelResultContent(details.state) : "";
+    this.showConclusion = Boolean(conclusion);
+    if (conclusion) this.conclusion.setText(conclusion);
 
     this.showError = Boolean(details.error);
     if (details.error) this.error.setText(theme.fg("error", details.error));
@@ -238,8 +222,8 @@ export class PanelResultView implements Component {
   invalidate(): void {
     this.compact.invalidate();
     this.activity.invalidate();
+    this.conclusion.invalidate();
     this.error.invalidate();
-    this.markdown?.invalidate();
   }
 
   render(width: number): string[] {
@@ -248,9 +232,9 @@ export class PanelResultView implements Component {
       lines.push("");
       lines.push(...this.activity.render(width));
     }
-    if (this.showMarkdown && this.markdown) {
+    if (this.showConclusion) {
       lines.push("");
-      lines.push(...this.markdown.render(width));
+      lines.push(...this.conclusion.render(width));
     }
     if (this.showError) {
       lines.push("");
@@ -262,7 +246,7 @@ export class PanelResultView implements Component {
 
 export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component, isPartial = false, now = Date.now()): Component {
   if (!details) return new Text(theme.fg("muted", isPartial ? `${PANEL_TOOL_DISPLAY_NAME} · starting…` : "Panel review has no progress details."), 0, 0);
-  const view = previous instanceof PanelResultView ? previous : new PanelResultView(resolveMarkdownTheme(theme));
+  const view = previous instanceof PanelResultView ? previous : new PanelResultView();
   view.update(details, expanded, theme, isPartial, now);
   return view;
 }

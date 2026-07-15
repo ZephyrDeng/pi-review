@@ -36,9 +36,9 @@ node ../../bin/pi-review.js --help
 
 Quote metrics from the run output; never estimate or invent them.
 
-- **ASCII footer** (the `── pi-review` / `── pi-review panel` block): Duration, Tokens as `in · out · cache · reason` plus total, and Cost — the provider-reported value, or `n/a` when the provider reports none. On Pi `/rv` the panel tool result uses this same classic ASCII chrome (not a free-form markdown table).
-- **Pi Review Panel**: each reviewer row shows **role persona · lifecycle · model · thinking · elapsed · tokens**. Lifecycle is `queued` / `running` / `completed` / `failed` / `cancelled`. Expanded view adds bounded activity, findings with provenance, and per-reviewer metrics.
-- Machine output: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit it on stdout). Show users the Markdown body and ASCII footer, not raw JSON, unless they ask for machine output.
+- **ASCII footer** (the `── pi-review` / `── pi-review panel` block): Duration, Tokens as `in · out · cache · reason` plus total, and Cost — the provider-reported value, or `n/a` when the provider reports none. On Pi `/rv` the panel tool result is **plain text / ASCII only** (Pi does not render markdown in tool results) — same classic chrome as the CLI, no `###` headings or fenced code blocks.
+- **Pi Review Panel**: each reviewer row shows **role persona · lifecycle · model · thinking · elapsed · tokens**. Lifecycle is `queued` / `running` / `completed` / `failed` / `cancelled`. Expanded view adds bounded activity, plain-text findings, and the ASCII footer.
+- Machine output: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit it on stdout). Show users the plain review text and ASCII footer, not raw JSON, unless they ask for machine output. Do **not** rewrap the tool result into markdown tables or `###` report sections.
 
 ## Pi host (`/rv*`)
 
@@ -208,7 +208,7 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
    Completion criterion: the command includes the resolved model/default choice and a concrete natural-language review target.
 
 4. Return the result:
-   - Show the Markdown review body and the ASCII footer, with metrics quoted per **Run metrics**.
+   - Show the review conclusion and ASCII footer as plain text, with metrics quoted per **Run metrics**. Do not reformat into markdown tables or invented `###` sections — Pi does not render markdown for this output.
    - For an ordinary review-only request, do not apply findings automatically; implementation is a separate user decision. When the user already requested implementation closeout, follow **Loop closeout protocol** and let only the host fix accepted in-scope blockers.
    Completion criterion: the user sees the review conclusion and readable footer.
 

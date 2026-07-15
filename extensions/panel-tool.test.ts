@@ -8,7 +8,6 @@ import {
   PanelResultView,
   registerPanelReviewTool,
   renderPanelResult,
-  resolveMarkdownTheme,
 } from "./panel-tool.js";
 
 const theme = {
@@ -88,9 +87,7 @@ test("Pi panel renderer reuses the same PanelResultView across updates", () => {
   assert.match(expanded.render(120).join("\n"), /r1 Independent reviewer · running/);
 });
 
-test("resolveMarkdownTheme and expandHint stay usable outside a live Pi session", () => {
-  const mdTheme = resolveMarkdownTheme(theme);
-  assert.equal(typeof mdTheme.heading, "function");
+test("expandHint stays usable outside a live Pi session", () => {
   assert.match(expandHint(), /expand/i);
 });
 
@@ -177,13 +174,15 @@ test("Pi panel renderer expands final findings and reviewer provenance", () => {
   });
   const expanded = renderPanelResult({ state }, true, theme).render(120).join("\n");
   assert.match(expanded, /── pi-review panel/);
-  assert.match(expanded, /Panel Findings \(confirmed\)|Auth bypass/);
+  assert.match(expanded, /Confirmed findings:|Auth bypass/);
   assert.match(expanded, /Auth bypass/);
-  assert.match(expanded, /Panel Advisories|Naming nit/);
+  assert.match(expanded, /Advisories \(non-blocking\)|Naming nit/);
   assert.match(expanded, /Naming nit/);
   assert.match(expanded, /security/);
   assert.match(expanded, /openai\/gpt/);
   assert.match(expanded, /HAS FINDINGS|has_findings/);
+  // No markdown chrome in the expanded tool view.
+  assert.doesNotMatch(expanded, /### |```/);
 
   state = reducePanelEvent(createPanelViewState(), {
     v: 1,
@@ -370,18 +369,20 @@ test("panel tool content carries full conclusion for the parent LLM", () => {
 
   const content = buildPanelResultContent(state);
   assert.match(content, /── pi-review panel/);
-  assert.match(content, /Panel Findings \(confirmed\)|Auth bypass/);
+  assert.match(content, /Confirmed findings:/);
   assert.match(content, /Auth bypass/);
-  assert.match(content, /Panel Advisories|Naming nit/);
+  assert.match(content, /Advisories \(non-blocking\):/);
   assert.match(content, /Naming nit/);
-  assert.match(content, /Status\s+has findings|has_findings/);
+  assert.match(content, /Status\s+has findings|HAS FINDINGS|has_findings/);
   assert.match(content, /security/);
   assert.match(content, /openai\/gpt/);
-  assert.match(content, /### Reviewer summaries/);
+  assert.match(content, /Reviewer summaries:/);
   assert.match(content, /Auth bypass in session cookie/);
+  assert.doesNotMatch(content, /### |```/);
 
   const expanded = renderPanelResult({ state }, true, theme).render(160).join("\n");
   assert.match(expanded, /── pi-review panel/);
-  assert.match(expanded, /Reviewer summaries/);
+  assert.match(expanded, /Reviewer summaries:/);
   assert.match(expanded, /Auth bypass in session cookie/);
+  assert.doesNotMatch(expanded, /### |```/);
 });
