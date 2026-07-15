@@ -12,16 +12,14 @@ General Codex subagent and worktree mappings live in the **using-superpowers** s
 
 ## Long-running `pi-review` (default on Codex / Claude Code)
 
-Native shell tools usually **buffer stdout/stderr until the command exits**. A multi-minute `pi-review` run can look like a silent wait, then one large dump. `pi-review` mitigates this in two ways that need **no** `--progress-log`:
-
-1. **Semantic milestone notices on stderr** (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`). Capture stderr separately or interleave it to show progress.
-2. **Token usage by default**: the ASCII footer and `PI_REVIEW_META_JSON` always include `thinking` + token usage (`input`/`output`/`cache`/`reasoning`) when the child session reports them — no `--progress-log` required.
+Native shell tools on these hosts **buffer stdout/stderr until the command exits**. A multi-minute foreground `pi-review` run looks like a silent wait, then one large dump — never promise live foreground streaming.
 
 When the **pi-review** skill applies on Codex, Claude Code, or Cursor:
 
-1. **Default:** run `pi-review ... -- <target>` (foreground or background). Stderr carries milestone notices; stdout carries the review Markdown + ASCII footer on exit.
-2. If you want the **full** `--mode json` event log for fine-grained debugging, add `--progress-log <path>` and tail it — but this is optional, not required for tokens or progress.
-3. After exit, show the Markdown review body and ASCII `── pi-review` footer (skill step 4).
+1. **Default:** run `pi-review ... --progress-log <path> -- <target>` in the **background** and **tail the log** for user-visible progress (see the tail example below). Stdout still delivers the review Markdown + ASCII footer on exit.
+2. `--progress-log` tees the raw `--mode json` event stream to the chosen file for observation and debugging. It is **not** a prerequisite for metrics: the ASCII footer and `PI_REVIEW_META_JSON` always include `thinking` + token usage (`input`/`output`/`cache`/`reasoning`) when the child session reports them.
+3. `pi-review` also writes semantic milestone notices to stderr (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`); they surface once the host flushes output.
+4. After exit, show the Markdown review body and ASCII `── pi-review` footer (skill step 4).
 
 **Pi interactive (`/rv`)**: foreground `pi-review`, default streaming. Text deltas appear live on the terminal; no `--progress-log` unless the user asked.
 
@@ -29,11 +27,11 @@ See the parent skill: sections *Default workflow by host* and *Streaming vs agen
 
 ### Loop closeout
 
-`loop` composes with the same default streaming + stderr-milestone workflow:
+`loop` composes with the same background + `--progress-log` + tail workflow:
 
 ```bash
-pi-review loop --max-rounds 1 -- @src
-# optional: --progress-log /tmp/pi-review-loop.jsonl for the full event log
+pi-review loop --max-rounds 1 --progress-log /tmp/pi-review-loop.jsonl -- @src
+# CLI default when --max-rounds is omitted: 3; --until clean defaults to a hard cap of 10
 ```
 
 A non-zero command exit is an expected gate result when findings remain. Wait for the process, read the final `PI_REVIEW_META_JSON` / loop summary, let the host fix only accepted in-scope findings, rerun focused proof, and invoke a new loop process. The child review session never edits. Reuse or truncate the progress log deliberately because every loop round appends events to the chosen path.
