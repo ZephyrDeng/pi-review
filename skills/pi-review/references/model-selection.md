@@ -9,6 +9,7 @@ Use this after `pi-review models` (or `pi-review models <search>`). **Never inve
 3. Walk the **priority list** for that profile; pick the **first** row whose `idContains` matches some listed model id (case-insensitive substring). If several ids match one row, prefer the **newest** id (higher version suffix, e.g. `2.7` over `2.5`, `4-8` over `4-6`).
 4. Set `--model <exact-listed-provider/model>` from the catalog. Add `:thinking` only if that model supports it in Pi and the preset suggests it (see thinking column).
    - User “max / 最高档” maps to Pi thinking `xhigh` when supported; otherwise fall back to the highest available level.
+   - User “low / off / medium / high” maps to that exact level when supported — **do not upgrade** a user-specified low/off to high/xhigh.
 5. If **no** priority row matches anything in the catalog, either omit `--model` (Pi default) or pick the best **reasoning** model with a large context window from the list—state the choice in one line to the user.
 
 ## Profiles
@@ -83,6 +84,7 @@ If the user specifies a model, resolve against the catalog instead of inventing 
 3. If several unrelated families match, show the top candidates and ask. Do not silently jump from `gpt` to `claude`.
 4. Thinking aliases are allowed: `max`/`最高`/`最高档` → `xhigh`, `高` → `high`, `中` → `medium`, `快`/`off` → `off`. If unsupported by the chosen model, fall back to the nearest supported level.
 5. Inline form `provider/model:thinking` is valid.
+6. **Panel per-reviewer overrides** use the same inline form: `--reviewer-model r1=provider/model:low` (or `reviewerModels: ["r1=..."]` on `pi_review`). The CLI splits the trailing thinking level into its own field so a shared `--thinking high` / preset cannot clobber a per-reviewer `:low`. Prefer this over putting thinking only on the shared flag when reviewers need different levels.
 
 On Pi `/rv*`, short model/thinking tokens are resolved against the live registry before the review starts. On other hosts, run `pi-review models <fragment>` and apply the same rules.
 

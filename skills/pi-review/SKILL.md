@@ -36,8 +36,8 @@ node ../../bin/pi-review.js --help
 
 Quote metrics from the run output; never estimate or invent them.
 
-- **ASCII footer** (the `── pi-review` block on stdout): Duration, Tokens as `in · out · cache · reason` plus total, and Cost — the provider-reported value, or `n/a` when the provider reports none.
-- **Pi Review Panel**: each reviewer row shows its lifecycle state (`queued` / `running` / `completed` / `failed` / `cancelled`), active tool, elapsed time, and token totals; the expanded result adds bounded activity, findings with provenance, and per-reviewer run metrics (duration, tokens, cost or `n/a`).
+- **ASCII footer** (the `── pi-review` / `── pi-review panel` block): Duration, Tokens as `in · out · cache · reason` plus total, and Cost — the provider-reported value, or `n/a` when the provider reports none. On Pi `/rv` the panel tool result uses this same classic ASCII chrome (not a free-form markdown table).
+- **Pi Review Panel**: each reviewer row shows **role persona · lifecycle · model · thinking · elapsed · tokens**. Lifecycle is `queued` / `running` / `completed` / `failed` / `cancelled`. Expanded view adds bounded activity, findings with provenance, and per-reviewer metrics.
 - Machine output: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit it on stdout). Show users the Markdown body and ASCII footer, not raw JSON, unless they ask for machine output.
 
 ## Pi host (`/rv*`)
@@ -124,6 +124,8 @@ Panel review runs multiple **independent** reviewers in isolated child sessions 
 
 - **Single review (default):** keep for small, low-cost changes. Reviewer count defaults to one; the existing execution, output, status mapping, and exit policy stay unchanged.
 - **Panel review:** use when a change deserves independent scrutiny. Activate it with `--reviewers <n>` (2-8) or `--panel <name>`; the two flags cannot combine. `--reviewers 1` stays a shell single review, and the `pi_review` API tool accepts only 2-8 reviewers.
+- **Generic `--reviewers N` roles** are distinct persona labels (rappers / AI KOLs / sports stars), **not** the literal string `Independent reviewer`. Named presets (`code-experts`) keep their fixed roles (correctness/security/testing). Do not invent or hardcode role names when calling `pi_review` — the CLI assigns them.
+- **Per-reviewer thinking**: pass `id=provider/model:thinking` via `--reviewer-model` / `reviewerModels` (e.g. `r1=zenmux/deepseek/deepseek-v4-flash:low`). The `:thinking` suffix is stripped into the thinking field and **must not** be overridden by a shared `--thinking` or preset default. Display should look like `model · low`, never `model:low · high`.
 
 ### Consensus
 
@@ -161,8 +163,10 @@ Panel review rejects `--keep-session`, `--continue`, and `--name` in v1 (reviewe
 ### Examples
 
 ```bash
-# Single panel review
+# Single panel review (roles auto-assigned as distinct personas)
 pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
+# Per-reviewer model + thinking (suffix wins over shared --thinking)
+pi-review --reviewers 3 --reviewer-model r1=zenmux/deepseek/deepseek-v4-flash:low --reviewer-model r2=zenmux/minimax/minimax-m3:off -- @src
 # Expert preset
 pi-review --panel code-experts --consensus majority -- @src
 # Panel loop review (up to 6 reviewer runs + adjudication)

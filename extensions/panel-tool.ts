@@ -295,7 +295,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       mode: Type.Optional(Type.String({ description: "Review mode; defaults to code." })),
       panel: Type.Optional(Type.String({ description: "Named panel preset; defaults to code-experts when reviewers is omitted." })),
       reviewers: Type.Optional(Type.Number({ minimum: 2, maximum: 8, description: "Independent reviewer count (2-8). Cannot combine with panel; single review uses the shell CLI." })),
-      reviewerModels: Type.Optional(Type.Array(Type.String(), { description: "Per-reviewer models as id=provider/model (e.g. r1=openai/gpt-5.6-sol)." })),
+      reviewerModels: Type.Optional(Type.Array(Type.String(), { description: "Per-reviewer models as id=provider/model[:thinking] (e.g. r1=openai/gpt-5.6-sol:low). Trailing :thinking wins over shared thinking." })),
       consensus: Type.Optional(Type.String({ description: "any | quorum | majority | unanimous" })),
       minAgree: Type.Optional(Type.Number({ description: "Quorum threshold when consensus=quorum" })),
       consensusModel: Type.Optional(Type.String({ description: "Model for semantic adjudication only" })),
