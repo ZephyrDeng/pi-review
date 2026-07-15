@@ -27,10 +27,12 @@ node ../../bin/pi-review.js --help
 |------|-------------------------|
 | **Pi** (`/rv`) | New panel reviews call the native `pi_review` API tool, shown to users as **Pi Review Panel**, which launches the packaged CLI in event mode and renders live reviewer state. Continuations, kept sessions, `/rv-loop`, and explicit `--no-stream` use the shell CLI. |
 | **Pi terminal** | Foreground `pi-review`; text deltas stream live by default. |
-| **Claude Code / Codex / Cursor** and similar agent hosts | These hosts buffer a shell tool's output until the command exits, so a foreground run looks like a silent wait. **Default: `--progress-log <path>` + background run + tail the log** — see [references/codex-tools.md](./references/codex-tools.md). Map skill mentions of `Bash` to your host shell tool. |
+| **Claude Code / Codex / Cursor** and similar agent hosts | These hosts buffer a shell tool's output until the command exits, so a foreground run looks like a silent wait. **Panel review (`--reviewers`/`--panel`) default: `--ui web --ui-url-file <path>` + background run** — hand the user the printed dashboard URL so they watch live progress in a browser instead of the chat. **Single review / `loop` default: `--progress-log <path>` + background run + tail the log** (`--ui web` requires an active panel and rejects `loop`). See [references/codex-tools.md](./references/codex-tools.md). Map skill mentions of `Bash` to your host shell tool. |
 | Scripts / CI | Foreground is fine; add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`). |
 
 `--progress-log <path>` tees the raw `--mode json` event stream to a file for outside observation and debugging; it is never a prerequisite for metrics. Token usage accumulates by default, and `pi-review` writes milestone notices (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`) to stderr.
+
+`--ui web` starts a loopback-only browser dashboard for panel review; `--ui-url-file <path>` writes its URL atomically so a buffered-output host can read it without parsing stderr. It never substitutes for panel semantics — findings, gate status, and exit code come from the same `PI_REVIEW_META_JSON` as always.
 
 ## Run metrics
 
@@ -74,7 +76,7 @@ There is **no** `/status` slash in this skill. When the user asks for **review s
 
 3. **Last conclusion** — if this conversation already has the ASCII `── pi-review` footer, quote verdict, duration, and session path instead of re-running the review.
 
-4. **Live output** — for live progress, re-run with the host's default workflow (background + `--progress-log` + tail on agent hosts), or a terminal running `pi-review` as a fallback.
+4. **Live output** — for live progress, re-run with the host's default workflow: panel review gets `--ui web` (browser dashboard) on agent hosts, single review/`loop` gets background + `--progress-log` + tail; a terminal running `pi-review` is a fallback for either.
 
 Do not implement findings from a status check; status is informational only.
 
@@ -171,6 +173,8 @@ pi-review --reviewers 3 --reviewer-model r1=zenmux/deepseek/deepseek-v4-flash:lo
 pi-review --panel code-experts --consensus majority -- @src
 # Panel loop review (up to 6 reviewer runs + adjudication)
 pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
+# Claude Code / Codex / Cursor default: browser dashboard instead of a tailed log
+pi-review --reviewers 3 --ui web --ui-url-file /tmp/pi-review-ui-url.txt -- @src
 ```
 
 ## Steps
@@ -229,4 +233,5 @@ pi-review loop --max-rounds 1 --progress-log /tmp/pi-review-loop.jsonl -- @src
 ## Status examples (user phrasing)
 
 - "review status" / "is the review still running?" → run **Review status** checks above.
-- "show streaming in Claude Code" / "the wait is bad, is there a better way" → explain that the host buffers tool output; re-run with the default background + `--progress-log` + tail workflow (or Pi `/rv`), offering a local terminal only as a fallback.
+- "show streaming in Claude Code" / "the wait is bad, is there a better way" → explain that the host buffers tool output; re-run with the default workflow for the run type — panel review gets `--ui web` (share the dashboard URL), single review/`loop` gets background + `--progress-log` + tail (or Pi `/rv`) — offering a local terminal only as a fallback.
+- "give me a dashboard" / "watch it in the browser" / "can I see this visually" → if the run is (or can be) a panel review, re-run with `--ui web --ui-url-file <path>` and share the printed URL; single review and `loop` do not support `--ui web` (offer to make it a panel review, or fall back to `--progress-log` + tail).
