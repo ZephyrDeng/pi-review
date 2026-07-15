@@ -96,8 +96,16 @@ Use this protocol when the host is closing out implementation work and may edit 
 2. **Run a bounded structured gate.** Prefer the productized command:
    ```bash
    pi-review loop --max-rounds 1 [shared review options] -- <@files|text...>
+   # Or host-driven until-clean (still hard-capped; never unlimited):
+   pi-review loop --until clean --max-rounds 10 [shared review options] -- <@files|text...>
    ```
-   A one-round invocation gives the host a fix point between reviews. Increase `--max-rounds` only when repeated independent review of the unchanged tree is intentional; the CLI never waits for edits. Re-invocation after a host fix is a new process. On Claude Code / Codex, compose `loop` with the normal `--progress-log <path>` background + tail workflow. On Pi, retain default foreground streaming. `loop` rejects `--keep-session`, `--continue`, and `--name`.
+   A one-round invocation gives the host a fix point between reviews. `--until clean` declares the success **goal** and still requires a hard `--max-rounds` ceiling (default 10 when omitted). The CLI never waits for edits and never loops forever on an unchanged tree. Re-invocation after a host fix is a new process (or the next host cycle under until-clean). On Claude Code / Codex, compose `loop` with the normal `--progress-log <path>` background + tail workflow. On Pi, retain default foreground streaming. `loop` rejects `--keep-session`, `--continue`, and `--name`.
+
+   **Clean goal definition:**
+   - Single review: `status=clean` means no actionable findings (notes/non-actionable may remain).
+   - Panel review: `status=clean` means zero **confirmed** actionable clusters. Advisories do **not** fail clean.
+   - `needs_human` / `blocked` never count as clean.
+   - Successful closeout requires exit code `0`.
 3. **Read the gate signals.** Parse `status`, `findings`, and `actionableCount` from each `PI_REVIEW_META_JSON` line and use the final loop summary. Expected statuses are `clean`, `has_findings`, `needs_human`, and `blocked`.
 4. **Apply the scope governor to every finding:**
    - **in-scope blocker** — accepted, actionable, and required by the frozen task; the host may fix it now.
@@ -107,10 +115,11 @@ Use this protocol when the host is closing out implementation work and may edit 
    - Check sibling instances of the same bug class only inside the frozen task/PR scope. Do not turn the check into a repository-wide refactor.
 5. **Fix only in-scope blockers in the host.** Never ask the child review session to implement fixes. After each host patch, rerun the narrowest relevant proof (focused test, typecheck, lint, or reproduction) before re-reviewing.
 6. **Re-review until a stop condition:**
-   - `clean` → gate open; proceed to final proof and closeout.
+   - `clean` → clean goal met; proceed to final proof and closeout.
    - `has_findings` → classify, fix accepted in-scope blockers, and re-invoke within the agreed host-cycle budget.
    - `needs_human` or `blocked` → stop early and escalate with the review history.
    - budget exhausted → report remaining findings and ask for a decision; do not loop indefinitely.
+   - With `--until clean`, the host owns the fix→re-review cycle until clean or hard budget; never claim clean while advisories-only is fine, but confirmed/actionable findings are not.
 7. **Detect non-convergence.** After two non-converging patch cycles (the same finding persists, findings oscillate, or scope grows), pause and reclassify all remaining findings before any further edit.
 8. **Gate completion claims.** Never claim done, ship, commit-ready, or clean without a fresh `clean` result, unless the user gives explicit human acceptance of named remaining findings. Report accepted fixes, rejected findings with rationale, follow-ups, stop reason, and proof evidence.
 
@@ -229,6 +238,7 @@ pi-review --model openai/gpt-5.5 -- "review the auth changes under @src"
 pi-review --mode challenge --keep-session -- @docs/design.md
 pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
 pi-review loop --max-rounds 1 -- @src
+pi-review loop --until clean --max-rounds 10 -- @src
 pi-review loop --max-rounds 1 --progress-log /tmp/pi-review-loop.jsonl -- @src
 ```
 

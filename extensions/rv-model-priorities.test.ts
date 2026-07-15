@@ -40,13 +40,20 @@ describe("resolveReviewProfile", () => {
 
 describe("matchPresetEntry", () => {
   const registry = [
-    m("openai", "gpt-5.5"),
+    m("openai-codex", "gpt-5.6-sol"),
+    m("openai-codex", "gpt-5.6-terra"),
+    m("openai-codex", "gpt-5.6-luna"),
     m("zhipu", "glm-5.2-chat"),
-    m("moonshot", "kimi-k2.7-preview"),
+    m("moonshot", "kimi-k2.7-code"),
     m("moonshot", "kimi-k2.5"),
     m("anthropic", "claude-opus-4-8"),
     m("anthropic", "claude-opus-4-6"),
+    m("anthropic", "claude-sonnet-4-5"),
+    m("anthropic", "claude-fable-5"),
     m("deepseek", "deepseek-v4-pro"),
+    m("deepseek", "deepseek-v4-flash"),
+    m("xai", "grok-4.5"),
+    m("minimax", "minimax-m3"),
   ];
 
   it("picks newest kimi when versionPrefer 2.7", () => {
@@ -56,14 +63,27 @@ describe("matchPresetEntry", () => {
     assert.match(hit!.id, /2\.7|k2\.7/i);
   });
 
-  it("ranks gpt-5.5 first for code presets", () => {
+  it("ranks fast-review models first for code presets", () => {
     const ordered = rankModelsWithPresets(registry, "code", DEFAULT_REVIEW_MODEL_PRIORITIES);
-    assert.equal(ordered[0].id, "gpt-5.5");
-    assert.equal(ordered[1].id, "glm-5.2-chat");
+    assert.equal(ordered[0].id, "claude-sonnet-4-5");
+    assert.equal(ordered[1].id, "deepseek-v4-flash");
+    assert.ok(ordered.some((row) => row.id === "gpt-5.6-terra"));
+    assert.ok(ordered.some((row) => row.id === "gpt-5.6-luna"));
   });
 
-  it("ranks claude-opus-4-8 before older opus for plan", () => {
+  it("ranks complex/plan models with sol then opus then fable", () => {
     const ordered = rankModelsWithPresets(registry, "plan", DEFAULT_REVIEW_MODEL_PRIORITIES);
-    assert.equal(ordered[0].id, "claude-opus-4-8");
+    assert.equal(ordered[0].id, "gpt-5.6-sol");
+    assert.equal(ordered[1].id, "claude-opus-4-8");
+    assert.equal(ordered[2].id, "claude-fable-5");
+    assert.ok(ordered.some((row) => row.id === "deepseek-v4-pro"));
+    assert.ok(ordered.some((row) => row.id === "grok-4.5"));
+  });
+
+  it("ranks vision/frontend with claude then gpt then kimi", () => {
+    const ordered = rankModelsWithPresets(registry, "frontend", DEFAULT_REVIEW_MODEL_PRIORITIES);
+    assert.match(ordered[0].id, /claude/i);
+    assert.ok(ordered.some((row) => /gpt/i.test(row.id)));
+    assert.ok(ordered.some((row) => /kimi/i.test(row.id) && /2\.7/i.test(row.id)));
   });
 });

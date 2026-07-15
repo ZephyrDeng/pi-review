@@ -32,7 +32,10 @@ if (parsed.command === "models") {
   const runOne = isPanelActive(parsed)
     ? () => runPanelReviewOnce(parsed, stdinText)
     : () => runReviewOnce(parsed, stdinText);
-  const result = await runReviewLoop(parsed.maxRounds!, runOne);
+  const result = await runReviewLoop(
+    { maxRounds: parsed.maxRounds!, ...(parsed.until ? { until: parsed.until } : {}) },
+    runOne,
+  );
   process.stdout.write(`${formatLoopSummary(result)}\n`);
   process.exit(result.exitCode);
 } else if (isPanelActive(parsed)) {

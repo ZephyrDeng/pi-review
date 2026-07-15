@@ -33,6 +33,49 @@ test("loop uses a small default review budget", () => {
 
   assert.equal(parsed.command, "loop");
   assert.equal(parsed.maxRounds, 3);
+  assert.equal(parsed.until, undefined);
+});
+
+test("loop --until clean sets goal and a hard default budget of 10", () => {
+  const parsed = parseReviewCommand(["loop", "--until", "clean", "--", "@src"]);
+  assert.equal(parsed.until, "clean");
+  assert.equal(parsed.maxRounds, 10);
+  assert.equal(parsed.maxRoundsExplicit, undefined);
+});
+
+test("loop --until clean keeps an explicit --max-rounds budget", () => {
+  const parsed = parseReviewCommand([
+    "loop", "--until", "clean", "--max-rounds", "7", "--", "@src",
+  ]);
+  assert.equal(parsed.until, "clean");
+  assert.equal(parsed.maxRounds, 7);
+  assert.equal(parsed.maxRoundsExplicit, true);
+});
+
+test("loop rejects unknown --until goals and non-loop --until", () => {
+  assert.throws(
+    () => parseReviewCommand(["loop", "--until", "perfect", "--", "@src"]),
+    /only supports clean/,
+  );
+  assert.throws(
+    () => parseReviewCommand(["--until", "clean", "--", "@src"]),
+    /only be used with loop/,
+  );
+});
+
+test("value-taking CLI flags reject a following flag instead of consuming it as the value", () => {
+  const valueFlags = [
+    "--mode", "--continue", "--model", "--provider", "--thinking", "--skill", "--tools", "--name",
+    "--progress-log", "--max-rounds", "--until", "--reviewers", "--panel", "--reviewer-model",
+    "--consensus", "--min-agree", "--consensus-model", "--concurrency", "--output-format",
+  ];
+  for (const flag of valueFlags) {
+    assert.throws(
+      () => parseReviewCommand(["loop", flag, "--no-stream", "--", "@src"]),
+      (error: unknown) => error instanceof ArgsParseError && error.message === `${flag} requires a value`,
+      flag,
+    );
+  }
 });
 
 test("loop rejects invalid max-rounds values as usage errors", () => {
@@ -79,6 +122,22 @@ test("panel options parse for review and loop", () => {
   assert.equal(loopParsed.command, "loop");
   assert.equal(loopParsed.reviewers, 3);
   assert.equal(loopParsed.maxRounds, 2);
+
+  const withModels = parseReviewCommand([
+    "--reviewers", "3",
+    "--reviewer-model", "r1=openai-codex/gpt-5.6-sol",
+    "--reviewer-model", "r2=anthropic/claude-sonnet-4-5",
+    "--", "@src",
+  ]);
+  assert.deepEqual(withModels.reviewerModels, [
+    "r1=openai-codex/gpt-5.6-sol",
+    "r2=anthropic/claude-sonnet-4-5",
+  ]);
+
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--reviewer-model", "not-a-mapping", "--", "@src"]),
+    /reviewer-model must look like/,
+  );
 
   const panelParsed = parseReviewCommand(["--panel", "code-experts", "--consensus", "majority", "--", "@src"]);
   assert.equal(panelParsed.panel, "code-experts");

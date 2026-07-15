@@ -42,9 +42,42 @@ function compactText(state: PanelViewState, theme: Theme, now = Date.now()): str
   return [header, ...rows].join("\n");
 }
 
-function finalMarkdown(state: PanelViewState): string {
+function reviewerSummaryLines(state: PanelViewState): string[] {
+  const fromMeta = state.meta?.reviewers ?? [];
+  if (fromMeta.length > 0) {
+    return fromMeta.map((reviewer) => {
+      const live = state.reviewers[reviewer.reviewerId];
+      const role = reviewer.role ? ` · ${reviewer.role}` : "";
+      const model = reviewer.model ? ` · ${reviewer.model}` : "";
+      const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
+      const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status} · ${reviewer.verdict}`;
+      const findings = live?.submission?.result.findings?.map((finding) => finding.summary).filter(Boolean).slice(0, 5) ?? [];
+      if (findings.length > 0) return `${head}\n  ${findings.map((summary) => `• ${summary}`).join("\n  ")}`;
+      if (reviewer.runtimeError || reviewer.parseError) return `${head}\n  • ${reviewer.runtimeError ?? reviewer.parseError}`;
+      if (live?.error) return `${head}\n  • ${live.error}`;
+      return head;
+    });
+  }
+  return Object.values(state.reviewers).map((reviewer) => {
+    const role = reviewer.role ? ` · ${reviewer.role}` : "";
+    const model = reviewer.model ? ` · ${reviewer.model}` : "";
+    const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
+    const status = reviewer.submission?.result.status ?? reviewer.status;
+    const verdict = reviewer.submission?.result.verdict ? ` · ${reviewer.submission.result.verdict}` : "";
+    const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${status}${verdict}`;
+    const findings = reviewer.submission?.result.findings?.map((finding) => finding.summary).filter(Boolean).slice(0, 5) ?? [];
+    if (findings.length > 0) return `${head}\n  ${findings.map((summary) => `• ${summary}`).join("\n  ")}`;
+    if (reviewer.error) return `${head}\n  • ${reviewer.error}`;
+    return head;
+  });
+}
+
+/** Full panel conclusion for the parent LLM (and expanded TUI markdown). */
+export function buildPanelResultContent(state: PanelViewState, error?: string): string {
   const meta = state.meta;
-  if (!meta) return "";
+  if (!meta && !error) return "Panel completed: unknown";
+  if (!meta) return error ?? "Panel completed: unknown";
+
   const confirmed = meta.confirmedClusters.map((finding) => `- ${finding.summary} (${finding.supportingReviewerIds.join(", ")})`);
   const advisories = meta.advisories.map((finding) => `- ${finding.summary} (${finding.supportingReviewerIds.join(", ")})`);
   const provenance = meta.reviewers.map((reviewer) => {
@@ -53,13 +86,20 @@ function finalMarkdown(state: PanelViewState): string {
     const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
     return `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status}`;
   });
-  return [
+  const summaries = reviewerSummaryLines(state);
+  const body = [
     "### Panel result",
     `Health: ${meta.panelHealth}; status: ${meta.status}.`,
     confirmed.length ? `### Confirmed findings\n${confirmed.join("\n")}` : "### Confirmed findings\nNone.",
     advisories.length ? `### Advisories\n${advisories.join("\n")}` : "### Advisories\nNone.",
     provenance.length ? `### Provenance\n${provenance.join("\n")}` : "### Provenance\nNone.",
+    summaries.length ? `### Reviewer summaries\n${summaries.join("\n")}` : "### Reviewer summaries\nNone.",
   ].join("\n\n");
+  return error ? `${body}\n\n### Error\n${error}` : body;
+}
+
+function finalMarkdown(state: PanelViewState): string {
+  return buildPanelResultContent(state);
 }
 
 export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component): Component {
@@ -106,6 +146,23 @@ export function renderPanelResult(details: PanelToolDetails | undefined, expande
   return container;
 }
 
+export type PanelToolParams = {
+  target: string;
+  panel?: string;
+  reviewers?: number;
+};
+
+/** Runtime guard for direct tool calls; schema validation is not the only boundary. */
+export function panelToolParamError(params: PanelToolParams): string | undefined {
+  if (params.reviewers !== undefined) {
+    if (!Number.isSafeInteger(params.reviewers) || params.reviewers < 2 || params.reviewers > 8) {
+      return "reviewers must be an integer between 2 and 8; use the shell CLI for a single reviewer";
+    }
+    if (params.panel) return "panel cannot be combined with reviewers";
+  }
+  return undefined;
+}
+
 export function registerPanelReviewTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "pi_review",
@@ -115,8 +172,14 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
     parameters: Type.Object({
       target: Type.String({ description: "Review target as given by the user, such as @src, @src/foo.ts, or a free-text brief. Directories stay tool path targets; only real files are attached." }),
       mode: Type.Optional(Type.String({ description: "Review mode; defaults to code." })),
-      panel: Type.Optional(Type.String({ description: "Named panel preset; defaults to code-experts." })),
-      model: Type.Optional(Type.String({ description: "Optional reviewer model." })),
+      panel: Type.Optional(Type.String({ description: "Named panel preset; defaults to code-experts when reviewers is omitted." })),
+      reviewers: Type.Optional(Type.Number({ minimum: 2, maximum: 8, description: "Independent reviewer count (2-8). Cannot combine with panel; single review uses the shell CLI." })),
+      reviewerModels: Type.Optional(Type.Array(Type.String(), { description: "Per-reviewer models as id=provider/model (e.g. r1=openai/gpt-5.6-sol)." })),
+      consensus: Type.Optional(Type.String({ description: "any | quorum | majority | unanimous" })),
+      minAgree: Type.Optional(Type.Number({ description: "Quorum threshold when consensus=quorum" })),
+      consensusModel: Type.Optional(Type.String({ description: "Model for semantic adjudication only" })),
+      concurrency: Type.Optional(Type.Number({ description: "Bound parallel reviewers (≤ reviewer count)" })),
+      model: Type.Optional(Type.String({ description: "Optional shared reviewer model." })),
       thinking: Type.Optional(Type.String({ description: "Optional thinking level." })),
     }),
     async execute(_toolCallId, params, signal, onUpdate) {
@@ -146,7 +209,26 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
           callback();
         },
       });
-      const args = [cliPath, "--panel", params.panel ?? "code-experts", "--mode", params.mode ?? "code", "--output-format", "events-jsonl"];
+      // Preserve the full panel configuration and enforce the panel-only tool boundary.
+      const paramError = panelToolParamError(params);
+      if (paramError) {
+        return {
+          content: [{ type: "text", text: `pi_review: ${paramError}` }],
+          details: { state, error: paramError },
+          isError: true,
+        };
+      }
+      const args = [cliPath, "--mode", params.mode ?? "code", "--output-format", "events-jsonl"];
+      if (params.reviewers !== undefined) {
+        args.push("--reviewers", String(params.reviewers));
+      } else {
+        args.push("--panel", params.panel ?? "code-experts");
+      }
+      for (const mapping of params.reviewerModels ?? []) args.push("--reviewer-model", mapping);
+      if (params.consensus) args.push("--consensus", params.consensus);
+      if (params.minAgree !== undefined) args.push("--min-agree", String(params.minAgree));
+      if (params.consensusModel) args.push("--consensus-model", params.consensusModel);
+      if (params.concurrency !== undefined) args.push("--concurrency", String(params.concurrency));
       if (params.model) args.push("--model", params.model);
       if (params.thinking) args.push("--thinking", params.thinking);
       args.push("--", params.target);
@@ -163,14 +245,16 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
           : [`pi-review ended before a final event (${child.status ?? child.signal ?? "unknown"})`, stderr.trim()].filter(Boolean).join(": ");
       const details: PanelToolDetails = { state, ...(error ? { error } : {}) };
       return {
-        content: [{ type: "text", text: error ?? `Panel completed: ${state.meta?.status ?? "unknown"}` }],
+        // Parent LLM must receive the full conclusion; details remain the TUI rendering source.
+        content: [{ type: "text", text: buildPanelResultContent(state, error) }],
         details,
         ...(error ? { isError: true } : {}),
       };
     },
     renderCall(args, theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-      text.setText(theme.fg("toolTitle", theme.bold("pi_review ")) + theme.fg("muted", `${args.panel ?? "code-experts"} · ${args.mode ?? "code"} · ${args.target}`));
+      const width = args.reviewers !== undefined ? `reviewers=${args.reviewers}` : (args.panel ?? "code-experts");
+      text.setText(theme.fg("toolTitle", theme.bold("pi_review ")) + theme.fg("muted", `${width} · ${args.mode ?? "code"} · ${args.target}`));
       return text;
     },
     renderResult(result, { expanded }, theme, context) {

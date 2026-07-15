@@ -24,7 +24,13 @@ function model(partial: Partial<ModelInfo> & Pick<ModelInfo, "provider" | "id">)
 }
 
 const MODELS: ModelInfo[] = [
-  model({ provider: "anthropic", id: "claude-opus-4-6", reasoning: true, contextWindow: 200_000, thinkingLevels: ["off", "low", "medium", "high", "xhigh"] }),
+  model({ provider: "openai-codex", id: "gpt-5.6-sol", reasoning: true, contextWindow: 400_000, thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"] }),
+  model({ provider: "openai-codex", id: "gpt-5.6-terra", reasoning: true, contextWindow: 400_000, thinkingLevels: ["off", "low", "medium", "high", "xhigh"] }),
+  model({ provider: "openai-codex", id: "gpt-5.6-luna", reasoning: true, contextWindow: 400_000, thinkingLevels: ["high", "xhigh"] }),
+  model({ provider: "anthropic", id: "claude-opus-4-8", reasoning: true, contextWindow: 200_000, thinkingLevels: ["off", "low", "medium", "high", "xhigh"] }),
+  model({ provider: "anthropic", id: "claude-sonnet-4-5", reasoning: true, contextWindow: 200_000, thinkingLevels: ["off", "low", "medium", "high", "xhigh"] }),
+  model({ provider: "anthropic", id: "claude-fable-5", reasoning: true, contextWindow: 200_000, thinkingLevels: ["high", "xhigh"] }),
+  model({ provider: "deepseek", id: "deepseek-v4-flash", reasoning: true, contextWindow: 200_000, thinkingLevels: ["high", "xhigh"] }),
   model({ provider: "openai", id: "gpt-5.5", reasoning: true, contextWindow: 400_000, thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh"] }),
   model({ provider: "zenmux", id: "gemini-3-flash", reasoning: false, contextWindow: 1_000_000, thinkingLevels: [] }),
 ];
@@ -80,16 +86,16 @@ describe("extractSignals", () => {
 });
 
 describe("rankModelsForReview", () => {
-  it("puts preset code models first when registered", () => {
+  it("puts fast-review models first for code presets", () => {
     const sig = extractSignals(["@src/a.ts"], {});
     const ranked = rankModelsForReview(MODELS, sig, DEFAULT_REVIEW_MODEL_PRIORITIES);
-    assert.equal(ranked[0].id, "gpt-5.5");
+    assert.equal(ranked[0].id, "claude-sonnet-4-5");
   });
 
-  it("puts preset plan models first for plan mode", () => {
+  it("puts complex/plan models first for plan mode", () => {
     const sig = extractSignals(["--mode", "plan"], {});
     const ranked = rankModelsForReview(MODELS, sig, DEFAULT_REVIEW_MODEL_PRIORITIES);
-    assert.equal(ranked[0].id, "claude-opus-4-6");
+    assert.equal(ranked[0].id, "gpt-5.6-sol");
   });
 });
 
@@ -125,12 +131,12 @@ describe("buildRvCompletions", () => {
   });
 
   it("completes thinking suffix after provider/id: for a reasoning model", () => {
-    const items = buildRvCompletions("--model openai/gpt-5.5:", deps);
+    const items = buildRvCompletions("--model openai-codex/gpt-5.6-sol:", deps);
     assert.ok(items);
     const labels = items!.map((i) => i.label);
     assert.ok(labels.includes("high"));
     assert.ok(labels.includes("xhigh"));
-    assert.ok(items!.every((i) => i.value.startsWith("--model openai/gpt-5.5:")));
+    assert.ok(items!.every((i) => i.value.startsWith("--model openai-codex/gpt-5.6-sol:")));
   });
 
   it("does not offer thinking suffix for a non-reasoning model", () => {
@@ -167,41 +173,66 @@ describe("buildRvCompletions", () => {
     assert.equal(buildRvCompletions("--continue abc", deps), null);
   });
 
-  it("offers scene templates + models keyword at empty top level", () => {
+  it("empty top-level stays quiet: flags/hints, no preset wall", () => {
     const items = buildRvCompletions("", deps);
     const ui = rvUi("en");
     assert.ok(items);
-    assert.ok(items!.some((i) => i.label === ui.listModels));
-    assert.ok(items!.some((i) => i.label === ui.codePreset));
-    const tmpl = items!.find((i) => i.label === ui.codePreset)!;
-    assert.match(tmpl.value, /--model .*@src/);
+    assert.ok(items!.some((i) => i.value === "-i" || i.label.includes("interactive")));
+    assert.ok(items!.some((i) => i.label === ui.presetHint));
+    assert.ok(!items!.some((i) => i.label === ui.codePreset));
   });
 
-  it("/rv-loop empty top-level offers loop presets instead of panel keep-session templates", () => {
-    const items = buildRvCompletions("", { ...deps, strategy: "loop" });
-    assert.ok(items);
-    assert.ok(items!.some((i) => /Loop closeout/.test(i.label)));
-    assert.ok(!items!.some((i) => /Challenge review \(preset\)/.test(i.label)));
-    assert.ok(!items!.some((i) => i.value.includes("--keep-session")));
+  it("-i / --interactive complete to the wizard trigger, not the flag soup", () => {
+    for (const prefix of ["-i", "--interactive", "-"]) {
+      const items = buildRvCompletions(prefix, { ...deps, strategy: "loop" });
+      assert.ok(items?.some((i) => i.value === "-i" || i.value === "--interactive"), prefix);
+      assert.ok(!items?.some((i) => i.label === "--max-rounds 1" || i.value.startsWith("--max-rounds 1")), prefix);
+    }
+  });
+
+  it("presets appear only when the user asks for them", () => {
+    const ui = rvUi("en");
+    const quiet = buildRvCompletions("gpt", deps);
+    assert.ok(!quiet?.some((i) => i.label === ui.codePreset));
+    const asked = buildRvCompletions("preset", deps);
+    assert.ok(asked?.some((i) => i.label === ui.codePreset), `got ${asked?.map((i) => i.label).join(",")}`);
+    const zh = buildRvCompletions("预设", { ...deps, locale: "zh" });
+    assert.ok(zh?.some((i) => i.label === rvUi("zh").codePreset), `got ${zh?.map((i) => i.label).join(",")}`);
+  });
+
+  it("/rv-loop empty top-level stays quiet; loop presets need explicit request", () => {
+    const empty = buildRvCompletions("", { ...deps, strategy: "loop" });
+    assert.ok(empty);
+    assert.ok(!empty!.some((i) => /Loop closeout|关单/.test(i.label)));
+    assert.ok(!empty!.some((i) => i.value.includes("--keep-session")));
+    const asked = buildRvCompletions("preset", { ...deps, strategy: "loop" });
+    assert.ok(asked?.some((i) => /Loop closeout/.test(i.label)));
+  });
+
+  it("Chinese locale labels are used when locale=zh", () => {
+    const items = buildRvCompletions("预设", { ...deps, locale: "zh" });
+    const ui = rvUi("zh");
+    assert.ok(items?.some((i) => i.label === ui.codePreset));
+    assert.ok(items?.some((i) => i.description?.includes("--model")));
   });
 
   it("/rv-loop bare model typing surfaces catalog matches as --model values", () => {
-    const items = buildRvCompletions("gpt-5.5", { ...deps, strategy: "loop" });
+    const items = buildRvCompletions("gpt-5.6-sol", { ...deps, strategy: "loop" });
     assert.ok(items);
-    assert.ok(items!.some((i) => i.value.includes("--model") && i.label.includes("gpt-5.5")));
+    assert.ok(items!.some((i) => i.value.includes("--model") && i.label.includes("gpt-5.6-sol")));
   });
 
   it("/rv-loop accepts full provider/model and offers thinking suffixes", () => {
-    const items = buildRvCompletions("openai/gpt-5.5", { ...deps, strategy: "loop" });
+    const items = buildRvCompletions("openai-codex/gpt-5.6-sol", { ...deps, strategy: "loop" });
     assert.ok(items);
-    assert.ok(items!.some((i) => i.value === "--model openai/gpt-5.5"));
-    assert.ok(items!.some((i) => i.value.startsWith("--model openai/gpt-5.5:")));
+    assert.ok(items!.some((i) => i.value === "--model openai-codex/gpt-5.6-sol"));
+    assert.ok(items!.some((i) => i.value.startsWith("--model openai-codex/gpt-5.6-sol:")));
   });
 
   it("/rv-loop provider fragment still surfaces models", () => {
-    const items = buildRvCompletions("openai", { ...deps, strategy: "loop" });
+    const items = buildRvCompletions("openai-codex", { ...deps, strategy: "loop" });
     assert.ok(items);
-    assert.ok(items!.some((i) => i.label.includes("openai/") || i.value.includes("openai/")));
+    assert.ok(items!.some((i) => i.label.includes("openai-codex/") || i.value.includes("openai-codex/")));
   });
 
   it("/rv-models does not offer panel scene templates or targets", () => {
@@ -211,11 +242,68 @@ describe("buildRvCompletions", () => {
     assert.ok(!items!.some((i) => i.value.includes("@src") || i.value.includes("--model")));
   });
 
+  it("/rv-models completion never clears an already-entered prefix", () => {
+    for (const prefix of ["unexpected target ", "unexpected target mod"]) {
+      const items = buildRvCompletions(prefix, { models: [], strategy: "models" });
+      assert.ok(items, prefix);
+      assert.ok(items!.every((item) => item.value.startsWith(prefix)), prefix);
+    }
+  });
+
+  it("multi-word semantic completion replaces its typed phrase suffix without duplicating it", () => {
+    for (const prefix of ["@src code r", "@src code rev"]) {
+      const items = buildRvCompletions(prefix, { ...deps, strategy: "panel", locale: "en" });
+      const codeReview = items?.find((item) => item.label === "code review");
+      assert.ok(codeReview, prefix);
+      assert.equal(codeReview!.value, "@src code review");
+      assert.doesNotMatch(codeReview!.value, /code code review/);
+    }
+  });
+
   it("/rv-loop flag completion includes --max-rounds and excludes --keep-session", () => {
     const maxRounds = buildRvCompletions("--max", { ...deps, strategy: "loop" });
     assert.ok(maxRounds?.some((i) => i.label === "--max-rounds"));
     const keep = buildRvCompletions("--keep", { ...deps, strategy: "loop" });
     assert.ok(!keep?.some((i) => i.label === "--keep-session"));
+  });
+
+  it("/rv-loop completes --reviewers values and panel strategy flags", () => {
+    const flags = buildRvCompletions("--rev", { ...deps, strategy: "loop" });
+    assert.ok(flags?.some((i) => i.label === "--reviewers"), `got ${flags?.map((i) => i.label)}`);
+    const values = buildRvCompletions("--reviewers ", { ...deps, strategy: "loop" });
+    assert.ok(values?.some((i) => i.label === "3"));
+    const consensus = buildRvCompletions("--consensus ", { ...deps, strategy: "loop" });
+    assert.ok(consensus?.some((i) => i.label === "quorum"));
+    const panel = buildRvCompletions("--panel ", { ...deps, strategy: "loop" });
+    assert.ok(panel?.some((i) => i.label === "code-experts"));
+  });
+
+  it("hides --panel after --reviewers and vice versa", () => {
+    const afterReviewers = buildRvCompletions("--reviewers 3 --p", { ...deps, strategy: "loop" });
+    assert.ok(!afterReviewers?.some((i) => i.label === "--panel"));
+    const afterPanel = buildRvCompletions("--panel code-experts --r", { ...deps, strategy: "loop" });
+    assert.ok(!afterPanel?.some((i) => i.label === "--reviewers"));
+  });
+
+  it("--reviewer-model offers cascading id then model menus based on --reviewers count", () => {
+    const ids = buildRvCompletions("--reviewers 3 --reviewer-model ", { ...deps, strategy: "loop" });
+    assert.deepEqual(ids?.map((i) => i.label).sort(), ["r1=", "r2=", "r3="].sort());
+
+    const models = buildRvCompletions("--reviewers 3 --reviewer-model r1=", { ...deps, strategy: "loop" });
+    assert.ok(models?.some((i) => i.label.startsWith("r1=") && i.label.includes("/")), `got ${models?.map((i) => i.label)}`);
+
+    const afterOne = buildRvCompletions(
+      "--reviewers 2 --reviewer-model r1=openai-codex/gpt-5.6-sol --reviewer-model ",
+      { ...deps, strategy: "loop" },
+    );
+    assert.ok(afterOne?.some((i) => i.label === "r2="));
+    assert.ok(!afterOne?.some((i) => i.label === "r1="));
+  });
+
+  it("--reviewer-model with --panel code-experts uses role ids", () => {
+    const ids = buildRvCompletions("--panel code-experts --reviewer-model ", { ...deps, strategy: "panel" });
+    assert.ok(ids?.some((i) => i.label === "security="));
+    assert.ok(ids?.some((i) => i.label === "correctness="));
   });
 
   it("does not duplicate list-models completion at top level", () => {
@@ -259,16 +347,31 @@ describe("buildRvCompletions", () => {
   });
 
   it("omits preset scene templates when registry has no preset id match", () => {
-    const nonReasoning = [{ ...MODELS[2], thinkingLevels: [] }] as ModelInfo[];
-    const items = buildRvCompletions("", { models: nonReasoning, priorities: DEFAULT_REVIEW_MODEL_PRIORITIES });
-    assert.ok(items);
-    assert.ok(!items!.some((i) => i.label === rvUi("en").codePreset));
-    assert.ok(items!.some((i) => i.label === rvUi("en").listModels));
+    // Only a non-matching flash model: none of the code/plan/frontend preset needles hit.
+    const nonMatching = [
+      model({ provider: "zenmux", id: "gemini-3-flash", reasoning: false, contextWindow: 1_000_000, thinkingLevels: [] }),
+    ];
+    const empty = buildRvCompletions("", { models: nonMatching, priorities: DEFAULT_REVIEW_MODEL_PRIORITIES });
+    assert.ok(empty);
+    assert.ok(!empty!.some((i) => i.label === rvUi("en").codePreset));
+    const asked = buildRvCompletions("preset", { models: nonMatching, priorities: DEFAULT_REVIEW_MODEL_PRIORITIES });
+    assert.ok(!asked?.some((i) => i.label === rvUi("en").codePreset));
   });
 
   it("falls back gracefully when models are unavailable (static flags still work)", () => {
     const items = buildRvCompletions("--mode ", {});
     assert.ok(items);
     assert.ok(items!.some((i) => i.label === "code" || i.label === "plan" || i.label === "challenge"));
+  });
+
+  it("preserves entered targets when the model catalog is unavailable", () => {
+    const valuePosition = buildRvCompletions("@src --model ", { models: [], strategy: "panel" });
+    assert.ok(valuePosition);
+    assert.ok(valuePosition!.every((item) => item.value.startsWith("@src --model ")));
+
+    const bareModel = buildRvCompletions("@src gpt-5.6", { models: [], strategy: "panel" });
+    assert.ok(bareModel);
+    assert.ok(bareModel!.some((item) => item.value === "@src --model gpt-5.6"));
+    assert.ok(bareModel!.every((item) => item.value.startsWith("@src ")));
   });
 });

@@ -124,12 +124,13 @@ pi-review models
 
 ```bash
 pi-review loop --max-rounds 3 -- @src
+pi-review loop --until clean --max-rounds 10 -- @src
 pi-review loop --mode challenge --max-rounds 2 -- @docs/design.md
 ```
 
 Each round is review-only. The process never edits, patches, waits for filesystem changes, or asks the child session to fix findings. It stops immediately on `clean`, `needs_human`, or `blocked`; otherwise it stops when the round budget is exhausted. Every round emits one `PI_REVIEW_META_JSON` line in order, and the final human summary lists each round's status, verdict, duration, and finding counts.
 
-This is a **host-driven gate**: if findings remain, the host or human fixes only accepted in-scope findings and invokes `loop` again. For patch-by-patch agent closeout, `--max-rounds 1` gives the host a fix point after each review; use a larger budget only when repeated review of the unchanged tree is intentional. `loop` accepts normal review target/model/progress options but rejects `--keep-session`, `--continue`, and `--name` in v1.
+This is a **host-driven gate**: if findings remain, the host or human fixes only accepted in-scope findings and invokes `loop` again. For patch-by-patch agent closeout, `--max-rounds 1` gives the host a fix point after each review. For an explicit clean goal with a hard ceiling, use `--until clean` (default budget 10 when `--max-rounds` is omitted; never unlimited). Clean means no gate-blocking findings (single: no actionable findings; panel: no confirmed actionable clusters; advisories may remain). `loop` accepts normal review target/model/progress options but rejects `--keep-session`, `--continue`, and `--name` in v1.
 
 ## Panel Review
 
@@ -297,7 +298,8 @@ pi-review models [search]
 | `--name <name>` | Session name (with `--keep-session`) |
 | `--no-stream` | Buffer child output until exit (default: stream live) |
 | `--progress-log <path>` | Stream child `--mode json` events to this file (cannot combine with `--no-stream`) |
-| `--max-rounds <n>` | Positive loop review budget (default: `3`; `loop` only) |
+| `--max-rounds <n>` | Positive loop hard budget (default: `3`; with `--until clean` default: `10`; `loop` only) |
+| `--until clean` | Loop goal: keep going until the clean gate (still hard-capped by `--max-rounds`; never unlimited) |
 | `--reviewers <n>` | Panel: number of independent reviewers (2-8; activates panel mode) |
 | `--panel <name>` | Panel: named expert-panel preset (cannot combine with `--reviewers`) |
 | `--consensus <policy>` | Panel: `any \| quorum \| majority \| unanimous` (default: `quorum`) |
@@ -342,7 +344,7 @@ Slash commands inject a task message for the parent agent. Strategy is selected 
 
 Argument completions are context-aware. After the host session starts, `/rv` reads the live model registry and offers:
 
-- **Model list** after `--model `: candidates come from the live Pi registry; order follows **`resources/rv-model-priorities.json`** (override with `PI_REVIEW_RV_PRIORITIES`). Presets match registry ids by substring and prefer newer version strings (e.g. kimi `2.7`, `claude-opus-4-8`). Profiles: **code** (e.g. gpt-5.5 `:xhigh`, glm-5.2 `:high`), **frontend** (vue/css/… → kimi, claude-sonnet, minimax-m3), **plan/challenge** (claude-opus-4-8, deepseek-v4-pro, …).
+- **Model list** after `--model `: candidates come from the live Pi registry; order follows **`resources/rv-model-priorities.json`** (override with `PI_REVIEW_RV_PRIORITIES`). Presets match registry ids by substring and prefer newer version strings (e.g. kimi `2.7`, `claude-opus-4-8`). Profiles: **code / fast** (claude-sonnet-5, deepseek-v4-flash, glm-5.2, minimax-m3, grok-4.5, gpt-5.6-terra/luna), **frontend / vision** (claude → gpt → kimi-2.7 → minimax-m3), **plan / complex** (gpt-5.6-sol max, claude-opus-4.8 xhigh, claude-fable-5 max cautious, glm-5.2 / deepseek-v4-pro / grok-4.5 max).
 - **Thinking suffix** after `provider/model:` — only levels the chosen model actually supports.
 - **Semantic phrases** (e.g. `code review` / 代码审核, `查看模型列表`) in addition to flags; orchestration prompts follow **session locale** (zh/en) for summaries.
 - **Scene templates** at the top level (code / frontend / plan presets).

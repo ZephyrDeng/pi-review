@@ -90,21 +90,52 @@ export function semanticCompletionItems(
   tail: string,
   headPrefix: string,
   head: string[],
+  rawHead: string[] = head,
 ): { value: string; label: string; description?: string }[] {
   const present = new Set(head.map((h) => h.toLowerCase()));
   const q = tail.toLowerCase().trim();
-  const items: { value: string; label: string; description?: string }[] = [];
-  for (const row of SEMANTIC_PHRASES) {
+  const prepared = SEMANTIC_PHRASES.map((row) => {
     const value = row.completionValue(locale);
+    const candidates = [value, ...row.phrases].map((candidate) => candidate.toLowerCase().trim());
+    let consumedHeadTokens = 0;
+    // A multi-word phrase can span completed head tokens plus the in-progress tail
+    // (`@src code rev`). Replace that suffix rather than appending `code review`
+    // and producing `@src code code review`.
+    for (let count = head.length; count >= 1; count -= 1) {
+      const typed = [...head.slice(-count), tail]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .trim();
+      if (typed && candidates.some((candidate) => candidate.startsWith(typed))) {
+        consumedHeadTokens = count;
+        break;
+      }
+    }
+    return { row, value, consumedHeadTokens };
+  });
+  const hasContextualPhrase = prepared.some((entry) => entry.consumedHeadTokens > 0);
+  const items: { value: string; label: string; description?: string }[] = [];
+
+  for (const { row, value, consumedHeadTokens } of prepared) {
     if (present.has(value.toLowerCase())) continue;
+    // Once a head+tail suffix identifies a phrase, suppress unrelated phrases
+    // that only happen to contain the short tail (e.g. every "... review").
+    if (hasContextualPhrase && consumedHeadTokens === 0) continue;
     const matches =
+      consumedHeadTokens > 0 ||
       !q ||
       value.toLowerCase().includes(q) ||
       value.toLowerCase().startsWith(q) ||
       row.phrases.some((p) => p.toLowerCase().startsWith(q) || p.toLowerCase().includes(q));
     if (!matches) continue;
+
+    const keptRawHead = consumedHeadTokens > 0
+      ? rawHead.slice(0, Math.max(0, rawHead.length - consumedHeadTokens))
+      : rawHead;
+    const replacementPrefix = keptRawHead.length ? `${keptRawHead.join(" ")} ` : "";
     items.push({
-      value: `${headPrefix}${value}`,
+      value: `${replacementPrefix}${value}`,
       label: value,
       description: row.completionDesc?.(locale),
     });

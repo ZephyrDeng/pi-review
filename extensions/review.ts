@@ -7,24 +7,30 @@ import { detectRvLocale } from "./rv-locale.js";
 import {
   buildRvOrchestrationPrompt,
   parseRvArgs,
-  RV_COMPLETIONS,
   validateRvParsed,
   type RvStrategy,
 } from "./rv-prompts.js";
 import { resolveRvParsed } from "./rv-resolve.js";
+import {
+  runRvInteractiveWizard,
+  shouldRunInteractiveWizard,
+  stripInteractiveToken,
+} from "./rv-interactive.js";
 import { registerPanelReviewTool } from "./panel-tool.js";
 
 /**
  * Captured at `session_start` so the synchronous-ish `getArgumentCompletions`
  * callback (which receives only the argument prefix) can read the live model
- * registry without ctx. Stays undefined in non-TUI/print mode; completions then
- * gracefully degrade to the static `RV_COMPLETIONS` fallback.
+ * registry without ctx. Stays undefined in non-TUI/print mode; the pure
+ * completion builder then provides prefix-safe static suggestions.
  */
 let capturedModels: ModelInfo[] | undefined;
 let capturedPrimaryProvider: string | undefined;
-let capturedLocale: ReturnType<typeof detectRvLocale> = "en";
+let capturedLocale: ReturnType<typeof detectRvLocale> = detectRvLocale([]);
 /** Keep a registry handle so completions can refresh models lazily if session_start saw none yet. */
 let capturedModelRegistry: { getAvailable?: () => unknown[] } | undefined;
+/** Keep session manager so locale can re-detect on each completion as Chinese messages arrive. */
+let capturedSessionManager: { getEntries?: () => Array<{ type?: string; content?: unknown }> } | undefined;
 
 function sampleSessionText(
   sessionManager: { getEntries?: () => Array<{ type?: string; content?: unknown }> },
@@ -93,20 +99,26 @@ export default function piReviewExtension(pi: ExtensionAPI) {
   registerPanelReviewTool(pi);
   pi.on("session_start", (_event, ctx) => {
     try {
+      // Model availability is session-scoped. Clear the previous snapshot before
+      // the new registry is sampled so an empty/cold catalog cannot leak stale IDs.
+      capturedModels = undefined;
       capturedModelRegistry = ctx.modelRegistry;
       capturedPrimaryProvider = ctx.model?.provider;
+      capturedSessionManager = ctx.sessionManager;
       capturedLocale = detectRvLocale(sampleSessionText(ctx.sessionManager));
       refreshCapturedModels(ctx.modelRegistry, ctx.model?.provider);
     } catch {
       capturedModels = undefined;
       capturedPrimaryProvider = undefined;
-      capturedLocale = "en";
+      capturedLocale = detectRvLocale([]);
     }
   });
 
-  function localeForHandler(ctx: { sessionManager?: Parameters<typeof sampleSessionText>[0] }): typeof capturedLocale {
+  function localeForHandler(ctx?: { sessionManager?: Parameters<typeof sampleSessionText>[0] }): typeof capturedLocale {
     try {
-      return detectRvLocale(sampleSessionText(ctx.sessionManager ?? { getEntries: () => [] }));
+      const manager = ctx?.sessionManager ?? capturedSessionManager ?? { getEntries: () => [] };
+      capturedLocale = detectRvLocale(sampleSessionText(manager));
+      return capturedLocale;
     } catch {
       return capturedLocale;
     }
@@ -118,84 +130,72 @@ export default function piReviewExtension(pi: ExtensionAPI) {
   ): ReturnType<typeof buildRvCompletions> {
     // Always try a lazy refresh. session_start can race before providers finish loading.
     const models = refreshCapturedModels();
-    const dynamic = buildRvCompletions(prefix, {
+    // Re-detect locale every completion so Chinese sessions don't stay stuck on English labels.
+    const locale = localeForHandler();
+    return buildRvCompletions(prefix, {
       models,
       primaryProvider: capturedPrimaryProvider,
-      locale: capturedLocale,
+      locale,
       strategy,
     });
-    if (dynamic && dynamic.length) return dynamic;
-
-    // Strategy-aware static fallback when the live registry is unavailable.
-    const q = prefix.trim().toLowerCase();
-    const staticItems: { value: string; label: string; description?: string }[] = [];
-    if (strategy === "models") {
-      staticItems.push({ value: "", label: "list models", description: "No args needed · runs pi-review models" });
-      return staticItems;
-    }
-    if (strategy === "loop") {
-      staticItems.push(
-        { value: "--model ", label: "--model", description: "Pick reviewer model (short ids ok)" },
-        { value: "--thinking ", label: "--thinking", description: "off|minimal|low|medium|high|xhigh" },
-        { value: "--max-rounds 1 ", label: "--max-rounds 1", description: "One gate, then host fix point" },
-        { value: "--max-rounds 2 ", label: "--max-rounds 2", description: "Two review gates" },
-        { value: "--mode code ", label: "--mode code", description: "Code closeout" },
-        { value: "@src", label: "@src", description: "Natural-language / path target" },
-      );
-    } else {
-      staticItems.push(
-        { value: "--model ", label: "--model", description: "Pick panel model (short ids ok)" },
-        { value: "--thinking ", label: "--thinking", description: "off|minimal|low|medium|high|xhigh" },
-        { value: "--mode code ", label: "--mode code", description: "Code / diff review" },
-        { value: "--mode plan ", label: "--mode plan", description: "Architecture / plan review" },
-        { value: "--mode challenge ", label: "--mode challenge", description: "Adversarial plan review" },
-        { value: "--keep-session ", label: "--keep-session", description: "Persist for /rv --continue" },
-        { value: "@src", label: "@src", description: "Natural-language / path target" },
-        { value: "models", label: "models", description: "Or use /rv-models" },
-      );
-    }
-    // Bare model-ish text: still offer to wrap as --model <typed>
-    if (q && !q.startsWith("-") && !q.startsWith("@") && !q.includes(" ")) {
-      staticItems.unshift({
-        value: `--model ${prefix.trim()}`,
-        label: `--model ${prefix.trim()}`,
-        description: "Use typed model token (resolved against catalog at run time)",
-      });
-      if (prefix.includes("/") && !prefix.includes(":")) {
-        for (const level of ["high", "xhigh", "medium"]) {
-          staticItems.unshift({
-            value: `--model ${prefix.trim()}:${level}`,
-            label: `${prefix.trim()}:${level}`,
-            description: `thinking ${level}`,
-          });
-        }
-      }
-    }
-    const filtered = staticItems.filter((item) => {
-      if (!q) return true;
-      return (
-        item.value.toLowerCase().includes(q) ||
-        item.label.toLowerCase().includes(q) ||
-        item.value.startsWith(prefix) ||
-        q.startsWith(item.value.trim().toLowerCase())
-      );
-    });
-    return filtered.length ? filtered : staticItems.slice(0, 6);
   }
 
-  function handleRvCommand(strategy: RvStrategy, rawArgs: string, ctx: { ui: { notify: (message: string, level?: "warning" | "info" | "error") => void }; sessionManager?: Parameters<typeof sampleSessionText>[0] }): void {
-    const trimmed = rawArgs.trim();
-    if (strategy !== "models" && !trimmed) {
+  async function handleRvCommand(
+    strategy: RvStrategy,
+    rawArgs: string,
+    ctx: {
+      ui: {
+        notify: (message: string, level?: "warning" | "info" | "error") => void;
+        select?: (title: string, options: string[]) => Promise<string | undefined>;
+        input?: (title: string, placeholder?: string) => Promise<string | undefined>;
+        confirm?: (title: string, message: string) => Promise<boolean>;
+      };
+      sessionManager?: Parameters<typeof sampleSessionText>[0];
+    },
+  ): Promise<void> {
+    if (strategy === "models") {
+      const parsed = parseRvArgs("", "models");
+      pi.sendUserMessage(buildRvOrchestrationPrompt(parsed, localeForHandler(ctx)));
+      return;
+    }
+
+    const interactiveRequested = shouldRunInteractiveWizard(rawArgs, parseRvArgs(stripInteractiveToken(rawArgs), strategy));
+    const trimmed = stripInteractiveToken(rawArgs).trim();
+    let parsed = parseRvArgs(trimmed, strategy);
+
+    // Interactive wizard: empty command or explicit `interactive` / `--interactive` / `-i`.
+    // Uses Pi select/input/confirm dialogs — no tab completion required for model assignment.
+    if (interactiveRequested && ctx.ui.select && ctx.ui.input && ctx.ui.confirm) {
+      const models = refreshCapturedModels();
+      const locale = localeForHandler(ctx);
+      const wizardResult = await runRvInteractiveWizard(
+        {
+          select: (title, options) => ctx.ui.select!(title, options),
+          input: (title, placeholder) => ctx.ui.input!(title, placeholder),
+          confirm: (title, message) => ctx.ui.confirm!(title, message),
+          notify: (message, type) => ctx.ui.notify(message, type),
+        },
+        {
+          strategy: strategy === "loop" ? "loop" : "panel",
+          seed: parsed,
+          models,
+          locale,
+          primaryProvider: capturedPrimaryProvider,
+        },
+      );
+      if (!wizardResult) return;
+      parsed = wizardResult;
+    } else if (!trimmed) {
+      // No dialog API (print/RPC) and empty args → tell user how to run interactive.
       ctx.ui.notify(
         strategy === "loop"
-          ? "/rv-loop needs a natural-language target. Try: /rv-loop @src"
-          : "/rv needs a natural-language target or `models`. Try: /rv @src | /rv-models",
+          ? "/rv-loop interactive  · or /rv-loop --reviewers 3 --reviewer-model r1=... @src"
+          : "/rv interactive  · or /rv --panel code-experts @src",
         "warning",
       );
       return;
     }
 
-    const parsed = parseRvArgs(trimmed, strategy);
     const validation = validateRvParsed(parsed);
     if (!validation.ok) {
       ctx.ui.notify(validation.message, "warning");
@@ -203,17 +203,28 @@ export default function piReviewExtension(pi: ExtensionAPI) {
     }
 
     if (!parsed.modelsOnly && !parsed.target && !parsed.continueHandle) {
-      ctx.ui.notify("/rv needs a natural-language target, --continue <handle>, or /rv-models.", "warning");
+      ctx.ui.notify("/rv needs a natural-language target, --continue <handle>, interactive, or /rv-models.", "warning");
       return;
     }
 
-    const resolved = resolveRvParsed(parsed, capturedModels ?? [], capturedPrimaryProvider);
+    const resolved = resolveRvParsed(parsed, refreshCapturedModels(), capturedPrimaryProvider);
     if (resolved.ambiguousModels?.length) {
-      ctx.ui.notify(
-        `Model "${parsed.model}" is ambiguous. Candidates: ${resolved.ambiguousModels.join(", ")}. Re-run with an exact provider/model.`,
-        "warning",
-      );
-      return;
+      // Prefer interactive disambiguation when dialogs exist.
+      if (ctx.ui.select) {
+        const pick = await ctx.ui.select(
+          `Ambiguous model "${parsed.model}"`,
+          resolved.ambiguousModels,
+        );
+        if (!pick) return;
+        resolved.parsed = { ...resolved.parsed, model: pick };
+        resolved.notes.push(`model ${parsed.model} → ${pick} (interactive pick)`);
+      } else {
+        ctx.ui.notify(
+          `Model "${parsed.model}" is ambiguous. Candidates: ${resolved.ambiguousModels.join(", ")}. Re-run with an exact provider/model.`,
+          "warning",
+        );
+        return;
+      }
     }
 
     pi.sendUserMessage(buildRvOrchestrationPrompt(resolved.parsed, localeForHandler(ctx), resolved.notes));
@@ -221,14 +232,14 @@ export default function piReviewExtension(pi: ExtensionAPI) {
 
   pi.registerCommand("rv", {
     description:
-      "Panel review. Usage: /rv [--mode plan|challenge] [--model id] [--thinking level] [--keep-session] <natural-language target> | /rv --continue <handle> [opts] [text] | /rv models",
+      "Panel review. /rv interactive for dialog wizard; or /rv [flags] <natural-language target>",
     getArgumentCompletions: (prefix) => argumentCompletions(prefix, "panel"),
     handler: async (rawArgs, ctx) => handleRvCommand("panel", rawArgs, ctx),
   });
 
   pi.registerCommand("rv-loop", {
     description:
-      "Loop closeout review. Usage: /rv-loop [--mode plan|challenge] [--model id] [--max-rounds n] <natural-language target>",
+      "Loop closeout. /rv-loop interactive for dialog wizard (pick reviewers & models with arrows); or pass flags",
     getArgumentCompletions: (prefix) => argumentCompletions(prefix, "loop"),
     handler: async (rawArgs, ctx) => handleRvCommand("loop", rawArgs, ctx),
   });

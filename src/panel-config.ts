@@ -35,6 +35,43 @@ function defaultMinAgree(policy: ConsensusPolicy): number | undefined {
   return policy === "quorum" ? DEFAULT_PANEL_MIN_AGREE : undefined;
 }
 
+/** Parse `id=model` overrides into a map; last write wins for duplicate ids. */
+export function parseReviewerModelOverrides(values: string[] | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const raw of values ?? []) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0 || eq === raw.length - 1) {
+      throw new ArgsParseError(`--reviewer-model must look like id=provider/model; got ${raw}`);
+    }
+    const id = raw.slice(0, eq).trim();
+    const model = raw.slice(eq + 1).trim();
+    if (!/^[A-Za-z0-9_.-]+$/.test(id) || !model) {
+      throw new ArgsParseError(`--reviewer-model must look like id=provider/model; got ${raw}`);
+    }
+    map.set(id, model);
+  }
+  return map;
+}
+
+function applyReviewerModelOverrides(
+  reviewers: PanelReviewerSpec[],
+  overrides: Map<string, string>,
+): PanelReviewerSpec[] {
+  if (overrides.size === 0) return reviewers;
+  const known = new Set(reviewers.map((reviewer) => reviewer.id));
+  for (const id of overrides.keys()) {
+    if (!known.has(id)) {
+      throw new ArgsParseError(
+        `--reviewer-model unknown reviewer id "${id}"; expected one of ${[...known].join(", ")}`,
+      );
+    }
+  }
+  return reviewers.map((reviewer) => {
+    const model = overrides.get(reviewer.id);
+    return model ? { ...reviewer, model } : reviewer;
+  });
+}
+
 /**
  * Resolve a panel configuration. `panelPresets` is supplied by the caller (the
  * orchestrator loads the file), so this function stays pure and testable with
@@ -110,7 +147,8 @@ export function resolvePanelConfig(
     consensusModel = parsed.consensusModel ?? preset.consensusModel;
     concurrency = parsed.concurrency ?? preset.concurrency;
   } else {
-    // Generic same-model panel: --reviewers N (parser guarantees N in 2..MAX).
+    // Generic panel: --reviewers N (parser guarantees N in 2..MAX). Shared
+    // --model is the default; --reviewer-model rK=... overrides individuals.
     const count = parsed.reviewers!;
     reviewers = Array.from({ length: count }, (_, index) => ({
       id: `r${index + 1}`,
@@ -121,6 +159,8 @@ export function resolvePanelConfig(
     consensusModel = parsed.consensusModel;
     concurrency = parsed.concurrency;
   }
+
+  reviewers = applyReviewerModelOverrides(reviewers, parseReviewerModelOverrides(parsed.reviewerModels));
 
   if (minAgree !== undefined) {
     if (!Number.isSafeInteger(minAgree) || minAgree < 1) {

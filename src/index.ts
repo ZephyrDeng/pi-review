@@ -11,7 +11,8 @@ export type { PanelViewState, PanelReviewerView, PanelPhase, ReviewerViewStatus 
 export { createReviewEventEmitter, redactReviewEventPayload, redactReviewEventText, REVIEW_EVENT_VERSION, REVIEW_EVENT_TEXT_LIMIT } from "./review-events.js";
 export type { ReviewEvent, ReviewEventListener, ReviewerIdentity } from "./review-events.js";
 export { formatLoopSummary, runReviewLoop } from "./loop.js";
-export type { LoopReviewResult, LoopRoundSummary, LoopRoundPanelSummary, LoopStopReason, RunOneReview } from "./loop.js";
+export type { LoopReviewResult, LoopRoundSummary, LoopRoundPanelSummary, LoopStopReason, LoopUntilGoal, RunOneReview, RunReviewLoopOptions } from "./loop.js";
+export { LOOP_CLEAN_GOAL } from "./loop.js";
 export { aggregatePanel, effectiveThreshold } from "./panel-aggregate.js";
 export type { PanelAggregationInput } from "./panel-aggregate.js";
 export { DeterministicMatcher, SemanticMatcher } from "./matcher.js";

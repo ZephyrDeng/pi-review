@@ -4,7 +4,23 @@ export type RvLocale = "en" | "zh";
 
 const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
 
-export function detectRvLocale(textSamples: string[]): RvLocale {
+function systemPrefersZh(env: NodeJS.ProcessEnv = process.env): boolean {
+  const keys = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
+  for (const key of keys) {
+    const value = env[key];
+    if (!value) continue;
+    if (/(^|[_\.\-])zh/i.test(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * Prefer Chinese when:
+ * - recent session text has meaningful CJK, or
+ * - system locale is zh and samples are empty/ambiguous.
+ * Re-run this on each completion; session_start-only capture freezes English too early.
+ */
+export function detectRvLocale(textSamples: string[], env: NodeJS.ProcessEnv = process.env): RvLocale {
   let cjk = 0;
   let latin = 0;
   for (const sample of textSamples) {
@@ -14,8 +30,10 @@ export function detectRvLocale(textSamples: string[]): RvLocale {
       else if (/[a-zA-Z]/.test(ch)) latin++;
     }
   }
-  if (cjk === 0 && latin === 0) return "en";
-  return cjk >= latin * 0.15 ? "zh" : "en";
+  if (cjk > 0 && cjk >= Math.max(1, latin * 0.05)) return "zh";
+  if (cjk === 0 && latin === 0) return systemPrefersZh(env) ? "zh" : "en";
+  if (systemPrefersZh(env) && cjk > 0) return "zh";
+  return "en";
 }
 
 export type RvUiStrings = {
@@ -32,6 +50,11 @@ export type RvUiStrings = {
   frontendPreset: string;
   planPreset: string;
   challengePreset: string;
+  loopCodePreset: string;
+  loopCodeDesc: string;
+  loopTwoRounds: string;
+  loopPlanPreset: string;
+  presetHint: string;
   suggested: string;
   presetTier: (n: number) => string;
   thinkingSuggested: string;
@@ -48,10 +71,15 @@ const UI: Record<RvLocale, RvUiStrings> = {
     keepSessionDesc: "Persist review session for /rv --continue",
     listModels: "list models",
     listModelsDesc: "Show provider/model catalog",
-    codePreset: "Code review (preset)",
-    frontendPreset: "Frontend / multimodal review (preset)",
-    planPreset: "Plan review (preset)",
-    challengePreset: "Challenge review (preset)",
+    codePreset: "Code review preset",
+    frontendPreset: "Frontend preset",
+    planPreset: "Plan review preset",
+    challengePreset: "Challenge preset",
+    loopCodePreset: "Loop closeout (code)",
+    loopCodeDesc: "Host fixes, re-review until clean",
+    loopTwoRounds: "Loop closeout (2 rounds)",
+    loopPlanPreset: "Loop closeout (plan)",
+    presetHint: "Type preset / code / plan for templates",
     suggested: "Suggested",
     presetTier: (n) => (n === 0 ? "Suggested" : `Preset #${n + 1}`),
     thinkingSuggested: "Suggested ",
@@ -66,10 +94,15 @@ const UI: Record<RvLocale, RvUiStrings> = {
     keepSessionDesc: "保留 review 会话，便于 /rv --continue",
     listModels: "查看模型列表",
     listModelsDesc: "列出当前可用 provider/model",
-    codePreset: "代码审核（推荐配置）",
-    frontendPreset: "前端 / 多模态审核（推荐）",
-    planPreset: "方案 / 架构审核（推荐）",
-    challengePreset: "对抗性方案审核（可追问）",
+    codePreset: "代码审核预设",
+    frontendPreset: "前端审核预设",
+    planPreset: "方案审核预设",
+    challengePreset: "对抗审核预设",
+    loopCodePreset: "Loop 关单（代码）",
+    loopCodeDesc: "宿主修 → 再审，直到 clean",
+    loopTwoRounds: "Loop 两轮关单",
+    loopPlanPreset: "Loop 关单（方案）",
+    presetHint: "输入 预设 / 代码 / 方案 查看模板",
     suggested: "推荐",
     presetTier: (n) => (n === 0 ? "推荐" : `预设 #${n + 1}`),
     thinkingSuggested: "推荐 ",

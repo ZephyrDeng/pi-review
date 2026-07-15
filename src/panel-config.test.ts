@@ -36,6 +36,38 @@ test("generic panel builds N anonymous reviewers with default quorum two", () =>
   assert.equal(resolved.semanticEnabled, false);
 });
 
+test("generic panel applies per-reviewer model overrides", () => {
+  const resolved = resolvePanelConfig(
+    baseParsed({
+      reviewers: 3,
+      reviewerModels: ["r1=openai-codex/gpt-5.6-sol", "r3=anthropic/claude-sonnet-4-5"],
+    }),
+    {},
+  );
+  assert.equal(resolved.reviewers[0]?.model, "openai-codex/gpt-5.6-sol");
+  assert.equal(resolved.reviewers[1]?.model, undefined);
+  assert.equal(resolved.reviewers[2]?.model, "anthropic/claude-sonnet-4-5");
+});
+
+test("named panel applies overrides by preset reviewer id", () => {
+  const resolved = resolvePanelConfig(
+    baseParsed({
+      panel: "code-experts",
+      reviewerModels: ["security=openai-codex/gpt-5.6-sol"],
+    }),
+    { "code-experts": codeExperts },
+  );
+  assert.equal(resolved.reviewers.find((r) => r.id === "security")?.model, "openai-codex/gpt-5.6-sol");
+  assert.equal(resolved.reviewers.find((r) => r.id === "correctness")?.model, undefined);
+});
+
+test("unknown reviewer id in --reviewer-model fails", () => {
+  assert.throws(
+    () => resolvePanelConfig(baseParsed({ reviewers: 2, reviewerModels: ["r9=openai/gpt"] }), {}),
+    /unknown reviewer id/,
+  );
+});
+
 test("generic panel respects explicit consensus and min-agree", () => {
   const resolved = resolvePanelConfig(baseParsed({ reviewers: 5, consensus: "majority" }), {});
   assert.equal(resolved.consensus, "majority");

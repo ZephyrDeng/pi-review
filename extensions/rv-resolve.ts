@@ -40,12 +40,22 @@ const THINKING_ALIASES: Record<string, ThinkingLevel> = {
   满思考: "xhigh",
 };
 
-/** Collapse separators so gpt5.5 / gpt_5_5 / GPT-5.5 share one key. Keep `/` for provider splits. */
+/** Strip only a trailing `:thinking` suffix; preserve provider colons such as `px:anthropic/...`. */
+export function stripTrailingThinkingSuffix(value: string): { model: string; thinking?: string } {
+  const idx = value.lastIndexOf(":");
+  if (idx <= 0) return { model: value };
+  const after = value.slice(idx + 1).trim();
+  // Thinking suffixes are bare levels, never path-like fragments containing `/`.
+  if (!after || after.includes("/") || !canonicalizeThinking(after)) return { model: value };
+  return { model: value.slice(0, idx), thinking: after };
+}
+
+/** Collapse separators so gpt5.5 / gpt_5_5 / GPT-5.5 share one key. Keep `/` and provider `:`. */
 export function normalizeModelKey(value: string): string {
-  return value
+  const { model } = stripTrailingThinkingSuffix(value);
+  return model
     .toLowerCase()
-    .replace(/:.*$/, "")
-    .replace(/[^a-z0-9/]+/g, "")
+    .replace(/[^a-z0-9:/]+/g, "")
     .replace(/\/+/g, "/");
 }
 
@@ -108,7 +118,7 @@ function splitProviderModel(query: string): { provider?: string; id: string } {
 }
 
 function scoreModel(model: ModelInfo, query: string, primaryProvider?: string): number {
-  const q = normalizeModelKey(query.replace(/:.*$/, ""));
+  const q = normalizeModelKey(stripTrailingThinkingSuffix(query).model);
   if (!q) return -1;
   const label = normalizeModelKey(model.label);
   const id = normalizeModelKey(model.id);
@@ -141,13 +151,13 @@ export function resolveModelFromCatalog(
 ): ModelResolve {
   if (!query?.trim()) return { status: "none", query: "" };
   const raw = query.trim();
-  // Allow provider/model:thinking in --model values.
-  const modelQuery = raw.includes(":") && raw.includes("/") ? raw.slice(0, raw.lastIndexOf(":")) : raw;
+  // Only strip a trailing thinking suffix; keep provider colons (px:anthropic/...).
+  const modelQuery = stripTrailingThinkingSuffix(raw).model;
 
-  const exactLabel = models.find((m) => m.label === modelQuery);
+  const exactLabel = models.find((m) => m.label === modelQuery || m.label === raw);
   if (exactLabel) return { status: "exact", model: exactLabel, query: modelQuery };
 
-  const exactIds = models.filter((m) => m.id === modelQuery);
+  const exactIds = models.filter((m) => m.id === modelQuery || m.id === raw);
   if (exactIds.length === 1) return { status: "exact", model: exactIds[0]!, query: modelQuery };
   if (exactIds.length > 1) {
     const preferred =
@@ -186,54 +196,17 @@ export function resolveModelFromCatalog(
   return { status: "ambiguous", query: modelQuery, candidates };
 }
 
-const BARE_THINKING = new Set<string>([
-  ...THINKING_LEVELS,
-  ...Object.keys(THINKING_ALIASES),
-]);
-
 /**
- * Pull trailing/leading model and thinking tokens out of free text when the user
- * omitted flags, e.g. "gpt-5.5 xhigh review auth" or "用 kimi 高思考看 @src".
+ * Natural-language targets must stay verbatim. Model/thinking come only from
+ * explicit flags or an unambiguous `--model provider/model:thinking` suffix.
+ * This helper is retained for tests/docs as a no-rewrite identity.
  */
 export function extractModelThinkingFromText(
   text: string,
-  models: ModelInfo[],
-  primaryProvider?: string,
+  _models: ModelInfo[] = [],
+  _primaryProvider?: string,
 ): { model?: string; thinking?: string; target: string; notes: string[] } {
-  if (!text.trim() || models.length === 0) return { target: text, notes: [] };
-  const tokens = text.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
-  const notes: string[] = [];
-  let model: string | undefined;
-  let thinking: string | undefined;
-  const keep: string[] = [];
-
-  for (const token of tokens) {
-    const bare = token.replace(/^['"]|['"]$/g, "");
-    if (!model) {
-      const resolved = resolveModelFromCatalog(bare, models, primaryProvider);
-      if (resolved.status === "exact" || resolved.status === "unique") {
-        model = resolved.model.label;
-        notes.push(`model ${bare} → ${model}`);
-        // provider/model:thinking form
-        if (bare.includes(":") && bare.includes("/")) {
-          const level = bare.slice(bare.lastIndexOf(":") + 1);
-          if (canonicalizeThinking(level)) thinking = canonicalizeThinking(level);
-        }
-        continue;
-      }
-    }
-    if (!thinking && (BARE_THINKING.has(bare.toLowerCase()) || Boolean(canonicalizeThinking(bare)))) {
-      const level = canonicalizeThinking(bare);
-      if (level) {
-        thinking = level;
-        notes.push(`thinking ${bare} → ${level}`);
-        continue;
-      }
-    }
-    keep.push(token);
-  }
-
-  return { ...(model ? { model } : {}), ...(thinking ? { thinking } : {}), target: keep.join(" ").trim(), notes };
+  return { target: text, notes: [] };
 }
 
 export type RvResolution = {
@@ -252,29 +225,17 @@ export function resolveRvParsed(
   let next: RvParsed = { ...parsed };
   let ambiguousModels: string[] | undefined;
 
-  // Inline --model provider/model:thinking
-  if (next.model?.includes(":") && next.model.includes("/")) {
-    const idx = next.model.lastIndexOf(":");
-    const modelPart = next.model.slice(0, idx);
-    const thinkingPart = next.model.slice(idx + 1);
-    if (canonicalizeThinking(thinkingPart)) {
-      next = { ...next, model: modelPart, thinking: next.thinking ?? thinkingPart };
-      notes.push(`split --model thinking suffix :${thinkingPart}`);
+  // Inline --model provider/model:thinking only when the suffix is a real thinking level.
+  // Providers such as `px:anthropic/...` must keep their colon.
+  if (next.model) {
+    const split = stripTrailingThinkingSuffix(next.model);
+    if (split.thinking && split.model !== next.model) {
+      next = { ...next, model: split.model, thinking: next.thinking ?? split.thinking };
+      notes.push(`split --model thinking suffix :${split.thinking}`);
     }
   }
 
-  if (!next.model && !next.thinking && next.target && models.length > 0 && !next.modelsOnly) {
-    const extracted = extractModelThinkingFromText(next.target, models, primaryProvider);
-    if (extracted.model || extracted.thinking) {
-      next = {
-        ...next,
-        ...(extracted.model ? { model: extracted.model } : {}),
-        ...(extracted.thinking ? { thinking: extracted.thinking } : {}),
-        target: extracted.target || next.target,
-      };
-      notes.push(...extracted.notes);
-    }
-  }
+  // Never rewrite natural-language targets by scavenging bare thinking/model words.
 
   if (next.model && models.length > 0) {
     const resolved = resolveModelFromCatalog(next.model, models, primaryProvider);
@@ -312,6 +273,40 @@ export function resolveRvParsed(
       if (thinking.level !== next.thinking) notes.push(`thinking ${next.thinking} → ${thinking.level}`);
       next = { ...next, thinking: thinking.level };
     }
+  }
+
+  // Resolve each --reviewer-model id=model[:thinking] the same way as --model.
+  if (next.reviewerModels?.length && models.length > 0) {
+    const resolvedMappings: string[] = [];
+    for (const mapping of next.reviewerModels) {
+      const eq = mapping.indexOf("=");
+      if (eq <= 0) {
+        resolvedMappings.push(mapping);
+        continue;
+      }
+      const id = mapping.slice(0, eq);
+      const rawModel = mapping.slice(eq + 1);
+      const split = stripTrailingThinkingSuffix(rawModel);
+      const hit = resolveModelFromCatalog(split.model, models, primaryProvider);
+      if (hit.status === "exact" || hit.status === "unique") {
+        let thinking = split.thinking;
+        if (thinking) {
+          const t = resolveThinking(thinking, hit.model.thinkingLevels);
+          if (t.status === "exact" || t.status === "alias" || t.status === "fallback") thinking = t.level;
+          else thinking = undefined;
+        }
+        const token = thinking ? `${hit.model.label}:${thinking}` : hit.model.label;
+        if (token !== rawModel) notes.push(`reviewer-model ${id}: ${rawModel} → ${token}`);
+        resolvedMappings.push(`${id}=${token}`);
+      } else if (hit.status === "ambiguous") {
+        notes.push(`reviewer-model ${id}: ${rawModel} ambiguous; left unchanged`);
+        resolvedMappings.push(mapping);
+      } else {
+        notes.push(`reviewer-model ${id}: ${rawModel} not in catalog; left unchanged`);
+        resolvedMappings.push(mapping);
+      }
+    }
+    next = { ...next, reviewerModels: resolvedMappings };
   }
 
   return { parsed: next, notes, ...(ambiguousModels ? { ambiguousModels } : {}) };

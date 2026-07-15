@@ -33,8 +33,15 @@ export interface ParsedArgs {
   stream: boolean;
   /** When set, run the child in --mode json and stream its event log to this file path. */
   progressLog?: string;
-  /** Review budget for the loop command. */
+  /** Review budget for the loop command (hard ceiling). */
   maxRounds?: number;
+  /** True when the user explicitly passed --max-rounds (vs default). */
+  maxRoundsExplicit?: boolean;
+  /**
+   * Loop stop goal. `clean` means keep reviewing until the gate is clean
+   * (or escalate / exhaust the hard max-rounds budget).
+   */
+  until?: "clean";
   continueHandle?: string;
   model?: string;
   provider?: string;
@@ -54,6 +61,11 @@ export interface ParsedArgs {
   consensusModel?: string;
   /** Panel: bounded reviewer concurrency. */
   concurrency?: number;
+  /**
+   * Per-reviewer model overrides: `r1=provider/model` or `security=provider/model`.
+   * Generic panels use r1..rN; named panels use preset reviewer ids.
+   */
+  reviewerModels?: string[];
   /** Panel: normalized machine event stream for renderer adapters. */
   outputFormat?: "events-jsonl";
 }

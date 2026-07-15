@@ -94,3 +94,35 @@ test("loop summary reports each round and final outcome", async () => {
   assert.match(summary, /Round 2.*CLEAN.*APPROVE.*800ms/);
   assert.match(summary, /Stop.*clean/);
 });
+
+test("loop until clean declares the clean goal and still hard-caps the budget", async () => {
+  let calls = 0;
+  const result = await runReviewLoop(
+    { maxRounds: 2, until: "clean" },
+    async () => {
+      calls += 1;
+      return { meta: meta("has_findings", "request_changes"), exitCode: 1 };
+    },
+  );
+
+  assert.equal(calls, 2);
+  assert.equal(result.until, "clean");
+  assert.equal(result.maxRounds, 2);
+  assert.equal(result.stopReason, "budget_exhausted");
+  const summary = formatLoopSummary(result);
+  assert.match(summary, /Goal\s+clean/);
+  assert.match(summary, /no gate-blocking findings/);
+  assert.match(summary, /Budget\s+max-rounds 2/);
+  assert.match(summary, /Stop\s+budget_exhausted/);
+});
+
+test("loop until clean stops early when the clean goal is met", async () => {
+  const result = await runReviewLoop(
+    { maxRounds: 10, until: "clean" },
+    async () => ({ meta: meta("clean", "approve"), exitCode: 0 }),
+  );
+  assert.equal(result.stopReason, "clean");
+  assert.equal(result.until, "clean");
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.rounds.length, 1);
+});

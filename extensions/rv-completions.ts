@@ -40,12 +40,31 @@ export const RV_FLAGS = [
   "--no-stream",
   "--continue",
   "--max-rounds",
+  "--until",
+  "--reviewers",
+  "--panel",
+  "--reviewer-model",
+  "--consensus",
+  "--min-agree",
+  "--consensus-model",
+  "--concurrency",
 ] as const;
 
 export const MODE_HINTS: Record<string, string> = {
   code: "Code / diff / MR review",
   plan: "Architecture or plan review",
   challenge: "Adversarial plan review",
+};
+
+export const CONSENSUS_HINTS: Record<string, string> = {
+  any: "Any single actionable reviewer confirms",
+  quorum: "At least --min-agree reviewers (default 2)",
+  majority: "floor(n/2)+1 reviewers",
+  unanimous: "All reviewers must agree",
+};
+
+export const PANEL_PRESET_HINTS: Record<string, string> = {
+  "code-experts": "correctness + security + testing (quorum 2)",
 };
 
 export const FLAG_HINTS: Record<string, string> = {
@@ -55,8 +74,46 @@ export const FLAG_HINTS: Record<string, string> = {
   "--keep-session": "Keep session for /rv --continue follow-up",
   "--no-stream": "Buffer output until exit (not default)",
   "--continue": "Resume an existing review session",
-  "--max-rounds": "Loop budget ( /rv-loop only )",
+  "--max-rounds": "Loop hard budget: how many review gates (not reviewer count)",
+  "--until": "Loop stop goal: clean",
+  "--reviewers": "Panel width: independent reviewers per gate (1-8)",
+  "--panel": "Named expert panel preset (cannot combine with --reviewers)",
+  "--reviewer-model": "Per-reviewer model: pick rK= then model (repeatable)",
+  "--consensus": "any | quorum | majority | unanimous",
+  "--min-agree": "Quorum threshold (quorum only)",
+  "--consensus-model": "Model for semantic adjudication only",
+  "--concurrency": "Bound parallel reviewers (≤ reviewers)",
 };
+
+/** Infer reviewer ids available for --reviewer-model secondary menu. */
+export function reviewerIdsForHead(head: string[]): string[] {
+  const panelIdx = head.indexOf("--panel");
+  if (panelIdx >= 0) {
+    const name = head[panelIdx + 1];
+    if (name === "code-experts") return ["correctness", "security", "testing"];
+    // Unknown preset: still offer generic slots as a fallback.
+  }
+  const reviewersIdx = head.indexOf("--reviewers");
+  if (reviewersIdx >= 0) {
+    const n = Number(head[reviewersIdx + 1]);
+    if (Number.isSafeInteger(n) && n >= 1 && n <= 8) {
+      return Array.from({ length: n }, (_, i) => `r${i + 1}`);
+    }
+  }
+  // Default panel path (/rv without width): code-experts style ids.
+  return ["correctness", "security", "testing"];
+}
+
+function assignedReviewerIds(head: string[]): Set<string> {
+  const assigned = new Set<string>();
+  for (let i = 0; i < head.length; i++) {
+    if (head[i] !== "--reviewer-model") continue;
+    const value = head[i + 1] ?? "";
+    const eq = value.indexOf("=");
+    if (eq > 0) assigned.add(value.slice(0, eq));
+  }
+  return assigned;
+}
 
 /** Minimal model metadata we need; converted from the host's Model registry. */
 export interface ModelInfo {
@@ -360,6 +417,14 @@ function thinkingSuffixForModel(m: ModelInfo, want?: string): string {
   return lvl ? `:${lvl}` : "";
 }
 
+/** Presets are opt-in to avoid drowning flag/model completions. */
+export function wantsPresetCompletions(tail: string): boolean {
+  const q = tail.trim().toLowerCase();
+  if (!q) return false;
+  return /^(preset|模板|预设|推荐|code|plan|front|challenge|代码|方案|前端|对抗|loop|关单)/i.test(q)
+    || /preset|模板|预设|推荐|code review|plan review|frontend|challenge|代码审核|方案审核|前端|对抗|关单/i.test(q);
+}
+
 function sceneTemplates(
   models: ModelInfo[],
   sig: ReviewSignals,
@@ -367,18 +432,20 @@ function sceneTemplates(
   tail: string,
   deps: CompletionDeps,
 ): AutocompleteItem[] {
+  // Empty top-level should stay quiet: flags + model typing first.
+  if (!wantsPresetCompletions(tail)) return [];
+
   const priorities = getPriorities(deps);
   const codePrimary = primaryPresetForProfile(models, "code", priorities);
   const planPrimary = primaryPresetForProfile(models, "plan", priorities);
   const frontendPrimary = primaryPresetForProfile(models, "frontend", priorities);
   const strategy = deps.strategy ?? "panel";
-
   const ui = rvUi(localeOf(deps));
   const templates: { cmd: string; label: string; description?: string }[] = [];
 
   if (strategy === "models") {
     return [{
-      value: headPrefix.trimEnd(),
+      value: `${headPrefix}${tail}`,
       label: ui.listModels,
       description: ui.listModelsDesc,
     }].filter((t) => !tail || fuzzyMatch(t.label, tail) || fuzzyMatch("models", tail));
@@ -387,60 +454,58 @@ function sceneTemplates(
   if (strategy === "loop") {
     if (codePrimary) {
       const m = codePrimary.model;
+      const cmd1 = `--model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "high")} @src`;
       templates.push({
-        cmd: `--model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "high")} @src`,
-        label: localeOf(deps) === "zh" ? "Loop 关单（代码）" : "Loop closeout (code)",
-        description: localeOf(deps) === "zh" ? "宿主修 → 再审，直到 clean" : "Host fixes, re-review until clean",
+        cmd: cmd1,
+        label: ui.loopCodePreset,
+        description: `${ui.loopCodeDesc} · ${cmd1}`,
       });
+      const cmd2 = `--max-rounds 2 --model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "high")} fix until clean @src`;
       templates.push({
-        cmd: `--max-rounds 2 --model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "high")} fix until clean @src`,
-        label: localeOf(deps) === "zh" ? "Loop 两轮关单" : "Loop closeout (2 rounds)",
+        cmd: cmd2,
+        label: ui.loopTwoRounds,
+        description: cmd2,
       });
     }
     if (planPrimary) {
       const m = planPrimary.model;
+      const cmd = `--mode plan --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @docs`;
       templates.push({
-        cmd: `--mode plan --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @docs`,
-        label: localeOf(deps) === "zh" ? "Loop 关单（方案）" : "Loop closeout (plan)",
+        cmd,
+        label: ui.loopPlanPreset,
+        description: cmd,
       });
     }
   } else {
     if (codePrimary) {
       const m = codePrimary.model;
-      templates.push({
-        cmd: `--model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "xhigh")} @src`,
-        label: ui.codePreset,
-        description: localeOf(deps) === "zh" ? "Panel 代码审查预设" : "Panel code review preset",
-      });
+      const cmd = `--model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "xhigh")} @src`;
+      templates.push({ cmd, label: ui.codePreset, description: cmd });
     }
     if (frontendPrimary) {
       const m = frontendPrimary.model;
-      templates.push({
-        cmd: `--model ${m.label}${thinkingSuffixForModel(m, frontendPrimary.thinking)} @src`,
-        label: ui.frontendPreset,
-        description: localeOf(deps) === "zh" ? "Panel 前端/多模态预设" : "Panel frontend / multimodal preset",
-      });
+      const cmd = `--model ${m.label}${thinkingSuffixForModel(m, frontendPrimary.thinking)} @src`;
+      templates.push({ cmd, label: ui.frontendPreset, description: cmd });
     }
     if (planPrimary) {
       const m = planPrimary.model;
-      templates.push({
-        cmd: `--mode plan --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @docs`,
-        label: ui.planPreset,
-        description: localeOf(deps) === "zh" ? "Panel 方案审查预设" : "Panel plan review preset",
-      });
-      templates.push({
-        cmd: `--mode challenge --keep-session --model ${m.label}${thinkingSuffixForModel(m, "xhigh")} @docs`,
-        label: ui.challengePreset,
-        description: localeOf(deps) === "zh" ? "Panel 对抗审查（可追问）" : "Panel challenge review (keep session)",
-      });
+      const planCmd = `--mode plan --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @docs`;
+      templates.push({ cmd: planCmd, label: ui.planPreset, description: planCmd });
+      const challengeCmd = `--mode challenge --keep-session --model ${m.label}${thinkingSuffixForModel(m, "xhigh")} @docs`;
+      templates.push({ cmd: challengeCmd, label: ui.challengePreset, description: challengeCmd });
     }
   }
 
   return templates
-    .filter((t) => !tail || fuzzyMatch(t.label, tail) || t.cmd.includes(tail))
+    .filter((t) => {
+      const q = tail.trim().toLowerCase();
+      if (!q || q === "preset" || q === "预设" || q === "模板" || q === "推荐") return true;
+      return fuzzyMatch(t.label, tail) || t.cmd.toLowerCase().includes(q) || fuzzyMatch(t.description ?? "", tail);
+    })
     .map((t) => ({
       value: `${headPrefix}${t.cmd}`,
       label: t.label,
+      // Put the full command in description so the TUI shows what will be inserted.
       description: t.description ?? t.cmd,
     }));
 }
@@ -453,21 +518,93 @@ function flagItems(
 ): AutocompleteItem[] | null {
   // Don't re-suggest boolean flags already present.
   const present = new Set(head);
+  const hasReviewers = head.includes("--reviewers");
+  const hasPanel = head.includes("--panel");
   const allowed = RV_FLAGS.filter((f) => {
+    if (strategy === "models") return false;
     if (strategy === "loop") {
       // Loop rejects keep-session / continue; max-rounds is loop-only.
       if (f === "--keep-session" || f === "--continue") return false;
       return true;
     }
-    if (strategy === "models") return false;
-    if (f === "--max-rounds") return false;
+    // Panel strategy (/rv): no loop-only flags (single gate).
+    if (f === "--max-rounds" || f === "--until") return false;
+    return true;
+  }).filter((f) => {
+    // Mutually exclusive panel selectors.
+    if (f === "--reviewers" && hasPanel) return false;
+    if (f === "--panel" && hasReviewers) return false;
     return true;
   });
   const candidates = filterList(allowed, tail).filter((f) => {
     if (f === "--keep-session" || f === "--no-stream") return !present.has(f);
+    // Value flags: hide if already present once.
+    if ([
+      "--mode", "--model", "--thinking", "--continue", "--max-rounds", "--until",
+      "--reviewers", "--panel", "--consensus", "--min-agree", "--consensus-model", "--concurrency",
+    ].includes(f) && present.has(f)) return false;
+    // --reviewer-model is repeatable; keep offering until every reviewer id is assigned.
+    if (f === "--reviewer-model") {
+      const ids = reviewerIdsForHead(head);
+      const assigned = assignedReviewerIds(head);
+      if (ids.length > 0 && ids.every((id) => assigned.has(id))) return false;
+    }
     return true;
   });
   return wrap(candidates, headPrefix, FLAG_HINTS);
+}
+
+function reviewerModelCompletions(
+  head: string[],
+  tail: string,
+  headPrefix: string,
+  deps: CompletionDeps,
+  sig: ReviewSignals,
+): AutocompleteItem[] | null {
+  const ids = reviewerIdsForHead(head);
+  const assigned = assignedReviewerIds(head);
+  const eq = tail.indexOf("=");
+
+  // Secondary menu stage 1: pick reviewer id → inserts `id=`
+  if (eq === -1) {
+    const open = ids.filter((id) => !assigned.has(id) || tail.startsWith(id));
+    const filtered = filterList(open.length ? open : ids, tail);
+    if (!filtered.length) return null;
+    return filtered.map((id) => ({
+      value: `${headPrefix}${id}=`,
+      label: `${id}=`,
+      description: localeOf(deps) === "zh"
+        ? `为 ${id} 选择模型（下一级）`
+        : `Choose model for ${id} (next step)`,
+    }));
+  }
+
+  // Secondary menu stage 2: after `id=`, offer catalog models.
+  const reviewerId = tail.slice(0, eq);
+  const modelQuery = tail.slice(eq + 1);
+  const models = deps.models ?? [];
+  if (!models.length) {
+    // Still help shape the token when registry is cold.
+    if (!modelQuery) {
+      return [{
+        value: `${headPrefix}${reviewerId}=`,
+        label: `${reviewerId}=<model>`,
+        description: localeOf(deps) === "zh" ? "输入 provider/model 或短名" : "Type provider/model or short id",
+      }];
+    }
+    return [{
+      value: `${headPrefix}${reviewerId}=${modelQuery}`,
+      label: `${reviewerId}=${modelQuery}`,
+      description: localeOf(deps) === "zh" ? "使用输入的模型 token" : "Use typed model token",
+    }];
+  }
+  const ranked = modelItems(models, sig, "", modelQuery, deps) ?? [];
+  if (!ranked.length) return null;
+  return ranked.map((item) => ({
+    value: `${headPrefix}${reviewerId}=${item.label}`,
+    label: `${reviewerId}=${item.label}`,
+    description: item.description,
+  }));
 }
 
 function looksLikeModelQuery(tail: string, models: ModelInfo[] = []): boolean {
@@ -479,7 +616,7 @@ function looksLikeModelQuery(tail: string, models: ModelInfo[] = []): boolean {
   }
   // Match against live catalog providers / ids so short provider names complete.
   const q = tail.toLowerCase();
-  if (models.some((m) => m.provider.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q))) {
+  if (q.length >= 2 && models.some((m) => m.provider.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q))) {
     return true;
   }
   // short alphanumeric model-ish tokens (gpt55, kimi-k2)
@@ -488,6 +625,7 @@ function looksLikeModelQuery(tail: string, models: ModelInfo[] = []): boolean {
 
 function topLevelCompletions(
   head: string[],
+  rawHead: string[],
   tail: string,
   deps: CompletionDeps,
   headPrefix: string,
@@ -495,31 +633,51 @@ function topLevelCompletions(
 ): AutocompleteItem[] | null {
   const items: AutocompleteItem[] = [];
   const strategy = deps.strategy ?? "panel";
+  const ui = rvUi(localeOf(deps));
 
   if (strategy === "models") {
     // /rv-models takes no target; only remind the user.
-    const ui = rvUi(localeOf(deps));
     if (!tail || fuzzyMatch(ui.listModels, tail) || fuzzyMatch("models", tail)) {
-      items.push({ value: "", label: ui.listModels, description: `${ui.listModelsDesc} · no args needed` });
+      items.push({ value: `${headPrefix}${tail}`, label: ui.listModels, description: ui.listModelsDesc });
     }
     return items.length ? items : null;
   }
 
-  // Scene templates for the active strategy.
+  // Quiet empty top-level: interactive wizard first, then a few flags.
+  if (!tail) {
+    const zh = localeOf(deps) === "zh";
+    items.push({
+      value: `${headPrefix}-i`,
+      label: zh ? "-i · 交互向导（推荐）" : "-i · interactive wizard (recommended)",
+      description: zh
+        ? "对话框选择人数、模型、思考强度 — 不用 Tab"
+        : "Dialog picker for reviewers, models, thinking — no tab",
+    });
+    const flags = flagItems(head, "--", headPrefix, strategy) ?? [];
+    items.push(...flags.slice(0, 5));
+    items.push({
+      value: headPrefix,
+      label: ui.presetHint,
+      description: localeOf(deps) === "zh" ? "需要模板时再输入「预设」" : "Type preset when you want templates",
+    });
+    return items.length ? items : null;
+  }
+
+  // Opt-in scene templates only.
   if (deps.models?.length) {
     items.push(...sceneTemplates(deps.models, sig, headPrefix, tail, deps));
   }
 
-  // Panel keeps semantic phrases; loop only needs mode-ish phrases lightly.
-  if (strategy === "panel") {
-    items.push(...semanticCompletionItems(localeOf(deps), tail, headPrefix, head));
-    const ui = rvUi(localeOf(deps));
+  // Panel keeps semantic phrases when the user is typing mode-ish text.
+  if (strategy === "panel" && !looksLikeModelQuery(tail, deps.models ?? [])) {
+    items.push(...semanticCompletionItems(localeOf(deps), tail, headPrefix, head, rawHead));
     const hasListModelsItem = items.some((i) => i.label === ui.listModels);
     if (
       !hasListModelsItem &&
       (fuzzyMatch(ui.modelsKeyword, tail) ||
         ui.modelsKeyword.startsWith(tail) ||
-        fuzzyMatch("models", tail))
+        fuzzyMatch("models", tail) ||
+        fuzzyMatch(ui.listModels, tail))
     ) {
       items.push({
         value: `${headPrefix}${ui.listModels}`,
@@ -559,6 +717,16 @@ function topLevelCompletions(
         }
       }
     }
+  } else if (!deps.models?.length && looksLikeModelQuery(tail)) {
+    // Registry-cold fallback: preserve every already-entered argument while
+    // wrapping the typed token as --model. Pi replaces the whole arg string.
+    items.unshift({
+      value: `${headPrefix}--model ${tail}`,
+      label: `--model ${tail}`,
+      description: localeOf(deps) === "zh"
+        ? "模型目录尚未加载；保留现有目标并在执行时解析"
+        : "Catalog not loaded; preserve target and resolve at execution",
+    });
   }
 
   if (tail.startsWith("--")) {
@@ -573,6 +741,37 @@ function topLevelCompletions(
 // Public entry point
 // ---------------------------------------------------------------------------
 
+function interactiveTriggerCompletions(
+  tail: string,
+  headPrefix: string,
+  strategy: CompletionStrategy,
+  locale: RvLocale,
+): AutocompleteItem[] | null {
+  const q = tail.trim().toLowerCase();
+  // Only intercept pure interactive triggers, not unrelated flags like --input.
+  if (!q || !(/^(-i|--i|--in|--int|--inter|--interactive|interactive|i)$/i.test(q) || q === "-")) {
+    // Allow "-i" / "--interactive" / "interactive" prefixes while typing.
+    if (!/^(interactive|--interactive|-i)/i.test(q) && q !== "-") return null;
+  }
+  if (q.startsWith("--") && !q.startsWith("--i") && !q.startsWith("--interactive")) return null;
+  if (q.startsWith("-") && q !== "-" && !q.startsWith("-i") && !q.startsWith("--")) return null;
+
+  const zh = locale === "zh";
+  const label = zh ? "交互向导（对话框选模型）" : "Interactive wizard (dialog model picker)";
+  const description = strategy === "loop"
+    ? (zh ? "方向键选择 reviewer / 模型，无需 Tab 补全" : "Arrow-key pick reviewers & models; no tab completion")
+    : (zh ? "方向键配置 panel 审查" : "Arrow-key configure panel review");
+  return [{
+    value: `${headPrefix}-i`,
+    label: `-i · ${label}`,
+    description,
+  }, {
+    value: `${headPrefix}--interactive`,
+    label: `--interactive · ${label}`,
+    description,
+  }];
+}
+
 export function buildRvCompletions(
   prefix: string,
   deps: CompletionDeps,
@@ -583,14 +782,30 @@ export function buildRvCompletions(
   const sig = extractSignals(head, deps);
   const strategy = deps.strategy ?? "panel";
 
+  // 0) Interactive wizard triggers — do not fall through to the flag soup.
+  if (!prev && strategy !== "models") {
+    const interactive = interactiveTriggerCompletions(tail, headPrefix, strategy, localeOf(deps));
+    if (interactive) return interactive;
+  }
+
   // 1) --model value position (model list or :thinking suffix).
   if (prev === "--model") {
+    const models = deps.models ?? [];
+    if (models.length === 0) {
+      return [{
+        value: `${headPrefix}${tail}`,
+        label: tail || "<provider/model>",
+        description: localeOf(deps) === "zh"
+          ? "模型目录尚未加载；继续输入 provider/model 或短名"
+          : "Catalog not loaded; type provider/model or short id",
+      }];
+    }
     const colonIdx = tail.lastIndexOf(":");
     if (colonIdx !== -1 && tail.slice(0, colonIdx).includes("/")) {
-      const items = thinkingSuffixItems(tail, deps.models ?? [], headPrefix, sig, deps);
+      const items = thinkingSuffixItems(tail, models, headPrefix, sig, deps);
       return items;
     }
-    return modelItems(deps.models ?? [], sig, headPrefix, tail, deps);
+    return modelItems(models, sig, headPrefix, tail, deps);
   }
 
   // 2) --mode value position.
@@ -614,7 +829,73 @@ export function buildRvCompletions(
     });
   }
 
-  // 5) --continue value position: defer (no static list; handler owns it).
+  // 4b) --until value position (loop only).
+  if (prev === "--until") {
+    if (strategy !== "loop") return null;
+    return wrap(filterList(["clean"], tail), headPrefix, {
+      clean: "Stop only when the clean gate is met (hard-capped by --max-rounds)",
+    });
+  }
+
+  // 5) --reviewers value position (panel width per gate).
+  if (prev === "--reviewers") {
+    const counts = ["2", "3", "4", "5"];
+    return wrap(filterList(counts, tail), headPrefix, {
+      "2": "Two independent reviewers · then set --reviewer-model r1=…",
+      "3": "Three independent reviewers · then set --reviewer-model r1=…",
+      "4": "Four independent reviewers",
+      "5": "Five independent reviewers",
+    });
+  }
+
+  // 5b) --reviewer-model cascading menu: id= then model list.
+  if (prev === "--reviewer-model") {
+    return reviewerModelCompletions(head, tail, headPrefix, deps, sig);
+  }
+
+  // 6) --panel value position.
+  if (prev === "--panel") {
+    return wrap(filterList(Object.keys(PANEL_PRESET_HINTS), tail), headPrefix, PANEL_PRESET_HINTS);
+  }
+
+  // 7) --consensus value position.
+  if (prev === "--consensus") {
+    return wrap(filterList(Object.keys(CONSENSUS_HINTS), tail), headPrefix, CONSENSUS_HINTS);
+  }
+
+  // 8) --min-agree value position.
+  if (prev === "--min-agree") {
+    return wrap(filterList(["2", "3", "4"], tail), headPrefix, {
+      "2": "Default quorum threshold",
+      "3": "Stricter quorum",
+      "4": "Very strict quorum",
+    });
+  }
+
+  // 9) --concurrency value position.
+  if (prev === "--concurrency") {
+    return wrap(filterList(["1", "2", "3", "4"], tail), headPrefix, {
+      "1": "Serial reviewers",
+      "2": "Up to 2 in parallel",
+      "3": "Up to 3 in parallel",
+      "4": "Up to 4 in parallel",
+    });
+  }
+
+  // 10) --consensus-model value position: reuse model list when available.
+  if (prev === "--consensus-model") {
+    const models = deps.models ?? [];
+    if (models.length === 0) {
+      return [{
+        value: `${headPrefix}${tail}`,
+        label: tail || "<provider/model>",
+        description: "Catalog not loaded; type provider/model or short id",
+      }];
+    }
+    return modelItems(models, sig, headPrefix, tail, deps);
+  }
+
+  // 11) --continue value position: defer (no static list; handler owns it).
   if (prev === "--continue") return null;
 
   // 6) Flag completion (tail starts with "--").
@@ -626,5 +907,5 @@ export function buildRvCompletions(
   if (tail.startsWith("@")) return null;
 
   // 8) Top-level: strategy-aware templates + bare model hints + flags.
-  return topLevelCompletions(head, tail, deps, headPrefix, sig);
+  return topLevelCompletions(head, rawHead, tail, deps, headPrefix, sig);
 }

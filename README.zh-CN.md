@@ -60,9 +60,12 @@ pi-review models
 
 ```bash
 pi-review loop --max-rounds 3 -- @src
+pi-review loop --until clean --max-rounds 10 -- @src
 ```
 
 每轮都是完整 review run；命令不会编辑、打补丁、等待文件变化，也不会让子会话修复问题。遇到 `clean`、`needs_human`、`blocked` 会提前停止；仍有 actionable finding 时，在预算耗尽后以非零状态退出并输出逐轮摘要。宿主 Agent 或人工负责筛选并修复任务范围内的问题，再重新调用命令。需要在每次修复之间留出宿主处理点时，使用 `--max-rounds 1`。
+
+`--until clean` 声明成功目标（clean gate），但仍有硬预算：省略 `--max-rounds` 时默认为 10，**不是无限循环**。Clean 定义：单审查无 actionable finding；面板审查无 confirmed actionable cluster；advisories 可保留；`needs_human`/`blocked` 绝不算 clean。
 
 `loop` 复用普通审查的 mode/model/progress/target 参数；v1 明确不支持 `--keep-session`、`--continue`、`--name`。
 

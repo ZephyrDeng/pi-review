@@ -48,6 +48,33 @@ const models: ModelInfo[] = [
     contextWindow: 200000,
     thinkingLevels: ["high", "xhigh"],
   },
+  {
+    provider: "px:anthropic",
+    id: "claude-opus-4-8",
+    label: "px:anthropic/claude-opus-4-8",
+    name: "opus-px",
+    reasoning: true,
+    contextWindow: 200000,
+    thinkingLevels: ["high", "xhigh"],
+  },
+  {
+    provider: "px:anthropic",
+    id: "claude-sonnet-4-5",
+    label: "px:anthropic/claude-sonnet-4-5",
+    name: "sonnet-px",
+    reasoning: true,
+    contextWindow: 200000,
+    thinkingLevels: ["medium", "high"],
+  },
+  {
+    provider: "px:anthropic",
+    id: "claude-haiku-4-5",
+    label: "px:anthropic/claude-haiku-4-5",
+    name: "haiku-px",
+    reasoning: true,
+    contextWindow: 200000,
+    thinkingLevels: ["low", "medium"],
+  },
 ];
 
 function baseParsed(over: Partial<RvParsed> = {}): RvParsed {
@@ -93,11 +120,12 @@ test("model catalog resolves short ids and prefers primary provider", () => {
   if (kimi.status === "unique") assert.equal(kimi.model.label, "wafer.ai/Kimi-K2.6");
 });
 
-test("extractModelThinkingFromText pulls bare tokens out of natural language", () => {
-  const extracted = extractModelThinkingFromText("gpt-5.5 最高 review auth under @src", models, "openai-codex");
-  assert.equal(extracted.model, "openai-codex/gpt-5.5");
-  assert.equal(extracted.thinking, "xhigh");
-  assert.match(extracted.target, /review auth under @src/);
+test("extractModelThinkingFromText never rewrites natural-language targets", () => {
+  const original = "review high memory usage under @src";
+  const extracted = extractModelThinkingFromText(original, models, "openai-codex");
+  assert.equal(extracted.target, original);
+  assert.equal(extracted.model, undefined);
+  assert.equal(extracted.thinking, undefined);
 });
 
 test("resolveRvParsed normalizes flags and inline model:thinking", () => {
@@ -116,12 +144,46 @@ test("resolveRvParsed normalizes flags and inline model:thinking", () => {
   assert.ok(inline.notes.some((note) => /thinking/.test(note)));
 });
 
-test("resolveRvParsed extracts model tokens from target text", () => {
+test("resolveRvParsed keeps natural-language targets verbatim", () => {
+  const target = "review high memory usage under @src";
+  const resolved = resolveRvParsed(baseParsed({ target }), models);
+  assert.equal(resolved.parsed.target, target);
+  assert.equal(resolved.parsed.model, undefined);
+  assert.equal(resolved.parsed.thinking, undefined);
+});
+
+test("resolveRvParsed resolves short names inside --reviewer-model mappings", () => {
   const resolved = resolveRvParsed(
-    baseParsed({ target: "use kimi high on @src" }),
+    baseParsed({
+      reviewers: 2,
+      reviewerModels: ["r1=gpt-5.5:最高", "r2=kimi"],
+    }),
+    models,
+    "openai-codex",
+  );
+  assert.deepEqual(resolved.parsed.reviewerModels, [
+    "r1=openai-codex/gpt-5.5:xhigh",
+    "r2=wafer.ai/Kimi-K2.6",
+  ]);
+  assert.ok(resolved.notes.some((note) => /reviewer-model r1/.test(note)));
+});
+
+test("px:anthropic exact catalog ids keep provider colons", () => {
+  for (const label of [
+    "px:anthropic/claude-opus-4-8",
+    "px:anthropic/claude-sonnet-4-5",
+    "px:anthropic/claude-haiku-4-5",
+  ]) {
+    const resolved = resolveModelFromCatalog(label, models);
+    assert.equal(resolved.status, "exact", label);
+    if (resolved.status === "exact") assert.equal(resolved.model.label, label);
+  }
+
+  const withThinking = resolveRvParsed(
+    baseParsed({ model: "px:anthropic/claude-opus-4-8:xhigh" }),
     models,
   );
-  assert.equal(resolved.parsed.model, "wafer.ai/Kimi-K2.6");
-  assert.equal(resolved.parsed.thinking, "high");
-  assert.match(resolved.parsed.target, /@src/);
+  assert.equal(withThinking.parsed.model, "px:anthropic/claude-opus-4-8");
+  assert.equal(withThinking.parsed.thinking, "xhigh");
+  assert.ok(withThinking.notes.some((note) => /thinking suffix/.test(note)));
 });

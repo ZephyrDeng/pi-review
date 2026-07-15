@@ -23,9 +23,11 @@ Options:
   --tools <csv>                               Override allowed tools
   --no-stream                                 Buffer child output until exit (default: stream live)
   --progress-log <path>                       Stream child --mode json events to this file (cannot combine with --no-stream)
-  --max-rounds <n>                            Loop review budget (default: 3; loop only)
+  --max-rounds <n>                            Loop hard budget (default: 3; with --until clean default: 10; loop only)
+  --until clean                               Loop goal: keep going until clean gate (still hard-capped by --max-rounds)
   --reviewers <n>                             Panel: number of independent reviewers (2-8; activates panel mode)
   --panel <name>                              Panel: named expert-panel preset (cannot combine with --reviewers)
+  --reviewer-model <id=model>                 Panel: per-reviewer model (repeatable; r1=... or security=...)
   --consensus <policy>                        Panel: any | quorum | majority | unanimous (default: quorum)
   --min-agree <n>                             Panel: minimum reviewers for quorum (default: 2; quorum only)
   --consensus-model <model>                   Panel: model for semantic consensus adjudication
@@ -54,6 +56,7 @@ Examples:
   pi-review --panel code-experts --consensus majority -- @src
   pi-review loop --reviewers 3 --consensus quorum --max-rounds 3 -- @src
   pi-review loop --max-rounds 3 -- @src
+  pi-review loop --until clean --max-rounds 10 -- @src
   pi-review install
   pi-review install --agent claude-code codex -y
   pi-review install-skill
@@ -63,6 +66,12 @@ Examples:
 }
 
 export const DEFAULT_MAX_ROUNDS = 3;
+/** Hard budget when --until clean is set without an explicit --max-rounds. Never unlimited. */
+export const DEFAULT_UNTIL_CLEAN_MAX_ROUNDS = 10;
+
+/** Product clean-goal text (shared with loop footer / docs). */
+export const CLEAN_GOAL_HELP =
+  "clean = no gate-blocking findings (single: no actionable findings; panel: no confirmed actionable clusters; advisories ok)";
 
 export class ArgsParseError extends Error {
   constructor(message: string, readonly exitCode = 2) {
@@ -72,7 +81,7 @@ export class ArgsParseError extends Error {
 }
 
 function requireValue(flag: string, argv: string[]): string {
-  if (argv.length === 0 || argv[0] === "--") {
+  if (argv.length === 0 || argv[0].startsWith("--")) {
     throw new ArgsParseError(`${flag} requires a value`);
   }
   return argv.shift()!;
@@ -157,13 +166,30 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
         break;
       case "--max-rounds":
         options.maxRounds = parsePositiveInteger(arg, requireValue(arg, argv));
+        options.maxRoundsExplicit = true;
         break;
+      case "--until": {
+        const value = requireValue(arg, argv);
+        if (value !== "clean") {
+          throw new ArgsParseError(`--until only supports clean (${CLEAN_GOAL_HELP})`);
+        }
+        options.until = "clean";
+        break;
+      }
       case "--reviewers":
         options.reviewers = parsePositiveInteger(arg, requireValue(arg, argv));
         break;
       case "--panel":
         options.panel = requireValue(arg, argv);
         break;
+      case "--reviewer-model": {
+        const value = requireValue(arg, argv);
+        if (!/^[A-Za-z0-9_.-]+=\S+$/.test(value)) {
+          throw new ArgsParseError("--reviewer-model must look like id=provider/model (e.g. r1=openai/gpt-5.6-sol)");
+        }
+        options.reviewerModels = [...(options.reviewerModels ?? []), value];
+        break;
+      }
       case "--consensus":
         options.consensus = requireValue(arg, argv);
         break;
@@ -201,8 +227,15 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
   if (command !== "loop" && options.maxRounds !== undefined) {
     throw new ArgsParseError("--max-rounds can only be used with loop");
   }
+  if (command !== "loop" && options.until !== undefined) {
+    throw new ArgsParseError("--until can only be used with loop");
+  }
   if (command === "loop" && (options.keepSession || options.continueHandle || options.name)) {
     throw new ArgsParseError("loop cannot be used with --keep-session, --continue, or --name");
+  }
+  // --until clean is never unlimited: apply a higher default budget only when max-rounds was omitted.
+  if (command === "loop" && options.until === "clean" && !options.maxRoundsExplicit) {
+    options.maxRounds = DEFAULT_UNTIL_CLEAN_MAX_ROUNDS;
   }
 
   validatePanelOptions(options);
@@ -218,7 +251,8 @@ function validatePanelOptions(options: ParsedArgs): void {
     options.consensus !== undefined ||
     options.minAgree !== undefined ||
     options.consensusModel !== undefined ||
-    options.concurrency !== undefined;
+    options.concurrency !== undefined ||
+    (options.reviewerModels?.length ?? 0) > 0;
 
   if (hasReviewers && options.reviewers! > MAX_REVIEWERS) {
     throw new ArgsParseError(`--reviewers must be between 1 and ${MAX_REVIEWERS}`);

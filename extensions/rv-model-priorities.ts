@@ -15,21 +15,36 @@ export type ReviewModelPriorities = {
   plan: PresetModelEntry[];
 };
 
+/**
+ * Default priorities when resources/rv-model-priorities.json is missing.
+ * - code: fast review
+ * - plan: complex / architecture / 方案评审 (max thinking)
+ * - frontend: vision / UI / multimodal
+ */
 export const DEFAULT_REVIEW_MODEL_PRIORITIES: ReviewModelPriorities = {
   code: [
-    { idContains: "gpt-5.5", thinking: "xhigh" },
-    { idContains: "glm-5.2", thinking: "high" },
+    { idContains: "claude-sonnet", versionPrefer: "5", thinking: "xhigh" },
+    { idContains: "deepseek-v4-flash", thinking: "xhigh" },
+    { idContains: "glm-5.2", thinking: "xhigh" },
+    { idContains: "minimax-m3", thinking: "xhigh" },
+    { idContains: "grok-4.5", thinking: "xhigh" },
+    { idContains: "gpt-5.6-terra" },
+    { idContains: "gpt-5.6-luna", thinking: "xhigh" },
   ],
   frontend: [
+    { idContains: "claude" },
+    { idContains: "gpt" },
     { idContains: "kimi", versionPrefer: "2.7" },
-    { idContains: "claude-sonnet", versionPrefer: "5" },
-    { idContains: "minimax-m3" },
+    { idContains: "minimax-m3", thinking: "xhigh" },
   ],
   plan: [
-    { idContains: "claude-opus-4-8" },
-    { idContains: "claude-opus-4", versionPrefer: "8" },
-    { idContains: "deepseek-v4-pro" },
-    { idContains: "deepseek-v4" },
+    { idContains: "gpt-5.6-sol", thinking: "xhigh" },
+    { idContains: "claude-opus-4-8", thinking: "xhigh" },
+    { idContains: "claude-opus-4", versionPrefer: "8", thinking: "xhigh" },
+    { idContains: "claude-fable-5", thinking: "xhigh" },
+    { idContains: "glm-5.2", thinking: "xhigh" },
+    { idContains: "deepseek-v4-pro", thinking: "xhigh" },
+    { idContains: "grok-4.5", thinking: "xhigh" },
   ],
 };
 
