@@ -31,8 +31,9 @@ function compactText(state: PanelViewState, theme: Theme): string {
   const header = theme.fg("toolTitle", theme.bold(`pi-review panel ${progress}`)) + theme.fg("muted", ` · ${state.phase} · ${elapsed} · ${usageTokens(state)}`);
   const rows = Object.values(state.reviewers).map((reviewer) => {
     const active = reviewer.activeTool ? ` · ${reviewer.activeTool}` : "";
+    const elapsed = reviewer.startedAt ? ` · ${duration((reviewer.completedAt ?? Date.now()) - reviewer.startedAt)}` : "";
     const tokens = reviewer.usage ? ` · ${reviewer.usage.totalTokens.toLocaleString()} tok` : "";
-    return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${active}${tokens}`)}`;
+    return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${active}${elapsed}${tokens}`)}`;
   });
   return [header, ...rows].join("\n");
 }
@@ -131,7 +132,11 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       if (params.thinking) args.push("--thinking", params.thinking);
       args.push("--", params.target);
       const child = await spawnStreamingChild(process.execPath, args, { cwd: process.cwd(), env: process.env, stdoutSink, stderrSink: new Writable({ write(_chunk, _encoding, callback) { callback(); } }), signal });
-      if (buffer.trim()) consume(`${buffer}\n`);
+      if (buffer.trim()) {
+        const tail = buffer;
+        buffer = "";
+        consume(`${tail}\n`);
+      }
       const error = child.error ? child.error.message : state.meta ? undefined : `pi-review ended before a final event (${child.status ?? child.signal ?? "unknown"})`;
       const details: PanelToolDetails = { state, ...(error ? { error } : {}) };
       return {

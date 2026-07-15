@@ -34,14 +34,14 @@ When resolving this fallback, use the actual directory that contains this `SKILL
 
 | Host | How to run `pi-review` |
 |------|-------------------------|
-| **Pi** (`/rv`) | Foreground CLI, **default streaming** only. Do **not** add `--no-stream` or `--progress-log` unless the user explicitly asks. |
+| **Pi** (`/rv`) | New reviews call the native `pi_review` tool, which launches the packaged CLI in event mode and renders live Panel state. Continuations, kept sessions, and explicit `--no-stream` retain the foreground CLI path. |
 | **Claude Code, Codex, Cursor**, and similar AI agents | **Default: `--progress-log <path>` + background run + tail** (see below). Do **not** rely on foreground Bash stdout for “streaming” — the tool buffers until exit. |
 | Scripts / CI | Foreground is fine; use `--no-stream` only when you must buffer until exit. |
 
 ## Pi host (`/rv`)
 
-- In **Pi interactive** sessions, run `pi-review` with **default streaming only** — do **not** add `--no-stream` or `--progress-log` unless the user explicitly asks.
-- The `/rv` extension injects these rules into the parent agent; ordinary `/rv @path` needs no extra flags.
+- In **Pi interactive** sessions, ordinary `/rv @path` calls the native `pi_review` tool and needs no streaming flags. The tool owns normalized events, live rendering, and the packaged CLI process.
+- `--continue`, `--keep-session`, and explicit `--no-stream` use the shell CLI path because they retain single-review session semantics.
 
 ## Streaming vs agent hosts (Claude Code / Codex)
 

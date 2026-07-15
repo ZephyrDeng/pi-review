@@ -325,7 +325,7 @@ After installing as a Pi package, use the `/rv` slash command:
 /rv --mode challenge @docs/design.md
 ```
 
-The `/rv` command injects a task message for the parent agent (Pi host rules: default streaming, no automatic `--no-stream` or `--progress-log` + the `pi-review` CLI to run). The agent follows the **pi-review** skill and runs an isolated child session. Use plain `/rv @path` in Pi — no extra streaming flags needed.
+The `/rv` command injects a task message for the parent agent. New Pi reviews call the native `pi_review` tool, which launches the packaged `pi-review` CLI in normalized event mode and renders live Panel rows. Use plain `/rv @path` in Pi — no extra streaming flags needed. `--continue`, `--keep-session`, and explicit `--no-stream` retain the single-review CLI path.
 
 ```
 /rv models

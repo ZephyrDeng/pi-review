@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
+import { PANEL_READ_ONLY_TOOLS } from "./types.js";
 import type {
   ParsedArgs,
   PanelReviewMeta,
@@ -14,6 +15,7 @@ import type {
   StructuredReviewResult,
   VerdictInfo,
 } from "./types.js";
+export { PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { spawnStreamingChild } from "./child-process.js";
 import { childEnv, childRuntimeError, readReviewStdin } from "./review.js";
 import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
@@ -70,7 +72,6 @@ function reviewerProgressLog(baseProgressLog: string | undefined, reviewerId: st
 }
 
 /** The hard panel boundary. Shell access gets a separate verified profile in a future change. */
-export const PANEL_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
 const PANEL_READ_ONLY_TOOL_SET = new Set<string>(PANEL_READ_ONLY_TOOLS);
 
 /** Resolve reviewer tools through the hard allowlist; rejected requests cannot silently widen access. */

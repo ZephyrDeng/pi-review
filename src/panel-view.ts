@@ -10,6 +10,8 @@ export interface PanelReviewerView extends ReviewerIdentity {
   status: ReviewerViewStatus;
   activeTool?: string;
   activityAt?: number;
+  startedAt?: number;
+  completedAt?: number;
   turns: number;
   usage?: TokenUsage;
   recentActivity: string[];
@@ -104,7 +106,7 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
       reviewer = { ...previous, status: "queued", activityAt: event.at };
       break;
     case "reviewer.started":
-      reviewer = addActivity({ ...previous, status: "running", activityAt: event.at }, "review started");
+      reviewer = addActivity({ ...previous, status: "running", startedAt: event.at, activityAt: event.at }, "review started");
       break;
     case "reviewer.turn.started":
       reviewer = addActivity({ ...previous, status: "running", turns: event.turn, activityAt: event.at }, `turn ${event.turn}`);
@@ -122,13 +124,13 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
       reviewer = { ...previous, usage: event.usage, activityAt: event.at };
       break;
     case "reviewer.completed":
-      reviewer = addActivity({ ...previous, status: "completed", activeTool: undefined, activityAt: event.at, usage: event.submission.usage ?? previous.usage, submission: event.submission }, "review completed");
+      reviewer = addActivity({ ...previous, status: "completed", activeTool: undefined, completedAt: event.at, activityAt: event.at, usage: event.submission.usage ?? previous.usage, submission: event.submission }, "review completed");
       break;
     case "reviewer.failed":
-      reviewer = addActivity({ ...previous, status: "failed", activeTool: undefined, activityAt: event.at, error: event.message }, event.message);
+      reviewer = addActivity({ ...previous, status: "failed", activeTool: undefined, completedAt: event.at, activityAt: event.at, error: event.message }, event.message);
       break;
     case "reviewer.cancelled":
-      reviewer = addActivity({ ...previous, status: "cancelled", activeTool: undefined, activityAt: event.at, ...(event.message ? { error: event.message } : {}) }, event.message ?? "review cancelled");
+      reviewer = addActivity({ ...previous, status: "cancelled", activeTool: undefined, completedAt: event.at, activityAt: event.at, ...(event.message ? { error: event.message } : {}) }, event.message ?? "review cancelled");
       break;
   }
   next = { ...next, reviewers: { ...state.reviewers, [reviewerId]: reviewer } };

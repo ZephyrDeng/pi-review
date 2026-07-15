@@ -36,5 +36,5 @@
 - A **review run** always executes in a child Pi process — never in the parent session.
 - A **loop round** remains review-only; only the **host agent** may act on an **actionable finding**.
 - `pi-review models` delegates to the Pi **model catalog** directly.
-- The Pi package `/rv` command sends mode-specific orchestration text to the parent agent, which uses the **pi-review skill** to invoke the **shell CLI**.
-- The package skill guides parent agents to call the **shell CLI** and show the ASCII footer to users; `/rv` orchestration forbids default `--no-stream` / `--progress-log` in Pi. On **Claude Code / Codex**-style hosts, the skill defaults to `--progress-log` + background run + tail (`skills/pi-review/references/codex-tools.md`).
+- The Pi package `/rv` command sends mode-specific orchestration text to the parent agent. New review runs call the native `pi_review` tool, which invokes the packaged **shell CLI** in normalized event mode and renders live Panel state. Continuations, kept sessions, and explicit buffered runs retain the shell-CLI path.
+- The package skill guides non-Pi hosts to call the **shell CLI** and show the ASCII footer to users. `/rv` orchestration uses native live rendering for new Pi Panel runs and forbids default `--no-stream` / `--progress-log`. On **Claude Code / Codex**-style hosts, the skill defaults to `--progress-log` + background run + tail (`skills/pi-review/references/codex-tools.md`).

@@ -233,3 +233,29 @@ test("panel events-jsonl emits only normalized lifecycle events and carries the 
   assert.equal(events.at(-1)?.meta?.status, "has_findings");
   assert.doesNotMatch(result.stdout, /PI_REVIEW_META_JSON|── pi-review/);
 });
+
+test("panel events-jsonl keeps the default CLI gate metadata semantics", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const fakePi = writeFakePi(tempDir);
+  const args = ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"];
+  const human = runPanelCli(fakePi, "agree-bug", args);
+  const eventStream = runPanelCli(fakePi, "agree-bug", [...args, "--output-format", "events-jsonl"]);
+  const humanMeta = metaRecord(human);
+  const eventMeta = JSON.parse(eventStream.stdout.trim().split("\n").at(-1)!).meta as Record<string, unknown>;
+  assert.equal(eventStream.status, human.status);
+  assert.equal(eventMeta.status, humanMeta!.status);
+  assert.deepEqual(eventMeta.confirmedClusters, humanMeta!.confirmedClusters);
+  assert.deepEqual(eventMeta.advisories, humanMeta!.advisories);
+  assert.equal(eventMeta.panelHealth, humanMeta!.panelHealth);
+});
+
+test("panel rejects disallowed tools before writing a partial event stream", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const fakePi = writeFakePi(tempDir);
+  const result = runPanelCli(fakePi, "agree-bug", ["--reviewers", "2", "--tools", "bash", "--output-format", "events-jsonl"]);
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /panel reviewers only allow/);
+});

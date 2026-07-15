@@ -90,6 +90,13 @@ test("panel event output format parses as an opt-in machine contract", () => {
   assert.equal(parsed.outputFormat, "events-jsonl");
 });
 
+test("panel rejects shell access as a usage error before execution begins", () => {
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--tools", "read,bash", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /panel reviewers only allow/.test(error.message),
+  );
+});
+
 test("reviewer count must be a positive integer within the limit", () => {
   for (const value of ["0", "-1", "1.5", "many"]) {
     assert.throws(

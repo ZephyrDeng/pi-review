@@ -116,6 +116,9 @@ export interface TokenUsage {
 /** Documented initial maximum number of reviewers in one panel. */
 export const MAX_REVIEWERS = 8;
 
+/** Hard capability boundary for every panel reviewer. */
+export const PANEL_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
+
 /** Default minimum agreement for a multi-reviewer quorum panel. */
 export const DEFAULT_PANEL_MIN_AGREE = 2;
 

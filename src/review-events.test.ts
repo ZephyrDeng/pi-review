@@ -19,3 +19,21 @@ test("ReviewEvent v1 redacts obvious secrets and bounds renderer text", () => {
   assert.doesNotMatch(text, /sk-secret-value/);
   assert.ok(text.length <= 512);
 });
+
+test("ReviewEvent v1 redacts bounded final reviewer findings before renderers receive them", () => {
+  const events: Array<{ submission: { result: { findings: Array<{ summary: string }> } } }> = [];
+  const emit = createReviewEventEmitter("run-1", (event) => {
+    if (event.type === "reviewer.completed") events.push(event);
+  });
+  emit("reviewer.completed", {
+    reviewerId: "security",
+    submission: {
+      reviewerId: "security",
+      durationMs: 1,
+      result: { status: "has_findings", verdict: "request_changes", verdictSource: "parsed", actionableCount: 1, findings: [{ summary: `token=sk-final-secret ${"x".repeat(900)}`, actionable: true }] },
+    },
+  });
+  const summary = events[0]!.submission.result.findings[0]!.summary;
+  assert.doesNotMatch(summary, /sk-final-secret/);
+  assert.ok(summary.length <= 512);
+});

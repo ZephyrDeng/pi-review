@@ -74,6 +74,12 @@ describe("parseRvArgs / validateRvParsed", () => {
     assert.doesNotMatch(prompt, /PI_REVIEW_META:/);
   });
 
+  it("continuations retain the session-aware CLI path", () => {
+    const prompt = buildRvOrchestrationPrompt(parseRvArgs("--continue /tmp/review.jsonl @src/foo.ts"));
+    assert.match(prompt, /Execute:\npi-review --continue \/tmp\/review\.jsonl -- @src\/foo\.ts/);
+    assert.doesNotMatch(prompt, /Call pi_review with target/);
+  });
+
   it("buildPiReviewArgv matches for initial and continue", () => {
     const initial = parseRvArgs("--mode plan --model m/a @doc.md");
     assert.deepEqual(buildPiReviewArgv(initial, "@doc.md"), [

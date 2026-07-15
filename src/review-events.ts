@@ -51,20 +51,18 @@ export function redactReviewEventText(value: string, limit = REVIEW_EVENT_TEXT_L
   return redacted.length <= limit ? redacted : `${redacted.slice(0, Math.max(0, limit - 1))}…`;
 }
 
-function redactEvent<T extends ReviewEvent>(event: T): T {
-  switch (event.type) {
-    case "reviewer.text.delta":
-      return { ...event, text: redactReviewEventText(event.text) } as T;
-    case "reviewer.tool.started":
-    case "reviewer.tool.finished":
-      return { ...event, ...(event.summary ? { summary: redactReviewEventText(event.summary) } : {}) } as T;
-    case "reviewer.failed":
-      return { ...event, message: redactReviewEventText(event.message) } as T;
-    case "reviewer.cancelled":
-      return { ...event, ...(event.message ? { message: redactReviewEventText(event.message) } : {}) } as T;
-    default:
-      return event;
+function redactValue(value: unknown): unknown {
+  if (typeof value === "string") return redactReviewEventText(value);
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, redactValue(nested)]));
   }
+  return value;
+}
+
+function redactEvent<T extends ReviewEvent>(event: T): T {
+  const { v, runId, seq, at, type, ...payload } = event;
+  return { v, runId, seq, at, type, ...(redactValue(payload) as object) } as T;
 }
 
 /** Build one ordered event stream for exactly one panel run. */

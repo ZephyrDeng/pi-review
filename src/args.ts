@@ -1,5 +1,5 @@
 import type { ParsedArgs } from "./types.js";
-import { CONSENSUS_POLICIES, MAX_REVIEWERS } from "./types.js";
+import { CONSENSUS_POLICIES, MAX_REVIEWERS, PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { parseInstallCommand } from "./install-args.js";
 
 export function usage(exitCode = 0): never {
@@ -234,6 +234,12 @@ function validatePanelOptions(options: ParsedArgs): void {
   }
   if (panelActive && (options.keepSession || options.continueHandle || options.name)) {
     throw new ArgsParseError("panel cannot be used with --keep-session, --continue, or --name");
+  }
+  if (panelActive && options.tools) {
+    const disallowed = options.tools.split(",").map((tool) => tool.trim()).filter((tool) => tool && !(PANEL_READ_ONLY_TOOLS as readonly string[]).includes(tool));
+    if (disallowed.length > 0) {
+      throw new ArgsParseError(`panel reviewers only allow ${PANEL_READ_ONLY_TOOLS.join(",")}; rejected: ${disallowed.join(",")}`);
+    }
   }
   if (options.consensus !== undefined && !(CONSENSUS_POLICIES as readonly string[]).includes(options.consensus)) {
     throw new ArgsParseError(

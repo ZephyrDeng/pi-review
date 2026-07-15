@@ -36,6 +36,8 @@ test("panel reducer ignores duplicates, unknown events, and out-of-order deliver
   const state = reducePanelEvent(createPanelViewState(), started);
   const duplicate = reducePanelEvent(state, started);
   const unknown = reducePanelEvent(duplicate, { v: 1, runId: "run-1", seq: 2, at: 1002, type: "future.event" } as unknown as ReviewEvent);
-  assert.equal(unknown.lastSeq, 1);
-  assert.equal(unknown.phase, "running");
+  const later = reducePanelEvent(unknown, event("aggregation.started", 3, {}));
+  const outOfOrder = reducePanelEvent(later, event("aggregation.started", 2, {}));
+  assert.equal(outOfOrder.lastSeq, 3);
+  assert.equal(outOfOrder.phase, "aggregating");
 });
