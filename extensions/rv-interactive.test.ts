@@ -90,6 +90,28 @@ test("stripInteractiveToken removes the trigger token", () => {
   assert.equal(stripInteractiveToken("--reviewers 3 -i @src"), "--reviewers 3 @src");
 });
 
+test("wizard chooses mode before asking for a missing natural-language target", async () => {
+  const ui = scriptedUi({
+    selects: ["plan review (plan)"],
+    inputs: ["review the auth design"],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel", reviewers: 1, model: "openai-codex/gpt-5.6-sol" }),
+    models,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.mode, "plan");
+  assert.equal(result!.target, "review the auth design");
+  const modeStep = ui.log.findIndex((entry) => entry === "select:Review mode :: code review (code) | plan review (plan) | challenge review (challenge)");
+  const targetStep = ui.log.findIndex((entry) => entry === "input:Review target (natural language or @path)");
+  assert.ok(modeStep >= 0 && targetStep >= 0 && modeStep < targetStep, ui.log.join("\n"));
+});
+
 test("wizard assigns per-reviewer models through select dialogs", async () => {
   const ui = scriptedUi({
     inputs: ["@src"],

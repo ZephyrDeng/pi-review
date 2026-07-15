@@ -86,21 +86,7 @@ export async function runRvInteractiveWizard(
   const zh = locale === "zh";
   const uiText = rvUi(locale);
 
-  // 1) Target
-  let target = seed.target.trim();
-  if (!target) {
-    const entered = await ui.input(
-      zh ? "审查目标（自然语言或 @路径）" : "Review target (natural language or @path)",
-      zh ? "例如：@src 或 review the auth changes" : "e.g. @src or review the auth changes",
-    );
-    if (!entered?.trim()) {
-      ui.notify(zh ? "已取消：需要审查目标" : "Cancelled: target required", "warning");
-      return undefined;
-    }
-    target = entered.trim();
-  }
-
-  // 2) Mode
+  // 1) Mode. This drives the model profile, so choose it before target/model input.
   let mode = seed.mode || "code";
   if (!seed.mode || seed.mode === "code") {
     const modeChoice = await mustSelect(
@@ -116,6 +102,20 @@ export async function runRvInteractiveWizard(
     if (modeChoice.includes("(plan)")) mode = "plan";
     else if (modeChoice.includes("(challenge)")) mode = "challenge";
     else mode = "code";
+  }
+
+  // 2) Target. Collect it after mode so the flow starts with review intent.
+  let target = seed.target.trim();
+  if (!target) {
+    const entered = await ui.input(
+      zh ? "审查目标（自然语言或 @路径）" : "Review target (natural language or @path)",
+      zh ? "例如：@src 或 review the auth changes" : "e.g. @src or review the auth changes",
+    );
+    if (!entered?.trim()) {
+      ui.notify(zh ? "已取消：需要审查目标" : "Cancelled: target required", "warning");
+      return undefined;
+    }
+    target = entered.trim();
   }
 
   // 3) Loop goal + hard budget — always ask for /rv-loop so the stop condition is explicit.

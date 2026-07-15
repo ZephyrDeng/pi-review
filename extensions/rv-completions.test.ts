@@ -11,6 +11,7 @@ import {
 } from "./rv-completions.js";
 import { rvUi } from "./rv-locale.js";
 import { DEFAULT_REVIEW_MODEL_PRIORITIES } from "./rv-model-priorities.js";
+import { parseRvArgs, validateRvParsed } from "./rv-prompts.js";
 
 function model(partial: Partial<ModelInfo> & Pick<ModelInfo, "provider" | "id">): ModelInfo {
   return {
@@ -276,6 +277,20 @@ describe("buildRvCompletions", () => {
     assert.ok(consensus?.some((i) => i.label === "quorum"));
     const panel = buildRvCompletions("--panel ", { ...deps, strategy: "loop" });
     assert.ok(panel?.some((i) => i.label === "code-experts"));
+  });
+
+  it("offers an explicit target boundary after completed flags so target text can be entered last", () => {
+    const prefix = "--mode plan --panel code-experts ";
+    const items = buildRvCompletions(prefix, { ...deps, strategy: "panel", locale: "en" });
+    const boundary = items?.find((item) => item.label === "Start review target");
+    assert.ok(boundary, `got ${items?.map((item) => item.label).join(", ")}`);
+    assert.equal(boundary!.value, "--mode plan --panel code-experts -- ");
+
+    const parsed = parseRvArgs(`${boundary!.value}code review the auth changes under @src`);
+    assert.equal(parsed.mode, "plan");
+    assert.equal(parsed.panel, "code-experts");
+    assert.equal(parsed.target, "code review the auth changes under @src");
+    assert.deepEqual(validateRvParsed(parsed), { ok: true });
   });
 
   it("hides --panel after --reviewers and vice versa", () => {

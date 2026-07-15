@@ -643,6 +643,20 @@ function topLevelCompletions(
     return items.length ? items : null;
   }
 
+  // After completing options, make the target boundary explicit. This lets a
+  // Tab-first flow safely append natural language without a value-taking flag
+  // accidentally consuming it.
+  if (!tail && !head.includes("--") && head.some((token) => token.startsWith("--"))) {
+    const zh = localeOf(deps) === "zh";
+    items.push({
+      value: `${headPrefix}-- `,
+      label: zh ? "开始输入审查目标" : "Start review target",
+      description: zh
+        ? "参数已结束，接下来输入自然语言或 @路径"
+        : "Finish options, then type natural language or @path",
+    });
+  }
+
   // Quiet empty top-level: interactive wizard first, then a few flags.
   if (!tail) {
     const zh = localeOf(deps) === "zh";

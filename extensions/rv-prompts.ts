@@ -10,6 +10,8 @@ export type RvMode = (typeof RV_MODES)[number];
 export const RV_STRATEGIES = ["panel", "loop", "models"] as const;
 export type RvStrategy = (typeof RV_STRATEGIES)[number];
 
+const RV_ARG_TOKEN_RE = /(?:[^\s"']+|"[^"]*"|'[^']*')+/g;
+
 const FLAGS_REQUIRING_VALUE = [
   "--mode",
   "--model",
@@ -107,8 +109,15 @@ export type RvValidation =
   | { ok: false; message: string };
 
 export function parseRvArgs(raw: string, strategy: RvStrategy = "panel"): RvParsed {
-  const { remainder, apply: semanticApply } = stripSemanticPhrases(raw);
-  const tokens = remainder.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  // `--` is the completion-friendly boundary between options and free text.
+  // Semantic shortcuts only apply before it, preserving the target typed last.
+  const rawTokens: string[] = raw.match(RV_ARG_TOKEN_RE) ?? [];
+  const terminatorIndex = rawTokens.indexOf("--");
+  const optionRaw = (terminatorIndex >= 0 ? rawTokens.slice(0, terminatorIndex) : rawTokens).join(" ");
+  const explicitTarget = (terminatorIndex >= 0 ? rawTokens.slice(terminatorIndex + 1) : [])
+    .map((t) => t.replace(/^['"]|['"]$/g, ""));
+  const { remainder, apply: semanticApply } = stripSemanticPhrases(optionRaw);
+  const tokens = remainder.match(RV_ARG_TOKEN_RE) ?? [];
   const cleaned = tokens.map((t) => t.replace(/^['"]|['"]$/g, ""));
 
   let mode = "code";
@@ -335,6 +344,9 @@ export function parseRvArgs(raw: string, strategy: RvStrategy = "panel"): RvPars
     }
     rest.push(t);
   }
+
+  // Text after the explicit separator must not be interpreted as strategy syntax.
+  rest.push(...explicitTarget);
 
   const effectiveStrategy: RvStrategy = modelsOnly ? "models" : strategy;
   return mergeSemanticIntoParsed(
