@@ -90,6 +90,13 @@ test("panel event output format parses as an opt-in machine contract", () => {
   assert.equal(parsed.outputFormat, "events-jsonl");
 });
 
+test("loop rejects events-jsonl because its human loop summary has a separate stdout contract", () => {
+  assert.throws(
+    () => parseReviewCommand(["loop", "--reviewers", "2", "--output-format", "events-jsonl", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /loop cannot be used/.test(error.message),
+  );
+});
+
 test("panel rejects shell access as a usage error before execution begins", () => {
   assert.throws(
     () => parseReviewCommand(["--reviewers", "2", "--tools", "read,bash", "--", "@src"]),

@@ -31,6 +31,17 @@ test("panel reducer produces the same final state during live delivery and repla
   assert.equal(live.phase, "aggregating");
 });
 
+test("terminal panel usage reuses the CLI aggregation semantics", () => {
+  const now = Date.now();
+  let state = reducePanelEvent(createPanelViewState(), {
+    v: 1, runId: "run-usage", seq: 1, at: now, type: "panel.started", target: "@src", mode: "code",
+    reviewers: [{ reviewerId: "r1", role: "one", model: null }, { reviewerId: "r2", role: "two", model: null }],
+  });
+  state = reducePanelEvent(state, { v: 1, runId: "run-usage", seq: 2, at: now, type: "reviewer.usage", reviewerId: "r1", usage: { input: 100, output: 10, cacheRead: 20, cacheWrite: 0, reasoning: 5, totalTokens: 110 } });
+  state = reducePanelEvent(state, { v: 1, runId: "run-usage", seq: 3, at: now, type: "reviewer.usage", reviewerId: "r2", usage: { input: 80, output: 30, cacheRead: 10, cacheWrite: 0, reasoning: 7, totalTokens: 110 } });
+  assert.deepEqual(state.aggregate.usage, { input: 180, output: 40, cacheRead: 30, cacheWrite: 0, reasoning: 12, totalTokens: 220 });
+});
+
 test("panel reducer ignores duplicates, unknown events, and out-of-order delivery", () => {
   const started = event("panel.started", 1, { target: "@src", mode: "code", reviewers: [] });
   const state = reducePanelEvent(createPanelViewState(), started);

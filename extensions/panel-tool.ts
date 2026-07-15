@@ -111,6 +111,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal, onUpdate) {
       let state = createPanelViewState();
       let buffer = "";
+      let stderr = "";
       const publish = () => onUpdate?.({ content: [{ type: "text", text: `Panel: ${state.aggregate.completed}/${state.aggregate.total} completed` }], details: { state } });
       const consume = (chunk: string) => {
         buffer += chunk;
@@ -127,17 +128,28 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
         }
       };
       const stdoutSink = new Writable({ write(chunk, _encoding, callback) { consume(String(chunk)); callback(); } });
+      const stderrSink = new Writable({
+        write(chunk, _encoding, callback) {
+          const next = stderr + String(chunk);
+          stderr = next.length > 2000 ? next.slice(-2000) : next;
+          callback();
+        },
+      });
       const args = [cliPath, "--panel", params.panel ?? "code-experts", "--mode", params.mode ?? "code", "--output-format", "events-jsonl"];
       if (params.model) args.push("--model", params.model);
       if (params.thinking) args.push("--thinking", params.thinking);
       args.push("--", params.target);
-      const child = await spawnStreamingChild(process.execPath, args, { cwd: process.cwd(), env: process.env, stdoutSink, stderrSink: new Writable({ write(_chunk, _encoding, callback) { callback(); } }), signal });
+      const child = await spawnStreamingChild(process.execPath, args, { cwd: process.cwd(), env: process.env, stdoutSink, stderrSink, signal, processGroup: true });
       if (buffer.trim()) {
         const tail = buffer;
         buffer = "";
         consume(`${tail}\n`);
       }
-      const error = child.error ? child.error.message : state.meta ? undefined : `pi-review ended before a final event (${child.status ?? child.signal ?? "unknown"})`;
+      const error = child.error
+        ? child.error.message
+        : state.meta
+          ? undefined
+          : [`pi-review ended before a final event (${child.status ?? child.signal ?? "unknown"})`, stderr.trim()].filter(Boolean).join(": ");
       const details: PanelToolDetails = { state, ...(error ? { error } : {}) };
       return {
         content: [{ type: "text", text: error ?? `Panel completed: ${state.meta?.status ?? "unknown"}` }],

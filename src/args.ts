@@ -232,6 +232,9 @@ function validatePanelOptions(options: ParsedArgs): void {
   if (!panelActive && options.outputFormat) {
     throw new ArgsParseError("--output-format events-jsonl requires an active panel");
   }
+  if (options.command === "loop" && options.outputFormat) {
+    throw new ArgsParseError("loop cannot be used with --output-format events-jsonl");
+  }
   if (panelActive && (options.keepSession || options.continueHandle || options.name)) {
     throw new ArgsParseError("panel cannot be used with --keep-session, --continue, or --name");
   }

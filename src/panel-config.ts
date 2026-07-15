@@ -66,8 +66,8 @@ export function resolvePanelConfig(
         `unknown panel preset: ${parsed.panel}. Available: ${Object.keys(panelPresets).join(", ") || "(none)"}`,
       );
     }
-    if (!Array.isArray(preset.reviewers) || preset.reviewers.length < 1) {
-      throw new ArgsParseError(`panel preset ${parsed.panel} must define at least one reviewer`);
+    if (!Array.isArray(preset.reviewers) || preset.reviewers.length < 2) {
+      throw new ArgsParseError(`panel preset ${parsed.panel} must define at least two reviewers`);
     }
     if (preset.reviewers.length > MAX_REVIEWERS) {
       throw new ArgsParseError(

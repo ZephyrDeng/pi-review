@@ -70,6 +70,7 @@ describe("parseRvArgs / validateRvParsed", () => {
     const p = parseRvArgs("@src/foo.ts");
     const prompt = buildRvOrchestrationPrompt(p);
     assert.match(prompt, /Do NOT add --no-stream or --progress-log/);
+    assert.match(prompt, /rendered panel result and status/);
     assert.match(prompt, /ASCII pi-review footer/);
     assert.doesNotMatch(prompt, /PI_REVIEW_META:/);
   });

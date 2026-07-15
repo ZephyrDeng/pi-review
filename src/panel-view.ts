@@ -2,6 +2,7 @@
 
 import type { PanelReviewMeta, ReviewerSubmission, TokenUsage } from "./types.js";
 import type { ReviewEvent, ReviewerIdentity } from "./review-events.js";
+import { sumPanelUsage } from "./panel-usage.js";
 
 export type ReviewerViewStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type PanelPhase = "idle" | "running" | "aggregating" | "completed";
@@ -33,7 +34,6 @@ export interface PanelViewState {
   meta?: PanelReviewMeta;
 }
 
-const EMPTY_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0 };
 const ACTIVITY_LIMIT = 8;
 
 export function createPanelViewState(): PanelViewState {
@@ -53,22 +53,9 @@ function fallbackReviewer(reviewerId: string): PanelReviewerView {
   return { reviewerId, role: reviewerId, model: null, status: "queued", turns: 0, recentActivity: [] };
 }
 
-function aggregateUsage(reviewers: Record<string, PanelReviewerView>): TokenUsage | undefined {
-  const all = Object.values(reviewers).map((reviewer) => reviewer.usage).filter((usage): usage is TokenUsage => Boolean(usage));
-  if (all.length === 0) return undefined;
-  return all.reduce<TokenUsage>((total, usage) => ({
-    input: total.input + usage.input,
-    output: total.output + usage.output,
-    cacheRead: total.cacheRead + usage.cacheRead,
-    cacheWrite: total.cacheWrite + usage.cacheWrite,
-    reasoning: total.reasoning + usage.reasoning,
-    totalTokens: total.totalTokens + usage.totalTokens,
-    ...(typeof usage.costTotal === "number" ? { costTotal: (total.costTotal ?? 0) + usage.costTotal } : {}),
-  }), { ...EMPTY_USAGE });
-}
-
 function withAggregate(state: PanelViewState): PanelViewState {
   const statuses = Object.values(state.reviewers).map((reviewer) => reviewer.status);
+  const usage = sumPanelUsage(Object.values(state.reviewers).map((reviewer) => reviewer.usage));
   return {
     ...state,
     aggregate: {
@@ -78,7 +65,7 @@ function withAggregate(state: PanelViewState): PanelViewState {
       completed: statuses.filter((status) => status === "completed").length,
       failed: statuses.filter((status) => status === "failed").length,
       cancelled: statuses.filter((status) => status === "cancelled").length,
-      ...(aggregateUsage(state.reviewers) ? { usage: aggregateUsage(state.reviewers) } : {}),
+      ...(usage ? { usage } : {}),
     },
   };
 }
@@ -96,7 +83,10 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
     return withAggregate({ ...next, target: event.target, mode: event.mode, ...(event.panelPreset ? { panelPreset: event.panelPreset } : {}), startedAt: event.at, phase: "running", reviewers });
   }
   if (event.type === "aggregation.started") return withAggregate({ ...next, phase: "aggregating" });
-  if (event.type === "panel.completed") return withAggregate({ ...next, phase: "completed", completedAt: event.at, meta: event.meta });
+  if (event.type === "panel.completed") {
+    const completed = withAggregate({ ...next, phase: "completed", completedAt: event.at, meta: event.meta });
+    return { ...completed, aggregate: { ...completed.aggregate, ...(event.meta.usage ? { usage: event.meta.usage } : {}) } };
+  }
 
   const reviewerId = event.reviewerId;
   const previous = state.reviewers[reviewerId] ?? fallbackReviewer(reviewerId);

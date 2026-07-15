@@ -37,6 +37,7 @@ const scenario = process.env.FAKE_PANEL_SCENARIO || "agree-bug";
 const idMatch = prompt.match(/Reviewer ID:\\s*(\\S+)/);
 const reviewerId = idMatch ? idMatch[1] : "r1";
 const bug = "### F1: Off-by-one in loop\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
+const longBug = "### F1: " + "x".repeat(700) + "\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
 function emit(text) {
   function line(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
   line({ type: "session", version: 3, id: "s1" });
@@ -60,6 +61,8 @@ if (scenario === "agree-bug") {
   else out("approve", "No material findings.");
 } else if (scenario === "all-clean") {
   out("approve", "No material findings.");
+} else if (scenario === "long-finding") {
+  out("request_changes", longBug);
 } else if (scenario === "singleton") {
   if (reviewerId === "r1" || reviewerId === "correctness") out("request_changes", bug);
   else out("approve", "No material findings.");
@@ -248,6 +251,18 @@ test("panel events-jsonl keeps the default CLI gate metadata semantics", (t) => 
   assert.deepEqual(eventMeta.confirmedClusters, humanMeta!.confirmedClusters);
   assert.deepEqual(eventMeta.advisories, humanMeta!.advisories);
   assert.equal(eventMeta.panelHealth, humanMeta!.panelHealth);
+});
+
+test("panel keeps full redacted findings for the CLI while bounding renderer events", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const fakePi = writeFakePi(tempDir);
+  const args = ["--reviewers", "2", "--consensus", "quorum", "--min-agree", "2"];
+  const human = runPanelCli(fakePi, "long-finding", args);
+  const events = runPanelCli(fakePi, "long-finding", [...args, "--output-format", "events-jsonl"]);
+  assert.match(human.stdout, /x{700}/);
+  const completed = JSON.parse(events.stdout.trim().split("\n").at(-1)!) as { meta: { confirmedClusters: Array<{ summary: string }> } };
+  assert.ok(completed.meta.confirmedClusters[0]!.summary.length <= 512);
 });
 
 test("panel rejects disallowed tools before writing a partial event stream", (t) => {

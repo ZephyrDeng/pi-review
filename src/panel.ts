@@ -28,28 +28,12 @@ import { fail, expandMaybeHome } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
 import { resolvePanelConfig, type ResolvedPanelConfig } from "./panel-config.js";
 import { aggregatePanel } from "./panel-aggregate.js";
+import { sumPanelUsage } from "./panel-usage.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
-import { createReviewEventEmitter, redactReviewEventPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
+import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
-/** Sum token usage across reviewers (prompt-scoped fields as maxima, output as additive). */
-function sumUsage(usages: (TokenUsage | undefined)[]): TokenUsage | undefined {
-  const present = usages.filter((u): u is TokenUsage => Boolean(u));
-  if (present.length === 0) return undefined;
-  const total: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0 };
-  for (const u of present) {
-    total.input = Math.max(total.input, u.input);
-    total.cacheRead = Math.max(total.cacheRead, u.cacheRead);
-    total.cacheWrite = Math.max(total.cacheWrite, u.cacheWrite);
-    total.output += u.output;
-    total.reasoning = Math.max(total.reasoning, u.reasoning);
-    total.totalTokens = Math.max(total.totalTokens, u.totalTokens);
-    if (typeof u.costTotal === "number") total.costTotal = (total.costTotal ?? 0) + u.costTotal;
-  }
-  return total;
-}
-
 export function emitPanelFooter(meta: PanelReviewMeta): void {
   // Issue #2 Decision 39: confirmed findings are the primary Findings section;
   // advisories are clearly separated and labelled non-blocking.
@@ -188,6 +172,7 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
     stdoutSink,
     stderrSink,
     signal,
+    processGroup: true,
   });
   streamParser.flush();
   if (progressStream) {
@@ -289,6 +274,7 @@ function createAdjudicator(
         stdoutSink: sink,
         stderrSink: sink,
         signal,
+        processGroup: true,
       });
       const runtimeError = childRuntimeError(child);
       if (runtimeError) {
@@ -333,13 +319,19 @@ export interface PanelRunOptions {
   emitFooter?: boolean;
 }
 
-function cancelledSubmission(reviewer: { id: string; role: string; provider?: string; model?: string; thinking?: string }, message: string): ReviewerSubmission {
+function cancelledSubmission(
+  reviewer: { id: string; role: string; provider?: string; model?: string; thinking?: string },
+  message: string,
+  durationMs = 0,
+  usage?: TokenUsage,
+): ReviewerSubmission {
   return {
     reviewerId: reviewer.id,
     role: reviewer.role,
     model: reviewer.model ?? null,
     ...(reviewer.thinking ? { thinking: reviewer.thinking } : {}),
-    durationMs: 0,
+    ...(usage ? { usage } : {}),
+    durationMs,
     result: { status: "blocked", verdict: "blocked", verdictSource: "runtime_error", parseError: message, findings: [], actionableCount: 0 },
   };
 }
@@ -358,6 +350,14 @@ export async function runPanelReviewOnce(
     fail(`unknown review mode: ${parsed.mode}\nAvailable modes: ${Object.keys(presets).join(", ")}`);
   }
   const systemPrompt = loadSystemPrompt(config.systemPromptFile);
+  // Validate tool capability before lifecycle emission so a malformed preset
+  // cannot leave events-jsonl consumers with a partial stream.
+  try {
+    resolvePanelReviewerTools(parsed.tools || preset.tools);
+  } catch (error) {
+    if (error instanceof Error) fail(error.message);
+    throw error;
+  }
   const payload = splitPayload(parsed.payload);
   const emit = createReviewEventEmitter(randomUUID(), (event) => {
     if (parsed.outputFormat === "events-jsonl") process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -399,9 +399,10 @@ export async function runPanelReviewOnce(
         emit,
         quietProgress: parsed.outputFormat === "events-jsonl",
       });
-      const completed = redactReviewEventPayload({ ...submission, durationMs: Date.now() - reviewerStart }) as ReviewerSubmission;
+      const completed = { ...submission, durationMs: Date.now() - reviewerStart };
       if (options.signal?.aborted) {
         emit("reviewer.cancelled", { reviewerId: reviewer.id, message: "panel review cancelled" });
+        return cancelledSubmission(reviewer, "panel review cancelled", completed.durationMs, completed.usage);
       } else if (completed.result.verdictSource === "runtime_error") {
         emit("reviewer.failed", { reviewerId: reviewer.id, message: completed.result.parseError ?? "reviewer failed" });
       } else {
@@ -428,18 +429,20 @@ export async function runPanelReviewOnce(
     matcher,
   });
 
-  const panelMeta = redactReviewEventPayload({
+  const panelMeta: PanelReviewMeta = {
     ...aggregate,
     reviewMode: parsed.mode,
     durationMs: Date.now() - startedAt,
     model: parsed.model || preset.model || null,
     thinking: parsed.thinking || preset.thinking,
-    usage: sumUsage(submissions.map((s) => s.usage)),
+    usage: sumPanelUsage(submissions.map((s) => s.usage)),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
-  }) as PanelReviewMeta;
+  };
 
-  emit("panel.completed", { meta: panelMeta });
-  if (options.emitFooter !== false && parsed.outputFormat !== "events-jsonl") emitPanelFooter(panelMeta);
+  const eventPanelMeta = redactReviewEventPayload(panelMeta);
+  const footerPanelMeta = redactReviewMetaPayload(panelMeta);
+  emit("panel.completed", { meta: eventPanelMeta });
+  if (options.emitFooter !== false && parsed.outputFormat !== "events-jsonl") emitPanelFooter(footerPanelMeta);
   return { meta: panelMeta, exitCode: reviewExitCode(panelMeta.status) };
 }
 

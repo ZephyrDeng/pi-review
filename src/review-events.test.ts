@@ -15,9 +15,15 @@ test("ReviewEvent v1 emits a monotonic, replayable panel lifecycle", () => {
 });
 
 test("ReviewEvent v1 redacts obvious secrets and bounds renderer text", () => {
-  const text = redactReviewEventText(`token=sk-secret-value ${"x".repeat(900)}`);
+  const text = redactReviewEventText(`token=sk-secret-value ${"x".repeat(900)}`, 512);
   assert.doesNotMatch(text, /sk-secret-value/);
+  assert.match(text, /^token=\[REDACTED\]/);
+  assert.doesNotMatch(text, /\$1=/);
   assert.ok(text.length <= 512);
+});
+
+test("ReviewEvent v1 recognizes dashed API key prefixes", () => {
+  assert.equal(redactReviewEventText("credential sk-live-secret-value"), "credential [REDACTED]");
 });
 
 test("ReviewEvent v1 redacts bounded final reviewer findings before renderers receive them", () => {

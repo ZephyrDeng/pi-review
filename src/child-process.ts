@@ -14,6 +14,8 @@ type SpawnCommon = {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  /** Start a separate process group so abort can terminate descendants too. */
+  processGroup?: boolean;
 };
 
 function appendBoundedTail(current: string, chunk: string, limit: number): string {
@@ -60,8 +62,9 @@ export async function spawnStreamingChild(
       cwd: options.cwd,
       env: options.env,
       stdio: ["ignore", "pipe", "pipe"],
-      // A separate process group lets cancellation reach Pi's descendants too.
-      detached: process.platform !== "win32",
+      // Preserve terminal signal delivery for ordinary streaming children.
+      // Panel callers opt into a group so their abort signal reaches Pi descendants.
+      detached: options.processGroup === true && process.platform !== "win32",
     };
     const child = spawn(command, argv, spawnOpts);
     let stdout = "";
@@ -78,8 +81,13 @@ export async function spawnStreamingChild(
     const abort = () => {
       if (child.pid === undefined || child.killed) return;
       try {
-        if (process.platform === "win32") child.kill("SIGTERM");
-        else process.kill(-child.pid, "SIGTERM");
+        if (options.processGroup && process.platform === "win32") {
+          spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        } else if (options.processGroup) {
+          process.kill(-child.pid, "SIGTERM");
+        } else {
+          child.kill("SIGTERM");
+        }
       } catch {
         child.kill("SIGTERM");
       }

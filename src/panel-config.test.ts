@@ -90,7 +90,11 @@ test("unknown panel preset is a usage error", () => {
 });
 
 test("panel preset with no reviewers is a usage error", () => {
-  expectUsage({ panel: "empty" }, { empty: { description: "x", reviewers: [] } }, /at least one reviewer/);
+  expectUsage({ panel: "empty" }, { empty: { description: "x", reviewers: [] } }, /at least two reviewers/);
+});
+
+test("panel preset with one reviewer is a usage error", () => {
+  expectUsage({ panel: "solo" }, { solo: { description: "x", reviewers: [{ id: "r1", role: "role" }] } }, /at least two reviewers/);
 });
 
 test("panel preset exceeding the reviewer limit is a usage error", () => {
@@ -104,7 +108,7 @@ test("panel preset exceeding the reviewer limit is a usage error", () => {
 test("panel preset with a reviewer missing id or role is a usage error", () => {
   expectUsage(
     { panel: "broken" },
-    { broken: { description: "x", reviewers: [{ id: "r1", role: "" }] } },
+    { broken: { description: "x", reviewers: [{ id: "r1", role: "" }, { id: "r2", role: "role" }] } },
     /missing id or role/,
   );
 });

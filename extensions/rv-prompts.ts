@@ -147,7 +147,7 @@ function piHostRules(): string {
     "For new review runs, call the pi_review custom tool. It launches pi-review in isolated reviewer sessions and renders panel progress live.",
     "CLI defaults: stream child output live. Do NOT add --no-stream or --progress-log unless the user explicitly asked.",
     "Do not edit, patch, commit, or implement findings unless the user asks separately.",
-    "After pi-review exits, show the user the ASCII pi-review footer (lines starting with ── pi-review). Do not paste PI_REVIEW_META_JSON to the user; use Session from the footer for /rv --continue.",
+    "For pi_review panel runs, report the tool's rendered panel result and status. For CLI fallback and --continue runs, show the ASCII pi-review footer (lines starting with ── pi-review). Do not paste PI_REVIEW_META_JSON to the user; use Session from a CLI footer for /rv --continue.",
   ].join(" ");
 }
 

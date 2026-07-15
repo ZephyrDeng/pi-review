@@ -43,25 +43,31 @@ type ReviewEventPayload<T extends ReviewEvent["type"]> = Omit<
 
 export type ReviewEventListener = (event: ReviewEvent) => void;
 
-/** Replace common secret-shaped values and cap any renderer-visible free text. */
-export function redactReviewEventText(value: string, limit = REVIEW_EVENT_TEXT_LIMIT): string {
+/** Replace common secret-shaped values and optionally cap renderer-visible free text. */
+export function redactReviewEventText(value: string, limit?: number): string {
   const redacted = value
-    .replace(/\b(?:sk|rk|pk|ghp|github_pat)_[A-Za-z0-9_-]{8,}\b/gi, "[REDACTED]")
-    .replace(/\b(?:api[_-]?key|token|password|secret)\s*[=:]\s*[^\s,;]+/gi, "$1=[REDACTED]");
-  return redacted.length <= limit ? redacted : `${redacted.slice(0, Math.max(0, limit - 1))}…`;
+    .replace(/\b(?:sk|rk|pk)[_-][A-Za-z0-9_-]{8,}\b|\b(?:ghp|github_pat)_[A-Za-z0-9_-]{8,}\b/gi, "[REDACTED]")
+    .replace(/\b(api[_-]?key|token|password|secret)\s*[=:]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+  if (limit === undefined || redacted.length <= limit) return redacted;
+  return `${redacted.slice(0, Math.max(0, limit - 1))}…`;
 }
 
-function redactValue(value: unknown): unknown {
-  if (typeof value === "string") return redactReviewEventText(value);
-  if (Array.isArray(value)) return value.map(redactValue);
+function redactValue(value: unknown, limit?: number): unknown {
+  if (typeof value === "string") return redactReviewEventText(value, limit);
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, limit));
   if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, redactValue(nested)]));
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, redactValue(nested, limit)]));
   }
   return value;
 }
 
 /** Redact and bound arbitrary renderer-visible data while preserving its shape. */
 export function redactReviewEventPayload<T>(value: T): T {
+  return redactValue(value, REVIEW_EVENT_TEXT_LIMIT) as T;
+}
+
+/** Redact machine-readable review metadata without truncating its findings. */
+export function redactReviewMetaPayload<T>(value: T): T {
   return redactValue(value) as T;
 }
 
