@@ -284,3 +284,69 @@ test("dashboard rejects non-GET/HEAD methods", async () => {
   });
   assert.equal(res.status, 405);
 });
+
+// ---------------------------------------------------------------------------
+// Shutdown route
+// ---------------------------------------------------------------------------
+
+function httpRequest(
+  port: number,
+  requestPath: string,
+  method: string,
+  headers: Record<string, string> = {},
+): Promise<HttpResult> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: requestPath, method, headers }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+test("POST /run/:token/shutdown responds 202 and invokes onShutdown", async () => {
+  let shutdownCalls = 0;
+  const { port, token } = await startTestServer({ onShutdown: () => (shutdownCalls += 1) });
+  const res = await httpRequest(port, `/run/${token}/shutdown`, "POST", { Host: `127.0.0.1:${port}` });
+  assert.equal(res.status, 202);
+  assert.equal(shutdownCalls, 1);
+});
+
+test("GET /run/:token/shutdown is rejected with 405 and does not shut down", async () => {
+  let shutdownCalls = 0;
+  const { port, token } = await startTestServer({ onShutdown: () => (shutdownCalls += 1) });
+  const res = await httpGet(port, `/run/${token}/shutdown`, { Host: `127.0.0.1:${port}` });
+  assert.equal(res.status, 405);
+  assert.equal(shutdownCalls, 0);
+});
+
+test("POST shutdown with a wrong token is a 404 and does not shut down", async () => {
+  let shutdownCalls = 0;
+  const { port, token } = await startTestServer({ onShutdown: () => (shutdownCalls += 1) });
+  const res = await httpRequest(port, `/run/${token}x/shutdown`, "POST", { Host: `127.0.0.1:${port}` });
+  assert.equal(res.status, 404);
+  assert.equal(shutdownCalls, 0);
+});
+
+test("POST to any non-shutdown route stays 405", async () => {
+  let shutdownCalls = 0;
+  const { port, token } = await startTestServer({ onShutdown: () => (shutdownCalls += 1) });
+  const events = await httpRequest(port, `/run/${token}/events`, "POST", { Host: `127.0.0.1:${port}` });
+  assert.equal(events.status, 405);
+  const asset = await httpRequest(port, `/run/${token}/static/panel-view.js`, "POST", { Host: `127.0.0.1:${port}` });
+  assert.equal(asset.status, 405);
+  assert.equal(shutdownCalls, 0);
+});
+
+test("cross-origin POST shutdown is blocked by the Origin gate", async () => {
+  let shutdownCalls = 0;
+  const { port, token } = await startTestServer({ onShutdown: () => (shutdownCalls += 1) });
+  const res = await httpRequest(port, `/run/${token}/shutdown`, "POST", {
+    Host: `127.0.0.1:${port}`,
+    Origin: "https://evil.example",
+  });
+  assert.equal(res.status, 403);
+  assert.equal(shutdownCalls, 0);
+});

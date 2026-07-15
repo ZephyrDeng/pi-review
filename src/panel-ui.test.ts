@@ -136,3 +136,11 @@ test("launchPanelUi falls back to headless when the server entry point cannot be
   assert.equal(launch, undefined);
   assert.ok(writes.some((line) => line.includes("dashboard failed to start")));
 }, 10_000);
+
+test("browserOpenCommand maps each platform to its native opener", async () => {
+  const { browserOpenCommand } = await import("./panel-ui.js");
+  const url = "http://127.0.0.1:1234/run/tok";
+  assert.deepEqual(browserOpenCommand("darwin", url), { command: "open", args: [url] });
+  assert.deepEqual(browserOpenCommand("win32", url), { command: "cmd", args: ["/c", "start", "", url] });
+  assert.deepEqual(browserOpenCommand("linux", url), { command: "xdg-open", args: [url] });
+});

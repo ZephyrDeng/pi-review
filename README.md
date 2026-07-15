@@ -206,9 +206,11 @@ Panel reviewers use the hard allowlist `read,grep,find,ls`. Shell and mutation-c
 pi-review --reviewers 3 --consensus quorum --ui web -- @src
 ```
 
-The CLI prints `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/<token>` to stderr before reviewers start; open it in a browser to watch live per-reviewer status, active tool, usage, and the final confirmed findings/advisories. `--ui-url-file <path>` additionally writes the URL atomically for hosts that buffer stdout/stderr. The review process still exits with the normal panel exit code as soon as the run completes — the dashboard keeps serving that run for a bounded idle TTL (default 900s; override with `--ui-ttl <seconds>`) so a browser can reconnect after a refresh, then shuts itself down.
+The CLI prints `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/<token>` to stderr and opens it in the default browser before reviewers start (`--no-ui-open` disables the auto-open). The dashboard shows live per-reviewer status, streaming activity, animated token/tool-call counters, and — once the run completes — the gate result, confirmed findings/advisories, and each reviewer's full report rendered from markdown. `--ui-url-file <path>` additionally writes the URL atomically for hosts that buffer stdout/stderr. The review process still exits with the normal panel exit code as soon as the run completes.
 
-The dashboard binds only to `127.0.0.1`/`::1`, protects every run with a high-entropy capability URL, sends a restrictive CSP with no remote assets or CORS, and renders all reviewer/finding text as escaped content (never HTML). It is view-only: cancellation stays with the invoking terminal/agent host (`Ctrl+C`). `--ui web` requires an active panel and cannot combine with `loop`.
+After completion the page shows a 60-second countdown, then closes itself and stops the dashboard server; any interaction (scroll, click, keypress, or the "Keep open" button) cancels the countdown, and closing the tab afterwards also stops the server. As a backstop, the server self-terminates after a bounded idle TTL (default 900s; override with `--ui-ttl <seconds>`) so a browser can reconnect after a refresh.
+
+The dashboard binds only to `127.0.0.1`/`::1`, protects every run with a high-entropy capability URL, sends a restrictive CSP with no remote assets or CORS, and renders all reviewer/finding text through safe DOM writes (markdown is parsed by a built-in renderer; links are restricted to http/https, and nothing goes through innerHTML). It is view-only: cancellation stays with the invoking terminal/agent host (`Ctrl+C`). `--ui web` requires an active panel and cannot combine with `loop`.
 
 ## Output Format
 

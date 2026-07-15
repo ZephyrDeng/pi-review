@@ -505,6 +505,7 @@ export async function runPanelReviewWithUi(parsed: ParsedArgs): Promise<never> {
   const launch = await launchPanelUi({
     ...(parsed.uiUrlFile ? { uiUrlFile: parsed.uiUrlFile } : {}),
     ...(parsed.uiTtlSeconds !== undefined ? { ttlSeconds: parsed.uiTtlSeconds } : {}),
+    openBrowser: parsed.uiOpen !== false,
   });
   return runPanelReviewToExit(parsed, launch ? { onEvent: launch.onEvent } : {});
 }

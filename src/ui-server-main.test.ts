@@ -154,3 +154,37 @@ test("ui-server-main self-terminates after the idle TTL once the run has complet
   assert.equal(exit.code, 0);
   assert.equal(fs.existsSync(dir), false);
 }, 10_000);
+
+test("ui-server-main serves the markdown renderer static asset", async () => {
+  const { port, token } = await spawnServer();
+  const md = await httpGet(port, `/run/${token}/static/ui-markdown.js`, { Host: `127.0.0.1:${port}` });
+  assert.equal(md.status, 200);
+  assert.match(md.body, /parseMarkdown/);
+}, 10_000);
+
+test("ui-server-main exits and removes the run directory after a shutdown POST", async () => {
+  const { child, port, token, dir } = await spawnServer();
+
+  const status = await new Promise<number>((resolve, reject) => {
+    const req = http.request(
+      { host: "127.0.0.1", port, path: `/run/${token}/shutdown`, method: "POST", headers: { Host: `127.0.0.1:${port}` } },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  assert.equal(status, 202);
+
+  const exit = await new Promise<{ code: number | null }>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("server did not exit after shutdown POST")), 3000);
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      resolve({ code });
+    });
+  });
+  assert.equal(exit.code, 0);
+  assert.equal(fs.existsSync(dir), false);
+}, 10_000);

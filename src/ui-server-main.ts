@@ -62,6 +62,7 @@ function main(): void {
       "panel-view.js": { contentType: "text/javascript; charset=utf-8", body: readTextAsset("panel-view.js") },
       "panel-usage.js": { contentType: "text/javascript; charset=utf-8", body: readTextAsset("panel-usage.js") },
       "ui-client.js": { contentType: "text/javascript; charset=utf-8", body: readTextAsset("ui-client.js") },
+      "ui-markdown.js": { contentType: "text/javascript; charset=utf-8", body: readTextAsset("ui-markdown.js") },
     };
     html = renderDashboardHtml({ runPath: `/run/${token}` });
   } catch (error) {
@@ -118,7 +119,15 @@ function main(): void {
     const address = server4.address();
     const port = typeof address === "object" && address ? address.port : 0;
 
-    const ctx: DashboardServerContext = { token, port, eventsPath, html, staticAssets };
+    const ctx: DashboardServerContext = {
+      token,
+      port,
+      eventsPath,
+      html,
+      staticAssets,
+      // Give the 202 response time to flush before tearing the sockets down.
+      onShutdown: () => setTimeout(() => shutdown(0), 150),
+    };
     const listener = createDashboardRequestListener(ctx);
     server4.on("request", listener);
 

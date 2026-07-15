@@ -74,6 +74,8 @@ export interface ParsedArgs {
   uiUrlFile?: string;
   /** Panel: override the dashboard's post-completion idle TTL, in seconds (default: 900). */
   uiTtlSeconds?: number;
+  /** Panel: auto-open the dashboard URL in the default browser (default: true; --no-ui-open sets false). */
+  uiOpen?: boolean;
 }
 
 export interface ReviewPreset {

@@ -36,6 +36,7 @@ Options:
   --ui <web>                                  Panel: start a loopback dashboard; prints its URL before reviewers start
   --ui-url-file <path>                        Panel: also write the dashboard URL to this file (atomic; with --ui web)
   --ui-ttl <seconds>                          Panel: dashboard idle TTL after completion (default: 900; with --ui web)
+  --no-ui-open                                Panel: do not auto-open the dashboard in a browser (with --ui web)
   -h, --help                                  Show help
 
 Session (single review only; rejected by loop and panel):
@@ -223,6 +224,9 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
       case "--ui-ttl":
         options.uiTtlSeconds = parsePositiveInteger(arg, requireValue(arg, argv));
         break;
+      case "--no-ui-open":
+        options.uiOpen = false;
+        break;
       default:
         if (arg.startsWith("--")) {
           throw new ArgsParseError(`unknown option: ${arg}`);
@@ -290,8 +294,8 @@ function validatePanelOptions(options: ParsedArgs): void {
   if (options.command === "loop" && options.ui) {
     throw new ArgsParseError("loop cannot be used with --ui web");
   }
-  if ((options.uiUrlFile !== undefined || options.uiTtlSeconds !== undefined) && options.ui !== "web") {
-    throw new ArgsParseError("--ui-url-file and --ui-ttl require --ui web");
+  if ((options.uiUrlFile !== undefined || options.uiTtlSeconds !== undefined || options.uiOpen !== undefined) && options.ui !== "web") {
+    throw new ArgsParseError("--ui-url-file, --ui-ttl, and --no-ui-open require --ui web");
   }
   if (panelActive && (options.keepSession || options.continueHandle || options.name)) {
     throw new ArgsParseError("panel cannot be used with --keep-session, --continue, or --name");

@@ -163,6 +163,16 @@ test("panel dashboard flags parse for an active panel", () => {
   assert.equal(parsed.ui, "web");
   assert.equal(parsed.uiUrlFile, "/tmp/url.txt");
   assert.equal(parsed.uiTtlSeconds, 60);
+  assert.equal(parsed.uiOpen, undefined, "auto-open stays on by default");
+});
+
+test("--no-ui-open turns off the browser auto-open and requires --ui web", () => {
+  const parsed = parseReviewCommand(["--reviewers", "2", "--ui", "web", "--no-ui-open", "--", "@src"]);
+  assert.equal(parsed.uiOpen, false);
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--no-ui-open", "--", "@src"]),
+    /require --ui web/,
+  );
 });
 
 test("--ui only accepts web", () => {

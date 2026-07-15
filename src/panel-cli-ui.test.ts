@@ -83,7 +83,7 @@ test("pi-review --reviewers N --ui web prints a reachable dashboard URL and pres
 
   const result = spawnSync(
     process.execPath,
-    [distCliPath(), "--reviewers", "2", "--ui", "web", "--ui-url-file", urlFile, "--", "@src"],
+    [distCliPath(), "--reviewers", "2", "--ui", "web", "--ui-url-file", urlFile, "--no-ui-open", "--", "@src"],
     {
       cwd: repoRoot(),
       env: { ...process.env, PI_BIN: fakePi },

@@ -67,7 +67,7 @@ export function isAllowedOrigin(originHeader: string | undefined, port: number):
 export function securityHeaders(): Record<string, string> {
   return {
     "Content-Security-Policy":
-      "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -114,6 +114,8 @@ export interface DashboardServerContext {
   eventsPath: string;
   html: string;
   staticAssets: Record<string, DashboardAsset>;
+  /** Invoked when the page POSTs /run/:token/shutdown (countdown finished or tab closed after completion). */
+  onShutdown?: () => void;
   /** Test-only: shrink the tail-poll interval below the 200ms production default. */
   pollIntervalMs?: number;
 }
@@ -223,8 +225,8 @@ export function createDashboardRequestListener(
     }
 
     const method = req.method ?? "GET";
-    if (method !== "GET" && method !== "HEAD") {
-      writeStatus(res, 405, { Allow: "GET, HEAD" }, "method not allowed");
+    if (method !== "GET" && method !== "HEAD" && method !== "POST") {
+      writeStatus(res, 405, { Allow: "GET, HEAD, POST" }, "method not allowed");
       return;
     }
 
@@ -235,6 +237,21 @@ export function createDashboardRequestListener(
       return;
     }
     const rest = match[2] || "/";
+
+    // The shutdown beacon is the only POST route; every other path stays GET/HEAD.
+    if (rest === "/shutdown") {
+      if (method !== "POST") {
+        writeStatus(res, 405, { Allow: "POST" }, "method not allowed");
+        return;
+      }
+      writeStatus(res, 202, {}, "shutting down");
+      ctx.onShutdown?.();
+      return;
+    }
+    if (method === "POST") {
+      writeStatus(res, 405, { Allow: "GET, HEAD" }, "method not allowed");
+      return;
+    }
 
     if (rest === "/" || rest === "") {
       res.writeHead(200, { ...securityHeaders(), "Content-Type": "text/html; charset=utf-8" });

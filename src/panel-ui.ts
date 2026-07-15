@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { fork } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRunDirectory, generateCapabilityToken, writeUrlFileAtomic, DEFAULT_UI_TTL_SECONDS } from "./ui-server.js";
@@ -17,6 +17,8 @@ import type { ReviewEventListener } from "./review-events.js";
 export interface LaunchPanelUiOptions {
   uiUrlFile?: string;
   ttlSeconds?: number;
+  /** Open the dashboard URL in the default browser once the server is ready (CLI default; off at the library level). */
+  openBrowser?: boolean;
   /** Milliseconds to wait for the server's ready handshake before falling back to headless. */
   readyTimeoutMs?: number;
   /** Test-only override for the forked server entry point (defaults to the compiled sibling module). */
@@ -34,6 +36,28 @@ export interface PanelUiLaunch {
 
 function defaultServerEntry(): string {
   return fileURLToPath(new URL("./ui-server-main.js", import.meta.url));
+}
+
+/** Platform command that opens a URL in the default browser. Pure; unit-tested. */
+export function browserOpenCommand(platform: NodeJS.Platform, url: string): { command: string; args: string[] } {
+  if (platform === "darwin") return { command: "open", args: [url] };
+  // `start` is a cmd.exe builtin; the empty string is the window title slot.
+  if (platform === "win32") return { command: "cmd", args: ["/c", "start", "", url] };
+  return { command: "xdg-open", args: [url] };
+}
+
+/** Best-effort browser launch: a missing opener must never affect the review. */
+function openInBrowser(url: string): void {
+  try {
+    const { command, args } = browserOpenCommand(process.platform, url);
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {
+      process.stderr.write("pi-review: could not open a browser; open the dashboard URL manually\n");
+    });
+    child.unref();
+  } catch {
+    /* spawn threw synchronously; the URL is already printed for manual use */
+  }
 }
 
 interface ReadyMessage {
@@ -101,6 +125,7 @@ export async function launchPanelUi(options: LaunchPanelUiOptions = {}): Promise
   const url = `http://127.0.0.1:${ready.port}/run/${token}`;
   process.stderr.write(`PI_REVIEW_UI_URL: ${url}\n`);
   if (options.uiUrlFile) writeUrlFileAtomic(options.uiUrlFile, url);
+  if (options.openBrowser) openInBrowser(url);
 
   return {
     runDir,

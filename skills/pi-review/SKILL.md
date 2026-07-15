@@ -32,7 +32,7 @@ node ../../bin/pi-review.js --help
 
 `--progress-log <path>` tees the raw `--mode json` event stream to a file for outside observation and debugging; it is never a prerequisite for metrics. Token usage accumulates by default, and `pi-review` writes milestone notices (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`) to stderr.
 
-`--ui web` starts a loopback-only browser dashboard for panel review; `--ui-url-file <path>` writes its URL atomically so a buffered-output host can read it without parsing stderr. It never substitutes for panel semantics — findings, gate status, and exit code come from the same `PI_REVIEW_META_JSON` as always.
+`--ui web` starts a loopback-only browser dashboard for panel review and auto-opens it in the default browser (`--no-ui-open` disables the auto-open); `--ui-url-file <path>` writes its URL atomically so a buffered-output host can read it without parsing stderr. After completion the page counts down 60s, then closes itself and stops the dashboard server (any interaction cancels the countdown). It never substitutes for panel semantics — findings, gate status, and exit code come from the same `PI_REVIEW_META_JSON` as always.
 
 ## Run metrics
 

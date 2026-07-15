@@ -98,3 +98,55 @@ test("findingDetailLine includes provenance and resultsSummary formats meta text
   );
   assert.equal(resultsSummary(undefined), "");
 });
+
+test("formatCompact steps through plain, K, and M ranges", async () => {
+  const { formatCompact } = await import("./ui-client.js");
+  assert.equal(formatCompact(0), "0");
+  assert.equal(formatCompact(950), "950");
+  assert.equal(formatCompact(12_345), "12.3K");
+  assert.equal(formatCompact(276_300), "276K");
+  assert.equal(formatCompact(1_234_567), "1.23M");
+});
+
+test("reduceClientExtras counts tool calls and accumulates full review text per reviewer", async () => {
+  const { createClientExtras, reduceClientExtras, totalToolCalls } = await import("./ui-client.js");
+  let extras = createClientExtras();
+  extras = reduceClientExtras(extras, event("reviewer.tool.started", 1, { reviewerId: "r1", tool: "read" }));
+  extras = reduceClientExtras(extras, event("reviewer.tool.started", 2, { reviewerId: "r1", tool: "grep" }));
+  extras = reduceClientExtras(extras, event("reviewer.tool.started", 3, { reviewerId: "r2", tool: "read" }));
+  extras = reduceClientExtras(extras, event("reviewer.text.delta", 4, { reviewerId: "r1", text: "## Find" }));
+  extras = reduceClientExtras(extras, event("reviewer.text.delta", 5, { reviewerId: "r1", text: "ings" }));
+  assert.equal(extras.toolCalls["r1"], 2);
+  assert.equal(extras.toolCalls["r2"], 1);
+  assert.equal(totalToolCalls(extras), 3);
+  assert.equal(extras.fullText["r1"], "## Findings");
+});
+
+test("statusHeadline tracks phase while running and gate status once completed", async () => {
+  const { statusHeadline } = await import("./ui-client.js");
+  let state = createPanelViewState();
+  assert.deepEqual(statusHeadline(state, "connecting"), { text: "Connecting", tone: "" });
+
+  state = reducePanelEvent(
+    state,
+    event("panel.started", 1, { target: "@src", mode: "code", reviewers: [{ reviewerId: "r1", role: "Reviewer", model: null }] }),
+  );
+  assert.deepEqual(statusHeadline(state, "live"), { text: "Reviewing", tone: "" });
+
+  state = reducePanelEvent(state, event("aggregation.started", 2, {}));
+  assert.deepEqual(statusHeadline(state, "live"), { text: "Aggregating", tone: "" });
+
+  const completed = reducePanelEvent(
+    state,
+    event("panel.completed", 3, {
+      meta: {
+        status: "clean", verdict: "approve", verdictSource: "parsed", findings: [], actionableCount: 0,
+        reviewMode: "code", durationMs: 10, model: null,
+        confirmedClusters: [], advisories: [], panelHealth: "healthy",
+        configuredReviewers: 1, successfulReviewers: 1, consensusPolicy: "quorum", consensusThreshold: 2,
+        reviewers: [], adjudicationUsed: false, strategy: "panel",
+      },
+    }),
+  );
+  assert.deepEqual(statusHeadline(completed, "live"), { text: "Clean", tone: "ok" });
+});
