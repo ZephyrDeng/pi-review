@@ -68,6 +68,12 @@ export interface ParsedArgs {
   reviewerModels?: string[];
   /** Panel: normalized machine event stream for renderer adapters. */
   outputFormat?: "events-jsonl";
+  /** Panel: start a loopback web dashboard for live progress (issue #4). Only "web" is supported. */
+  ui?: "web";
+  /** Panel: also write the dashboard URL to this file path (written atomically). */
+  uiUrlFile?: string;
+  /** Panel: override the dashboard's post-completion idle TTL, in seconds (default: 900). */
+  uiTtlSeconds?: number;
 }
 
 export interface ReviewPreset {

@@ -190,6 +190,18 @@ This mode writes only `ReviewEvent v1` JSONL to stdout. Events have one `runId`,
 
 Panel reviewers use the hard allowlist `read,grep,find,ls`. Shell and mutation-capable tools are rejected before a reviewer starts. `Ctrl+C` cancels the reviewer and adjudicator process trees, emits cancellation lifecycle events, and produces one blocked final event.
 
+### Live web dashboard
+
+`--ui web` starts an opt-in, loopback-only dashboard for hosts without a native Pi renderer (Claude Code, Codex, plain terminals):
+
+```bash
+pi-review --reviewers 3 --consensus quorum --ui web -- @src
+```
+
+The CLI prints `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/<token>` to stderr before reviewers start; open it in a browser to watch live per-reviewer status, active tool, usage, and the final confirmed findings/advisories. `--ui-url-file <path>` additionally writes the URL atomically for hosts that buffer stdout/stderr. The review process still exits with the normal panel exit code as soon as the run completes — the dashboard keeps serving that run for a bounded idle TTL (default 900s; override with `--ui-ttl <seconds>`) so a browser can reconnect after a refresh, then shuts itself down.
+
+The dashboard binds only to `127.0.0.1`/`::1`, protects every run with a high-entropy capability URL, sends a restrictive CSP with no remote assets or CORS, and renders all reviewer/finding text as escaped content (never HTML). It is view-only: cancellation stays with the invoking terminal/agent host (`Ctrl+C`). `--ui web` requires an active panel and cannot combine with `loop`.
+
 ## Output Format
 
 Every review produces Markdown with these sections:

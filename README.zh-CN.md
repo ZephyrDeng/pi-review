@@ -121,6 +121,18 @@ pi-review --panel code-experts --output-format events-jsonl -- @src
 
 Panel reviewer 固定使用 `read,grep,find,ls` 白名单；shell 与可变更工具会在启动前被拒绝。`Ctrl+C` 会取消 reviewer 与 adjudicator 进程树，输出取消事件并生成一条 blocked 最终事件。
 
+### 本地网页看板
+
+`--ui web` 启动一个可选的、仅回环访问的看板，供没有原生 Pi 渲染器的宿主（Claude Code、Codex、纯终端）使用：
+
+```bash
+pi-review --reviewers 3 --consensus quorum --ui web -- @src
+```
+
+CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/<token>` 打印到 stderr；在浏览器中打开即可实时查看每位 reviewer 的状态、当前工具、用量，以及最终的确认发现/advisory。`--ui-url-file <path>` 会额外把该 URL 原子化写入文件，供会缓冲 stdout/stderr 的宿主使用。审查进程本身仍在运行结束后立即以原有 panel 退出码退出——看板会为这次运行继续保留一段有界的空闲 TTL（默认 900 秒，可用 `--ui-ttl <秒数>` 覆盖），以便浏览器刷新后重连，随后自动关闭。
+
+看板仅绑定 `127.0.0.1`/`::1`，每次运行都用高熵能力令牌保护，发送不含远程资源或 CORS 的严格 CSP，所有 reviewer/发现文本均以转义形式渲染（绝不使用 HTML）。看板仅用于查看：取消操作仍由发起的终端/agent 宿主负责（`Ctrl+C`）。`--ui web` 必须配合活跃的 panel 使用，且不能与 `loop` 组合。
+
 ## Pi 包：`/rv` 命令
 
 安装 Pi 包后可在 Pi 里使用 `/rv`：

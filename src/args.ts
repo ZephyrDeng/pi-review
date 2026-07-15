@@ -33,6 +33,9 @@ Options:
   --consensus-model <model>                   Panel: model for semantic consensus adjudication
   --concurrency <n>                           Panel: bounded reviewer concurrency (default: reviewer count)
   --output-format <events-jsonl>              Panel: emit normalized ReviewEvent v1 JSONL to stdout
+  --ui <web>                                  Panel: start a loopback dashboard; prints its URL before reviewers start
+  --ui-url-file <path>                        Panel: also write the dashboard URL to this file (atomic; with --ui web)
+  --ui-ttl <seconds>                          Panel: dashboard idle TTL after completion (default: 900; with --ui web)
   -h, --help                                  Show help
 
 Session (single review only; rejected by loop and panel):
@@ -208,6 +211,18 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
         options.outputFormat = format;
         break;
       }
+      case "--ui": {
+        const value = requireValue(arg, argv);
+        if (value !== "web") throw new ArgsParseError("--ui must be web");
+        options.ui = value;
+        break;
+      }
+      case "--ui-url-file":
+        options.uiUrlFile = requireValue(arg, argv);
+        break;
+      case "--ui-ttl":
+        options.uiTtlSeconds = parsePositiveInteger(arg, requireValue(arg, argv));
+        break;
       default:
         if (arg.startsWith("--")) {
           throw new ArgsParseError(`unknown option: ${arg}`);
@@ -268,6 +283,15 @@ function validatePanelOptions(options: ParsedArgs): void {
   }
   if (options.command === "loop" && options.outputFormat) {
     throw new ArgsParseError("loop cannot be used with --output-format events-jsonl");
+  }
+  if (!panelActive && options.ui) {
+    throw new ArgsParseError("--ui web requires an active panel");
+  }
+  if (options.command === "loop" && options.ui) {
+    throw new ArgsParseError("loop cannot be used with --ui web");
+  }
+  if ((options.uiUrlFile !== undefined || options.uiTtlSeconds !== undefined) && options.ui !== "web") {
+    throw new ArgsParseError("--ui-url-file and --ui-ttl require --ui web");
   }
   if (panelActive && (options.keepSession || options.continueHandle || options.name)) {
     throw new ArgsParseError("panel cannot be used with --keep-session, --continue, or --name");
