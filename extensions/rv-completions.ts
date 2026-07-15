@@ -470,11 +470,18 @@ function flagItems(
   return wrap(candidates, headPrefix, FLAG_HINTS);
 }
 
-function looksLikeModelQuery(tail: string): boolean {
+function looksLikeModelQuery(tail: string, models: ModelInfo[] = []): boolean {
   if (!tail || tail.startsWith("-") || tail.startsWith("@")) return false;
   // provider/model, bare id fragments, or model:thinking
   if (tail.includes("/") || tail.includes(":")) return true;
-  if (/^(gpt|claude|kimi|glm|opus|sonnet|deepseek|minimax|o[0-9]|gemini)/i.test(tail)) return true;
+  if (/^(gpt|claude|kimi|glm|opus|sonnet|deepseek|minimax|o[0-9]|gemini|openai|anthropic|codex|zenmux|moonshot|px)/i.test(tail)) {
+    return true;
+  }
+  // Match against live catalog providers / ids so short provider names complete.
+  const q = tail.toLowerCase();
+  if (models.some((m) => m.provider.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.label.toLowerCase().includes(q))) {
+    return true;
+  }
   // short alphanumeric model-ish tokens (gpt55, kimi-k2)
   return /^[a-z0-9][a-z0-9._-]{1,}$/i.test(tail) && /[0-9]|gpt|claude|kimi|glm|opus|sonnet/i.test(tail);
 }
@@ -523,16 +530,34 @@ function topLevelCompletions(
   }
 
   // Bare model typing: `/rv-loop gpt-5.5` / `/rv openai-codex/gpt-5.5`
-  if (deps.models?.length && looksLikeModelQuery(tail)) {
-    const modelMatches = modelItems(deps.models, sig, `${headPrefix}--model `, tail, deps);
-    if (modelMatches?.length) {
-      // Prefer inserting as --model <id> so the parser/resolver gets a clean flag.
-      items.unshift(
-        ...modelMatches.map((item) => ({
-          ...item,
-          description: [item.description, strategy === "loop" ? "loop model" : "panel model"].filter(Boolean).join(" · "),
-        })),
-      );
+  // Also support `/rv openai-codex/gpt-5.5:` thinking suffixes without requiring --model first.
+  if (deps.models?.length && looksLikeModelQuery(tail, deps.models)) {
+    const colonIdx = tail.lastIndexOf(":");
+    if (colonIdx !== -1 && tail.slice(0, colonIdx).includes("/")) {
+      const thinking = thinkingSuffixItems(tail, deps.models, `${headPrefix}--model `, sig, deps);
+      if (thinking?.length) items.unshift(...thinking);
+    } else {
+      const modelMatches = modelItems(deps.models, sig, `${headPrefix}--model `, tail, deps);
+      if (modelMatches?.length) {
+        // Prefer inserting as --model <id> so the parser/resolver gets a clean flag.
+        items.unshift(
+          ...modelMatches.map((item) => ({
+            ...item,
+            description: [item.description, strategy === "loop" ? "loop model" : "panel model"].filter(Boolean).join(" · "),
+          })),
+        );
+        // If the user already typed an exact catalog id, also offer thinking suffixes.
+        const exact = deps.models.find((m) => m.label === tail || m.id === tail);
+        if (exact?.thinkingLevels?.length) {
+          for (const level of exact.thinkingLevels) {
+            items.unshift({
+              value: `${headPrefix}--model ${exact.label}:${level}`,
+              label: `${exact.label}:${level}`,
+              description: thinkingDescription(level, sig, localeOf(deps)),
+            });
+          }
+        }
+      }
     }
   }
 

@@ -191,6 +191,19 @@ describe("buildRvCompletions", () => {
     assert.ok(items!.some((i) => i.value.includes("--model") && i.label.includes("gpt-5.5")));
   });
 
+  it("/rv-loop accepts full provider/model and offers thinking suffixes", () => {
+    const items = buildRvCompletions("openai/gpt-5.5", { ...deps, strategy: "loop" });
+    assert.ok(items);
+    assert.ok(items!.some((i) => i.value === "--model openai/gpt-5.5"));
+    assert.ok(items!.some((i) => i.value.startsWith("--model openai/gpt-5.5:")));
+  });
+
+  it("/rv-loop provider fragment still surfaces models", () => {
+    const items = buildRvCompletions("openai", { ...deps, strategy: "loop" });
+    assert.ok(items);
+    assert.ok(items!.some((i) => i.label.includes("openai/") || i.value.includes("openai/")));
+  });
+
   it("/rv-models does not offer panel scene templates or targets", () => {
     const items = buildRvCompletions("", { ...deps, strategy: "models" });
     assert.ok(items);
