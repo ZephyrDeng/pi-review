@@ -3,15 +3,20 @@ import { fileURLToPath } from "node:url";
 import { Writable } from "node:stream";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text, type Component } from "@earendil-works/pi-tui";
+import { getMarkdownTheme, keyHint } from "@earendil-works/pi-coding-agent";
+import { Markdown, Text, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { createPanelViewState, formatCost, formatDurationMs, formatTokens, formatUsage, reducePanelEvent, spawnStreamingChild, type PanelViewState, type ReviewEvent } from "@zephyrdeng/pi-review";
 
 type Theme = { fg: (color: "toolTitle" | "muted" | "error" | "success" | "accent", text: string) => string; bold: (text: string) => string };
 type PanelToolDetails = { state: PanelViewState; error?: string };
+type PanelUi = { setStatus?: (key: string, text: string | undefined) => void };
+type PanelToolContext = { ui?: PanelUi };
 
 const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.resolve(extensionDir, "../bin/pi-review.js");
 const PANEL_TOOL_DISPLAY_NAME = "Pi Review Panel";
+const PANEL_STATUS_KEY = "pi-review";
+const LIVE_TICK_MS = 2000;
 
 function duration(ms: number | undefined): string {
   if (!ms) return "0s";
@@ -46,6 +51,49 @@ function compactText(state: PanelViewState, theme: Theme, now = Date.now()): str
     return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${lifecycle}${model}${thinking}${active}${activeSummary}${reviewerElapsed}${idle}${tokens}${cost}`)}`;
   });
   return [header, ...rows].join("\n");
+}
+
+function fallbackMarkdownTheme(theme: Theme): MarkdownTheme {
+  return {
+    heading: theme.bold,
+    link: (text) => text,
+    linkUrl: (text) => text,
+    code: (text) => text,
+    codeBlock: (text) => text,
+    codeBlockBorder: (text) => text,
+    quote: (text) => text,
+    quoteBorder: (text) => text,
+    hr: (text) => text,
+    listBullet: (text) => text,
+    bold: theme.bold,
+    italic: (text) => text,
+    strikethrough: (text) => text,
+    underline: (text) => text,
+  };
+}
+
+/** Prefer Pi host markdown theme; keep a portable fallback for unit tests / partial hosts. */
+export function resolveMarkdownTheme(theme: Theme): MarkdownTheme {
+  try {
+    const hostTheme = getMarkdownTheme();
+    if (hostTheme && typeof hostTheme.heading === "function") {
+      // getMarkdownTheme() can return wrappers that throw until initTheme() runs.
+      hostTheme.heading("probe");
+      return hostTheme;
+    }
+  } catch {
+    // Outside a fully initialized Pi interactive theme.
+  }
+  return fallbackMarkdownTheme(theme);
+}
+
+/** Expand hint that respects configured keybindings when available. */
+export function expandHint(): string {
+  try {
+    return keyHint("app.tools.expand", "to expand");
+  } catch {
+    return "ctrl+o to expand";
+  }
 }
 
 function reviewerSummaryLines(state: PanelViewState): string[] {
@@ -122,48 +170,100 @@ function finalMarkdown(state: PanelViewState): string {
   return buildPanelResultContent(state);
 }
 
-export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component, isPartial = false): Component {
+function ambientStatus(state: PanelViewState, now = Date.now()): string {
+  const elapsed = state.startedAt ? duration((state.completedAt ?? now) - state.startedAt) : "0s";
+  const running = state.aggregate.running;
+  const phase = state.phase === "aggregating" ? "aggregating" : state.phase;
+  const runningBit = running > 0 ? ` · ${running} running` : "";
+  return `● panel ${state.aggregate.completed}/${state.aggregate.total}${runningBit} · ${phase} · ${elapsed}`;
+}
+
+function setAmbientStatus(ctx: PanelToolContext | undefined, text: string | undefined): void {
+  try {
+    ctx?.ui?.setStatus?.(PANEL_STATUS_KEY, text);
+  } catch {
+    // Non-interactive / print hosts may not implement status chrome.
+  }
+}
+
+/**
+ * Stable tool-result component reused across onUpdate renders.
+ * Collapsed and expanded paths mutate the same child instances instead of rebuilding trees.
+ */
+export class PanelResultView implements Component {
+  private readonly compact = new Text("", 0, 0);
+  private readonly activity = new Text("", 0, 0);
+  private readonly error = new Text("", 0, 0);
+  private markdown: Markdown | undefined;
+  private showActivity = false;
+  private showMarkdown = false;
+  private showError = false;
+  private readonly mdTheme: MarkdownTheme;
+
+  constructor(mdTheme: MarkdownTheme) {
+    this.mdTheme = mdTheme;
+  }
+
+  update(details: PanelToolDetails, expanded: boolean, theme: Theme, isPartial = false, now = Date.now()): void {
+    const body = compactText(details.state, theme, now);
+    if (!expanded) {
+      // Discoverability: host expand binding (default ctrl+o).
+      this.compact.setText(`${body}\n${expandHint()}`);
+      this.showActivity = false;
+      this.showMarkdown = false;
+      this.showError = Boolean(details.error);
+      if (details.error) this.error.setText(theme.fg("error", details.error));
+      return;
+    }
+
+    this.compact.setText(body);
+    const activityBlocks = Object.values(details.state.reviewers)
+      .filter((reviewer) => reviewer.recentActivity.length > 0)
+      .map((reviewer) => `${theme.fg("muted", `${reviewer.reviewerId} activity`)}\n${reviewer.recentActivity.join("\n")}`);
+    this.showActivity = activityBlocks.length > 0;
+    if (this.showActivity) this.activity.setText(activityBlocks.join("\n\n"));
+
+    const markdown = !isPartial && details.state.meta ? finalMarkdown(details.state) : "";
+    this.showMarkdown = Boolean(markdown);
+    if (markdown) {
+      if (!this.markdown) this.markdown = new Markdown(markdown, 0, 0, this.mdTheme);
+      else this.markdown.setText(markdown);
+    }
+
+    this.showError = Boolean(details.error);
+    if (details.error) this.error.setText(theme.fg("error", details.error));
+  }
+
+  invalidate(): void {
+    this.compact.invalidate();
+    this.activity.invalidate();
+    this.error.invalidate();
+    this.markdown?.invalidate();
+  }
+
+  render(width: number): string[] {
+    const lines = [...this.compact.render(width)];
+    if (this.showActivity) {
+      lines.push("");
+      lines.push(...this.activity.render(width));
+    }
+    if (this.showMarkdown && this.markdown) {
+      lines.push("");
+      lines.push(...this.markdown.render(width));
+    }
+    if (this.showError) {
+      lines.push("");
+      lines.push(...this.error.render(width));
+    }
+    return lines;
+  }
+}
+
+export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component, isPartial = false, now = Date.now()): Component {
   if (!details) return new Text(theme.fg("muted", isPartial ? `${PANEL_TOOL_DISPLAY_NAME} · starting…` : "Panel review has no progress details."), 0, 0);
-  if (!expanded) {
-    const text = previous instanceof Text ? previous : new Text("", 0, 0);
-    text.setText(compactText(details.state, theme));
-    return text;
-  }
-  const container = new Container();
-  container.addChild(new Text(compactText(details.state, theme), 0, 0));
-  for (const reviewer of Object.values(details.state.reviewers)) {
-    if (reviewer.recentActivity.length === 0) continue;
-    container.addChild(new Spacer(1));
-    container.addChild(new Text(theme.fg("muted", `${reviewer.reviewerId} activity`), 0, 0));
-    container.addChild(new Text(reviewer.recentActivity.join("\n"), 0, 0));
-  }
-  const markdown = !isPartial && details.state.meta ? finalMarkdown(details.state) : "";
-  if (markdown) {
-    container.addChild(new Spacer(1));
-    // Pi supplies a Markdown theme to built-in renderers; plain text keeps this
-    // extension portable across public API versions while still using Markdown.
-    container.addChild(new Markdown(markdown, 0, 0, {
-      heading: theme.bold,
-      link: (text) => text,
-      linkUrl: (text) => text,
-      code: (text) => text,
-      codeBlock: (text) => text,
-      codeBlockBorder: (text) => text,
-      quote: (text) => text,
-      quoteBorder: (text) => text,
-      hr: (text) => text,
-      listBullet: (text) => text,
-      bold: theme.bold,
-      italic: (text) => text,
-      strikethrough: (text) => text,
-      underline: (text) => text,
-    }));
-  }
-  if (details.error) {
-    container.addChild(new Spacer(1));
-    container.addChild(new Text(theme.fg("error", details.error), 0, 0));
-  }
-  return container;
+  const view = previous instanceof PanelResultView ? previous : new PanelResultView(resolveMarkdownTheme(theme));
+  view.update(details, expanded, theme, isPartial, now);
+  return view;
 }
 
 export type PanelToolParams = {
@@ -202,11 +302,17 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       model: Type.Optional(Type.String({ description: "Optional shared reviewer model." })),
       thinking: Type.Optional(Type.String({ description: "Optional thinking level." })),
     }),
-    async execute(_toolCallId, params, signal, onUpdate) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       let state = createPanelViewState();
       let buffer = "";
       let stderr = "";
-      const publish = () => onUpdate?.({ content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${state.aggregate.completed}/${state.aggregate.total} completed` }], details: { state } });
+      const toolCtx = ctx as PanelToolContext | undefined;
+      const publish = () => {
+        onUpdate?.({ content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${state.aggregate.completed}/${state.aggregate.total} completed` }], details: { state } });
+        if (state.phase === "running" || state.phase === "aggregating") {
+          setAmbientStatus(toolCtx, ambientStatus(state));
+        }
+      };
       const consume = (chunk: string) => {
         buffer += chunk;
         let newline: number;
@@ -232,6 +338,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       // Preserve the full panel configuration and enforce the panel-only tool boundary.
       const paramError = panelToolParamError(params);
       if (paramError) {
+        setAmbientStatus(toolCtx, undefined);
         return {
           content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${paramError}` }],
           details: { state, error: paramError },
@@ -252,7 +359,21 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       if (params.model) args.push("--model", params.model);
       if (params.thinking) args.push("--thinking", params.thinking);
       args.push("--", params.target);
-      const child = await spawnStreamingChild(process.execPath, args, { cwd: process.cwd(), env: process.env, stdoutSink, stderrSink, signal, processGroup: true });
+
+      // Keep elapsed/idle labels fresh even when the child is quiet between events.
+      const tick = setInterval(() => {
+        if (state.phase === "running" || state.phase === "aggregating") publish();
+      }, LIVE_TICK_MS);
+      tick.unref?.();
+
+      let child: Awaited<ReturnType<typeof spawnStreamingChild>>;
+      try {
+        setAmbientStatus(toolCtx, ambientStatus(state));
+        child = await spawnStreamingChild(process.execPath, args, { cwd: process.cwd(), env: process.env, stdoutSink, stderrSink, signal, processGroup: true });
+      } finally {
+        clearInterval(tick);
+        setAmbientStatus(toolCtx, undefined);
+      }
       if (buffer.trim()) {
         const tail = buffer;
         buffer = "";
