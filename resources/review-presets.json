@@ -1,7 +1,7 @@
 {
   "code": {
     "description": "Code review only: inspect provided files, diffs, or paths and return review conclusions without editing.",
-    "tools": ["read", "grep", "find", "ls", "bash"],
+    "tools": ["read", "grep", "find", "ls"],
     "thinking": "high",
     "instructions": "Review code or code changes only. Do not edit, write, patch, format, commit, or otherwise mutate files. Use bash only for read-only inspection commands such as git diff, git status, git show, tests with explicit user permission, or listing files. Focus on correctness, regressions, security, concurrency, API contracts, edge cases, maintainability, and missing tests."
   },

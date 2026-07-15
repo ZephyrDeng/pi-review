@@ -30,6 +30,7 @@ Options:
   --min-agree <n>                             Panel: minimum reviewers for quorum (default: 2; quorum only)
   --consensus-model <model>                   Panel: model for semantic consensus adjudication
   --concurrency <n>                           Panel: bounded reviewer concurrency (default: reviewer count)
+  --output-format <events-jsonl>              Panel: emit normalized ReviewEvent v1 JSONL to stdout
   -h, --help                                  Show help
 
 Session (single review only; rejected by loop and panel):
@@ -175,6 +176,12 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
       case "--concurrency":
         options.concurrency = parsePositiveInteger(arg, requireValue(arg, argv));
         break;
+      case "--output-format": {
+        const format = requireValue(arg, argv);
+        if (format !== "events-jsonl") throw new ArgsParseError("--output-format must be events-jsonl");
+        options.outputFormat = format;
+        break;
+      }
       default:
         if (arg.startsWith("--")) {
           throw new ArgsParseError(`unknown option: ${arg}`);
@@ -221,6 +228,9 @@ function validatePanelOptions(options: ParsedArgs): void {
   }
   if (!panelActive && anyPanelOption) {
     throw new ArgsParseError("panel options require --reviewers > 1 or --panel");
+  }
+  if (!panelActive && options.outputFormat) {
+    throw new ArgsParseError("--output-format events-jsonl requires an active panel");
   }
   if (panelActive && (options.keepSession || options.continueHandle || options.name)) {
     throw new ArgsParseError("panel cannot be used with --keep-session, --continue, or --name");

@@ -54,6 +54,8 @@ export interface ParsedArgs {
   consensusModel?: string;
   /** Panel: bounded reviewer concurrency. */
   concurrency?: number;
+  /** Panel: normalized machine event stream for renderer adapters. */
+  outputFormat?: "events-jsonl";
 }
 
 export interface ReviewPreset {

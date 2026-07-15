@@ -62,3 +62,16 @@ test("spawnStreamingChild keeps captured stdout bounded while forwarding all out
   assert.equal(r.stdout, "efghij");
   assert.equal(chunks.join(""), "abcdefghij");
 });
+
+test("spawnStreamingChild terminates its detached process group when aborted", async () => {
+  const controller = new AbortController();
+  const { stream } = collectSink();
+  const result = spawnStreamingChild(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    stdoutSink: stream,
+    stderrSink: stream,
+    signal: controller.signal,
+  });
+  setTimeout(() => controller.abort(), 30);
+  const child = await result;
+  assert.equal(child.signal, "SIGTERM");
+});

@@ -144,10 +144,10 @@ function piHostRules(): string {
   return [
     "Follow the pi-review skill.",
     "Host: Pi interactive session (/rv).",
-    "Run pi-review in an isolated child session; return the review conclusion (Markdown sections) plus the ASCII pi-review footer.",
+    "For review runs, call the pi_review custom tool. It launches pi-review in isolated reviewer sessions and renders panel progress live.",
     "CLI defaults: stream child output live. Do NOT add --no-stream or --progress-log unless the user explicitly asked.",
     "Do not edit, patch, commit, or implement findings unless the user asks separately.",
-    "After pi-review exits, show the user the ASCII footer (lines starting with ── pi-review). Do not paste PI_REVIEW_META_JSON to the user; use Session from the footer for /rv --continue.",
+    "After pi-review exits, show the user the ASCII pi-review footer (lines starting with ── pi-review). Do not paste PI_REVIEW_META_JSON to the user; use Session from the footer for /rv --continue.",
   ].join(" ");
 }
 
@@ -216,7 +216,8 @@ export function buildRvOrchestrationPrompt(parsed: RvParsed, locale: RvLocale = 
       `Mode: ${parsed.mode}. Follow the preset named in review-presets.json when present.`,
     modelStep,
     continueNote,
-    `Execute:\n${cliLine}`,
+    `Call pi_review with target=${JSON.stringify(target)}, mode=${JSON.stringify(parsed.mode)}, and any selected model/thinking values. The tool uses the code-experts panel by default.`,
+    `CLI fallback:\n${cliLine}`,
   ]
     .filter(Boolean)
     .join("\n\n");

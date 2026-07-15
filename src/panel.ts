@@ -5,6 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import type {
   ParsedArgs,
@@ -13,7 +14,7 @@ import type {
   StructuredReviewResult,
   VerdictInfo,
 } from "./types.js";
-import { spawnBufferedChild, spawnStreamingChild } from "./child-process.js";
+import { spawnStreamingChild } from "./child-process.js";
 import { childEnv, childRuntimeError, readReviewStdin } from "./review.js";
 import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
@@ -21,12 +22,13 @@ import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
 import { extractFinalText, JsonEventStream } from "./json-events.js";
 import type { TokenUsage } from "./types.js";
-import { fail, expandMaybeHome, normalizeTools } from "./utils.js";
+import { fail, expandMaybeHome } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
 import { resolvePanelConfig, type ResolvedPanelConfig } from "./panel-config.js";
 import { aggregatePanel } from "./panel-aggregate.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
-import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine, formatUsage, formatTokens } from "./meta-footer.js";
+import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
+import { createReviewEventEmitter, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
 /** Sum token usage across reviewers (prompt-scoped fields as maxima, output as additive). */
@@ -67,21 +69,20 @@ function reviewerProgressLog(baseProgressLog: string | undefined, reviewerId: st
   return `${base}.r${reviewerId}.jsonl`;
 }
 
-/** Tools that can mutate the working tree — forbidden for panel reviewers. */
-const WRITE_TOOLS = new Set([
-  "edit", "write", "apply_patch", "create_file", "create", "patch",
-  "str_replace_editor", "file_editor", "delete", "move",
-]);
+/** The hard panel boundary. Shell access gets a separate verified profile in a future change. */
+export const PANEL_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
+const PANEL_READ_ONLY_TOOL_SET = new Set<string>(PANEL_READ_ONLY_TOOLS);
 
-/** Force a read-only tool allowlist for panel reviewers (issue #2 review-only security). */
-function readOnlyTools(tools: string | undefined): string | undefined {
-  if (!tools) return undefined;
-  const kept = tools
-    .split(",")
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0 && !WRITE_TOOLS.has(t));
-  if (kept.length === 0) return "read,grep,find,ls";
-  return kept.join(",");
+/** Resolve reviewer tools through the hard allowlist; rejected requests cannot silently widen access. */
+export function resolvePanelReviewerTools(tools: string | string[] | undefined): string {
+  const requested = (Array.isArray(tools) ? tools : tools?.split(",") ?? PANEL_READ_ONLY_TOOLS)
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  const disallowed = requested.filter((tool) => !PANEL_READ_ONLY_TOOL_SET.has(tool));
+  if (disallowed.length > 0) {
+    throw new Error(`panel reviewers only allow ${PANEL_READ_ONLY_TOOLS.join(",")}; rejected: ${disallowed.join(",")}`);
+  }
+  return [...new Set(requested.length > 0 ? requested : PANEL_READ_ONLY_TOOLS)].join(",");
 }
 
 function buildReviewerArgs(
@@ -104,8 +105,7 @@ function buildReviewerArgs(
   if (model) args.push("--model", model);
   if (thinking) args.push("--thinking", thinking);
 
-  const tools = readOnlyTools(parsed.tools || normalizeTools(preset.tools));
-  if (tools) args.push("--tools", tools);
+  args.push("--tools", resolvePanelReviewerTools(parsed.tools || preset.tools));
 
   const presetSkills = Array.isArray(preset.skillPaths) ? preset.skillPaths : [];
   for (const skill of [...presetSkills, ...parsed.skills]) {
@@ -126,10 +126,13 @@ interface ReviewerRunInput {
   reviewer: { id: string; role: string; provider?: string; model?: string; thinking?: string };
   progressLog: string | undefined;
   systemPrompt: string;
+  signal?: AbortSignal;
+  emit?: ReturnType<typeof createReviewEventEmitter>;
+  quietProgress?: boolean;
 }
 
 async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmission> {
-  const { config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt } = input;
+  const { config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt, signal, emit, quietProgress } = input;
   const args = buildReviewerArgs(config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt);
 
   let progressStream: fs.WriteStream | undefined;
@@ -144,7 +147,27 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   // progress isolation). The raw json lines tee into the progress-log file.
   const streamParser = new JsonEventStream({
     onText: () => { /* reviewer prose is captured, not displayed */ },
-    onMilestone: (line) => process.stderr.write(`  [${reviewer.id}] ${line}`),
+    onMilestone: (line) => { if (!quietProgress) process.stderr.write(`  [${reviewer.id}] ${line}`); },
+    onActivity: (event) => {
+      if (!emit) return;
+      switch (event.type) {
+        case "turn.started":
+          emit("reviewer.turn.started", { reviewerId: reviewer.id, turn: event.turn });
+          break;
+        case "tool.started":
+          emit("reviewer.tool.started", { reviewerId: reviewer.id, tool: event.tool });
+          break;
+        case "tool.finished":
+          emit("reviewer.tool.finished", { reviewerId: reviewer.id, tool: event.tool });
+          break;
+        case "text.delta":
+          emit("reviewer.text.delta", { reviewerId: reviewer.id, text: event.text });
+          break;
+        case "usage":
+          emit("reviewer.usage", { reviewerId: reviewer.id, usage: event.usage });
+          break;
+      }
+    },
   });
   const stdoutSink = new Writable({
     write(chunk, _enc, cb) {
@@ -163,6 +186,7 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
     env: childEnv(config.piBin),
     stdoutSink,
     stderrSink,
+    signal,
   });
   streamParser.flush();
   if (progressStream) {
@@ -234,6 +258,7 @@ async function mapWithConcurrency<T, R>(
 function createAdjudicator(
   config: Config,
   consensusModel: string | undefined,
+  signal?: AbortSignal,
 ): SemanticAdjudicator {
   // Dedicated JSON-only system prompt. The adjudicator must NOT inherit the
   // review Markdown output contract (system-prompt.md), which would conflict
@@ -246,6 +271,7 @@ function createAdjudicator(
   ].join("\n");
   return {
     async adjudicate(request) {
+      if (signal?.aborted) throw new Error("panel review cancelled before adjudication");
       const prompt = buildAdjudicatorPrompt(request.candidates as AdjudicationCandidate[]);
       // The adjudicator is aggregation-only: it must not inspect the repository
       // as an additional reviewer and has no write capability. Disable all tools
@@ -255,9 +281,13 @@ function createAdjudicator(
       if (consensusModel) args.push("--model", consensusModel);
       args.push(prompt);
 
-      const child = spawnBufferedChild(config.piBin, args, {
+      const sink = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+      const child = await spawnStreamingChild(config.piBin, args, {
         cwd: process.cwd(),
         env: childEnv(config.piBin),
+        stdoutSink: sink,
+        stderrSink: sink,
+        signal,
       });
       const runtimeError = childRuntimeError(child);
       if (runtimeError) {
@@ -296,8 +326,29 @@ function resolvePanel(parsed: ParsedArgs, config: Config): ResolvedPanelConfig {
   }
 }
 
+export interface PanelRunOptions {
+  onEvent?: ReviewEventListener;
+  signal?: AbortSignal;
+  emitFooter?: boolean;
+}
+
+function cancelledSubmission(reviewer: { id: string; role: string; provider?: string; model?: string; thinking?: string }, message: string): ReviewerSubmission {
+  return {
+    reviewerId: reviewer.id,
+    role: reviewer.role,
+    model: reviewer.model ?? null,
+    ...(reviewer.thinking ? { thinking: reviewer.thinking } : {}),
+    durationMs: 0,
+    result: { status: "blocked", verdict: "blocked", verdictSource: "runtime_error", parseError: message, findings: [], actionableCount: 0 },
+  };
+}
+
 /** Run one complete panel evaluation and return the aggregate result (no exit). */
-export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readReviewStdin()): Promise<{ meta: PanelReviewMeta; exitCode: number }> {
+export async function runPanelReviewOnce(
+  parsed: ParsedArgs,
+  stdinText = readReviewStdin(),
+  options: PanelRunOptions = {},
+): Promise<{ meta: PanelReviewMeta; exitCode: number }> {
   const config = resolveConfig();
   const resolved = resolvePanel(parsed, config);
   const presets = loadPresets(config.presetsFile);
@@ -307,13 +358,31 @@ export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readRev
   }
   const systemPrompt = loadSystemPrompt(config.systemPromptFile);
   const payload = splitPayload(parsed.payload);
+  const emit = createReviewEventEmitter(randomUUID(), (event) => {
+    if (parsed.outputFormat === "events-jsonl") process.stdout.write(`${JSON.stringify(event)}\n`);
+    options.onEvent?.(event);
+  });
+  const reviewerIdentities = resolved.reviewers.map((reviewer) => ({
+    reviewerId: reviewer.id,
+    role: reviewer.role,
+    model: reviewer.model || parsed.model || preset.model || null,
+    ...(reviewer.thinking || parsed.thinking || preset.thinking ? { thinking: reviewer.thinking || parsed.thinking || preset.thinking } : {}),
+  }));
+  emit("panel.started", { target: parsed.payload.join(" "), mode: parsed.mode, ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}), reviewers: reviewerIdentities });
+  for (const reviewer of resolved.reviewers) emit("reviewer.queued", { reviewerId: reviewer.id });
 
   const startedAt = Date.now();
   const submissions = await mapWithConcurrency(
     resolved.reviewers,
     resolved.concurrency,
     async (reviewer) => {
+      if (options.signal?.aborted) {
+        const message = "panel review cancelled";
+        emit("reviewer.cancelled", { reviewerId: reviewer.id, message });
+        return cancelledSubmission(reviewer, message);
+      }
       const reviewerStart = Date.now();
+      emit("reviewer.started", { reviewerId: reviewer.id });
       const prompt = buildReviewerPrompt(parsed.mode, preset, payload, stdinText, reviewer);
       const progressLog = reviewerProgressLog(parsed.progressLog, reviewer.id);
       const submission = await runReviewerChild({
@@ -325,8 +394,19 @@ export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readRev
         reviewer,
         progressLog,
         systemPrompt,
+        signal: options.signal,
+        emit,
+        quietProgress: parsed.outputFormat === "events-jsonl",
       });
-      return { ...submission, durationMs: Date.now() - reviewerStart };
+      const completed = { ...submission, durationMs: Date.now() - reviewerStart };
+      if (options.signal?.aborted) {
+        emit("reviewer.cancelled", { reviewerId: reviewer.id, message: "panel review cancelled" });
+      } else if (completed.result.verdictSource === "runtime_error") {
+        emit("reviewer.failed", { reviewerId: reviewer.id, message: completed.result.parseError ?? "reviewer failed" });
+      } else {
+        emit("reviewer.completed", { reviewerId: reviewer.id, submission: completed });
+      }
+      return completed;
     },
   );
 
@@ -336,7 +416,8 @@ export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readRev
   // back to the shared review model / Pi default. Exact matches never invoke
   // the adjudicator, so this stays cheap when there is nothing ambiguous.
   const adjudicatorModel = resolved.consensusModel ?? parsed.model ?? preset.model ?? undefined;
-  const matcher = new SemanticMatcher(createAdjudicator(config, adjudicatorModel));
+  emit("aggregation.started", {});
+  const matcher = new SemanticMatcher(createAdjudicator(config, adjudicatorModel, options.signal));
 
   const aggregate = await aggregatePanel({
     reviewers: submissions,
@@ -356,12 +437,19 @@ export async function runPanelReviewOnce(parsed: ParsedArgs, stdinText = readRev
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
   };
 
-  emitPanelFooter(panelMeta);
+  emit("panel.completed", { meta: panelMeta });
+  if (options.emitFooter !== false && parsed.outputFormat !== "events-jsonl") emitPanelFooter(panelMeta);
   return { meta: panelMeta, exitCode: reviewExitCode(panelMeta.status) };
 }
 
 /** CLI-compatible panel review entrypoint. */
 export async function runPanelReview(parsed: ParsedArgs): Promise<never> {
-  const result = await runPanelReviewOnce(parsed);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  process.once("SIGINT", abort);
+  process.once("SIGTERM", abort);
+  const result = await runPanelReviewOnce(parsed, readReviewStdin(), { signal: controller.signal });
+  process.removeListener("SIGINT", abort);
+  process.removeListener("SIGTERM", abort);
   process.exit(result.exitCode);
 }

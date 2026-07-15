@@ -183,7 +183,17 @@ export interface StreamEventEmitter {
   onText(chunk: string): void;
   /** Called for every semantic milestone (already formatted, ends with \n). */
   onMilestone(line: string): void;
+  /** Structured activity for renderers that need more than human milestone text. */
+  onActivity?: (event: JsonStreamActivity) => void;
 }
+
+export type JsonStreamActivity =
+  | { type: "turn.started"; turn: number }
+  | { type: "tool.started"; tool: string }
+  | { type: "tool.finished"; tool: string }
+  | { type: "text.delta"; text: string }
+  | { type: "usage"; usage: TokenUsage }
+  | { type: "agent.finished" };
 
 export interface StreamedUsage {
   usage?: TokenUsage;
@@ -274,12 +284,16 @@ export class JsonEventStream {
       }
       if (s.responseModel) this.responseModel = s.responseModel;
       else if (s.model && !this.responseModel) this.responseModel = s.model;
+      if (s.usage) this.emit.onActivity?.({ type: "usage", usage: { ...this.accumulate } });
     }
 
     // Text deltas -> forward to the human-readable terminal.
     if (t === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
       const delta = event.assistantMessageEvent.delta;
-      if (typeof delta === "string" && delta) this.emit.onText(delta);
+      if (typeof delta === "string" && delta) {
+        this.emit.onText(delta);
+        this.emit.onActivity?.({ type: "text.delta", text: delta });
+      }
     }
 
     // Semantic milestones (B).
@@ -291,18 +305,22 @@ export class JsonEventStream {
         this.turn += 1;
         this.inAssistantTurn = false;
         if (this.turn > 1) this.emit.onMilestone(`pi-review: turn ${this.turn}\n`);
+        this.emit.onActivity?.({ type: "turn.started", turn: this.turn });
         break;
       case "message_start":
         if (event.message?.role === "assistant") this.inAssistantTurn = true;
         break;
       case "tool_execution_start":
         this.emit.onMilestone(`pi-review: tool ${event.toolName ?? "unknown"} started\n`);
+        this.emit.onActivity?.({ type: "tool.started", tool: event.toolName ?? "unknown" });
         break;
       case "tool_execution_end":
         this.emit.onMilestone(`pi-review: tool ${event.toolName ?? "unknown"} finished\n`);
+        this.emit.onActivity?.({ type: "tool.finished", tool: event.toolName ?? "unknown" });
         break;
       case "agent_end":
         this.emit.onMilestone("pi-review: review finished\n");
+        this.emit.onActivity?.({ type: "agent.finished" });
         break;
     }
   }

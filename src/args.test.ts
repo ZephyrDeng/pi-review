@@ -85,6 +85,11 @@ test("panel options parse for review and loop", () => {
   assert.equal(panelParsed.consensus, "majority");
 });
 
+test("panel event output format parses as an opt-in machine contract", () => {
+  const parsed = parseReviewCommand(["--reviewers", "2", "--output-format", "events-jsonl", "--", "@src"]);
+  assert.equal(parsed.outputFormat, "events-jsonl");
+});
+
 test("reviewer count must be a positive integer within the limit", () => {
   for (const value of ["0", "-1", "1.5", "many"]) {
     assert.throws(

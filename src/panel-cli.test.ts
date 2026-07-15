@@ -218,3 +218,18 @@ test("named panel preset reviewer ids appear in supporting reviewer ids", (t) =>
   const cluster = (meta!.confirmedClusters as Array<{ supportingReviewerIds: string[] }>)[0]!;
   assert.deepEqual(cluster.supportingReviewerIds.sort(), ["correctness", "security"]);
 });
+
+test("panel events-jsonl emits only normalized lifecycle events and carries the final metadata", (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const fakePi = writeFakePi(tempDir);
+
+  const result = runPanelCli(fakePi, "agree-bug", ["--reviewers", "3", "--output-format", "events-jsonl"]);
+  assert.equal(result.status, 1, result.stderr);
+  const events = result.stdout.trim().split("\n").map((line) => JSON.parse(line) as { type: string; seq: number; meta?: { status?: string } });
+  assert.equal(events[0]?.type, "panel.started");
+  assert.deepEqual(events.map((event) => event.seq), events.map((_, index) => index + 1));
+  assert.equal(events.at(-1)?.type, "panel.completed");
+  assert.equal(events.at(-1)?.meta?.status, "has_findings");
+  assert.doesNotMatch(result.stdout, /PI_REVIEW_META_JSON|── pi-review/);
+});

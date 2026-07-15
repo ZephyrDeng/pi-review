@@ -104,6 +104,20 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。
 
+### Pi 实时进度与事件回放
+
+Pi 中执行 `/rv @target` 会调用原生 `pi_review` 工具。每位 reviewer 都有独立实时行，展示生命周期、当前工具、耗时和 token 用量；按 `Ctrl+O` 可展开查看有界活动记录、最终发现和溯源。
+
+渲染器可直接消费版本化事件流：
+
+```bash
+pi-review --panel code-experts --output-format events-jsonl -- @src
+```
+
+该模式只向 stdout 输出 `ReviewEvent v1` JSONL。每次运行拥有一个 `runId` 和单调递增的 `seq`，活动文本会脱敏和截断，结尾固定为一条携带 `PanelReviewMeta` 的 `panel.completed` 事件。`createPanelViewState()` 与 `reducePanelEvent()` 支持确定性的实时归约和回放。
+
+Panel reviewer 固定使用 `read,grep,find,ls` 白名单；shell 与可变更工具会在启动前被拒绝。`Ctrl+C` 会取消 reviewer 与 adjudicator 进程树，输出取消事件并生成一条 blocked 最终事件。
+
 ## Pi 包：`/rv` 命令
 
 安装 Pi 包后可在 Pi 里使用 `/rv`：

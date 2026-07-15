@@ -169,6 +169,20 @@ Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication cal
 
 A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields.
 
+### Live Pi progress and event replay
+
+In Pi, `/rv @target` calls the native `pi_review` tool. It renders each reviewer as an independent live row with lifecycle state, active tool, elapsed time, and token usage; expand the tool result with `Ctrl+O` for bounded activity and final findings/provenance.
+
+Renderer adapters can consume the stable, versioned event stream directly:
+
+```bash
+pi-review --panel code-experts --output-format events-jsonl -- @src
+```
+
+This mode writes only `ReviewEvent v1` JSONL to stdout. Events have one `runId`, monotonically increasing `seq`, bounded/redacted activity text, and end in exactly one `panel.completed` event containing the same `PanelReviewMeta` as the default CLI path. The reducer is exported as `createPanelViewState()` and `reducePanelEvent()` for deterministic live delivery and replay.
+
+Panel reviewers use the hard allowlist `read,grep,find,ls`. Shell and mutation-capable tools are rejected before a reviewer starts. `Ctrl+C` cancels the reviewer and adjudicator process trees, emits cancellation lifecycle events, and produces one blocked final event.
+
 ## Output Format
 
 Every review produces Markdown with these sections:
@@ -284,6 +298,7 @@ pi-review models [search]
 | `--min-agree <n>` | Panel: minimum reviewers for quorum (default: `2`; quorum only) |
 | `--consensus-model <model>` | Panel: model for semantic consensus adjudication |
 | `--concurrency <n>` | Panel: bounded reviewer concurrency (default: reviewer count) |
+| `--output-format events-jsonl` | Panel: normalized `ReviewEvent v1` JSONL for renderer adapters |
 
 Session flags (`--keep-session`, `--continue`, `--name`) are unsupported by `loop` and panel in v1; invalid combinations print usage and exit `2`.
 

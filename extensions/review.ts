@@ -10,6 +10,7 @@ import {
   RV_COMPLETIONS,
   validateRvParsed,
 } from "./rv-prompts.js";
+import { registerPanelReviewTool } from "./panel-tool.js";
 
 /**
  * Captured at `session_start` so the synchronous-ish `getArgumentCompletions`
@@ -68,6 +69,7 @@ function toModelInfo(m: {
 }
 
 export default function piReviewExtension(pi: ExtensionAPI) {
+  registerPanelReviewTool(pi);
   pi.on("session_start", (_event, ctx) => {
     try {
       const available = ctx.modelRegistry?.getAvailable?.() ?? [];

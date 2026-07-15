@@ -13,6 +13,7 @@ export const DEFAULT_STREAM_CAPTURE_LIMIT = 50 * 1024 * 1024;
 type SpawnCommon = {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
 };
 
 function appendBoundedTail(current: string, chunk: string, limit: number): string {
@@ -59,6 +60,8 @@ export async function spawnStreamingChild(
       cwd: options.cwd,
       env: options.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // A separate process group lets cancellation reach Pi's descendants too.
+      detached: process.platform !== "win32",
     };
     const child = spawn(command, argv, spawnOpts);
     let stdout = "";
@@ -68,8 +71,22 @@ export async function spawnStreamingChild(
     const finish = (result: ChildRunResult) => {
       if (settled) return;
       settled = true;
+      options.signal?.removeEventListener("abort", abort);
       resolve(result);
     };
+
+    const abort = () => {
+      if (child.pid === undefined || child.killed) return;
+      try {
+        if (process.platform === "win32") child.kill("SIGTERM");
+        else process.kill(-child.pid, "SIGTERM");
+      } catch {
+        child.kill("SIGTERM");
+      }
+    };
+
+    if (options.signal?.aborted) abort();
+    else options.signal?.addEventListener("abort", abort, { once: true });
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
