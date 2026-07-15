@@ -74,6 +74,185 @@ async function mustSelect(ui: InteractiveUi, title: string, options: string[]): 
   return choice ?? CANCEL;
 }
 
+/** At or below this model count, the wizard shows a simple flat ranked list.
+ *  Above it, the flat list gets hard to navigate, so the wizard first offers a
+ *  provider browser and a search box (Pi's `select` dialog has no built-in
+ *  search or grouping, so we compose it from `select` + `input`). */
+const MODEL_PICKER_THRESHOLD = 8;
+
+/** Case-insensitive, separator-insensitive match used by the search path.
+ *  Mirrors the completion matcher so "gpt55", "gpt-5.5", "openai/gpt-5.5" all hit. */
+function modelMatchesQuery(m: ModelInfo, query: string): boolean {
+  const q = query.toLowerCase();
+  const label = m.label.toLowerCase();
+  const id = m.id.toLowerCase();
+  const provider = m.provider.toLowerCase();
+  const labelKey = label.replace(/[^a-z0-9/]+/g, "");
+  const idKey = id.replace(/[^a-z0-9]+/g, "");
+  const qKey = q.replace(/[^a-z0-9/]+/g, "");
+  return (
+    label.startsWith(q) ||
+    label.includes(q) ||
+    id.startsWith(q) ||
+    provider.startsWith(q) ||
+    provider.includes(q) ||
+    labelKey.includes(qKey) ||
+    idKey.includes(qKey.replace(/\//g, ""))
+  );
+}
+
+function rankedModels(models: ModelInfo[], mode: string): ModelInfo[] {
+  if (models.length === 0) return [];
+  return rankModelsWithPresets(models, profileFor(mode), loadReviewModelPriorities());
+}
+
+/**
+ * Pick a model label through dialogs.
+ * @returns the chosen label; `CANCEL` if the user escapes; `undefined` if they pick skip.
+ *
+ * With few models this is a flat ranked list (optionally with a Skip entry).
+ * With many models it first asks how to pick — browse by provider, search, or
+ * the full ranked list — so a long catalog stays navigable without scrolling
+ * dozens of rows.
+ */
+async function pickModelLabel(
+  ui: InteractiveUi,
+  models: ModelInfo[],
+  mode: string,
+  locale: RvLocale,
+  title: string,
+  allowSkip: boolean,
+): Promise<string | typeof CANCEL | undefined> {
+  const zh = locale === "zh";
+  const ranked = rankedModels(models, mode);
+  if (ranked.length === 0) return CANCEL;
+
+  const labels = ranked.map((m) => m.label);
+  const skipOption = allowSkip ? [zh ? "跳过（用 Pi 默认）" : "Skip (Pi default)"] : [];
+
+  // Simple case: small catalog — flat ranked list, optionally with skip.
+  if (ranked.length <= MODEL_PICKER_THRESHOLD) {
+    const pick = await mustSelect(ui, title, [...skipOption, ...labels]);
+    if (pick === CANCEL) return CANCEL;
+    return stripSkip(pick, locale);
+  }
+
+  // Many models — offer provider browse / search / full ranked list.
+  const methodOptions = [
+    zh ? "按 provider 浏览（↑↓ 切换 provider，回车进入模型）" : "Browse by provider (arrows switch provider, enter drills in)",
+    zh ? "搜索模型（输入 provider 或 model 关键词）" : "Search models (type a provider or model keyword)",
+    zh ? "按推荐排序查看全部" : "Ranked list (all models)",
+    ...skipOption,
+  ];
+  const method = await mustSelect(ui, title, methodOptions);
+  if (method === CANCEL) return CANCEL;
+  if (allowSkip && stripSkip(method, locale) === undefined) return undefined;
+
+  // Dispatch by stable prefix — the search option text mentions "provider" as a
+  // hint, so check Search before the provider branch to avoid misrouting.
+  if (method.startsWith("Search") || method.startsWith("搜索")) {
+    return searchModel(ui, ranked, locale, title);
+  }
+  if (method.startsWith("Browse") || method.startsWith("按 provider")) {
+    return browseByProvider(ui, ranked, locale, title);
+  }
+  // Ranked list (all) — show every model; Escape to cancel.
+  const allPick = await mustSelect(ui, title, labels);
+  if (allPick === CANCEL) return CANCEL;
+  return allPick;
+}
+
+/** Provider browser: pick a provider, then a model under it. The model list
+ *  includes a "← Switch provider" entry so the user can jump back and pick an
+ *  adjacent provider (the closest affordance to left/right switching that the
+ *  flat `select` dialog supports). The previously chosen provider is marked
+ *  with ▸ so the user sees where they were. */
+async function browseByProvider(
+  ui: InteractiveUi,
+  ranked: ModelInfo[],
+  locale: RvLocale,
+  title: string,
+): Promise<string | typeof CANCEL> {
+  const zh = locale === "zh";
+  const byProvider = new Map<string, ModelInfo[]>();
+  for (const m of ranked) {
+    const list = byProvider.get(m.provider) ?? [];
+    list.push(m);
+    byProvider.set(m.provider, list);
+  }
+  // Biggest vendors first, then alphabetical — keeps the common providers near the top.
+  const providers = [...byProvider.entries()].sort(
+    (a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]),
+  );
+
+  let lastIdx = 0;
+  for (;;) {
+    const providerOptions = providers.map(([p, list], i) => {
+      const marker = i === lastIdx ? "▸ " : "  ";
+      return `${marker}${p} (${list.length})`;
+    });
+    const provPick = await mustSelect(
+      ui,
+      zh ? `${title} · 选择 provider（↑↓ 切换，回车进入）` : `${title} · pick provider (arrows to switch)`,
+      providerOptions,
+    );
+    if (provPick === CANCEL) return CANCEL;
+    const idx = Math.max(0, providerOptions.indexOf(provPick));
+    lastIdx = idx;
+    const provider = providers[idx][0];
+    const modelLabels = providers[idx][1].map((m) => m.label);
+
+    const backEntry = zh ? "← 切换 provider" : "← Switch provider";
+    const modelPick = await mustSelect(
+      ui,
+      zh ? `${title} · ${provider}（共 ${modelLabels.length} 个）` : `${title} · ${provider} (${modelLabels.length} models)`,
+      [backEntry, ...modelLabels],
+    );
+    if (modelPick === CANCEL) return CANCEL;
+    if (modelPick === backEntry) continue;
+    return modelPick;
+  }
+}
+
+/** Search flow: type a keyword, then pick from the filtered list. The filtered
+ *  list includes a "← Search again" entry; empty matches notify and re-prompt. */
+async function searchModel(
+  ui: InteractiveUi,
+  ranked: ModelInfo[],
+  locale: RvLocale,
+  title: string,
+): Promise<string | typeof CANCEL> {
+  const zh = locale === "zh";
+  for (;;) {
+    const q = await ui.input(
+      zh
+        ? `${title} · 搜索（provider 或 model 关键词，回车=显示全部）`
+        : `${title} · search (provider or model keyword; enter = all)`,
+      zh ? "例如：claude / gpt / anthropic" : "e.g. claude / gpt / anthropic",
+    );
+    if (q === undefined) return CANCEL; // user escaped the input
+    const query = q.trim().toLowerCase();
+    const filtered = query ? ranked.filter((m) => modelMatchesQuery(m, query)) : ranked;
+    if (filtered.length === 0) {
+      ui.notify(
+        zh ? `没有匹配 "${query}" 的模型，请换个关键词` : `No models match "${query}"; try another keyword`,
+        "warning",
+      );
+      continue;
+    }
+    const backEntry = zh ? "← 重新搜索" : "← Search again";
+    const labels = filtered.map((m) => m.label);
+    const pick = await mustSelect(
+      ui,
+      zh ? `${title} · 搜索结果（${labels.length} 个）` : `${title} · results (${labels.length})`,
+      [backEntry, ...labels],
+    );
+    if (pick === CANCEL) return CANCEL;
+    if (pick === backEntry) continue;
+    return pick;
+  }
+}
+
 /**
  * Build a fully populated RvParsed via dialogs.
  * Returns undefined if the user cancels any required step.
@@ -223,11 +402,6 @@ export async function runRvInteractiveWizard(
         : [];
 
   const labels = rankedModelLabels(models, mode);
-  const sharedDefault =
-    seed.model ??
-    (labels[0]
-      ? undefined
-      : undefined);
 
   if (ids.length > 0) {
     const assignEach = await ui.confirm(
@@ -252,28 +426,27 @@ export async function runRvInteractiveWizard(
         if (labels.length === 0) {
           ui.notify(zh ? "当前没有可用模型目录，请先 /rv-models" : "No model catalog available; run /rv-models first", "warning");
         } else {
-          const pick = await mustSelect(ui, zh ? "共用模型" : "Shared model", labels.slice(0, 40));
+          const pick = await pickModelLabel(ui, models, mode, locale, zh ? "共用模型" : "Shared model", false);
           if (pick === CANCEL) return undefined;
-          const m = modelByLabel(models, pick);
-          const thinkingPick = await mustSelect(
-            ui,
-            zh ? `思考强度（${pick}）` : `Thinking (${pick})`,
-            thinkingOptions(m, locale),
-          );
-          if (thinkingPick === CANCEL) return undefined;
-          const thinking = stripSkip(thinkingPick, locale);
-          const token = thinking ? `${pick}:${thinking}` : pick;
-          for (const id of ids) reviewerModels.push(`${id}=${token}`);
+          if (pick !== undefined) {
+            const m = modelByLabel(models, pick);
+            const thinkingPick = await mustSelect(
+              ui,
+              zh ? `思考强度（${pick}）` : `Thinking (${pick})`,
+              thinkingOptions(m, locale),
+            );
+            if (thinkingPick === CANCEL) return undefined;
+            const thinking = stripSkip(thinkingPick, locale);
+            const token = thinking ? `${pick}:${thinking}` : pick;
+            for (const id of ids) reviewerModels.push(`${id}=${token}`);
+          }
         }
       } else {
         for (const id of ids) {
           if (labels.length === 0) break;
-          const pick = await mustSelect(
-            ui,
-            zh ? `模型 · ${id}` : `Model · ${id}`,
-            labels.slice(0, 40),
-          );
+          const pick = await pickModelLabel(ui, models, mode, locale, zh ? `模型 · ${id}` : `Model · ${id}`, false);
           if (pick === CANCEL) return undefined;
+          if (pick === undefined) continue; // defensive: allowSkip=false never returns undefined here
           const m = modelByLabel(models, pick);
           const thinkingPick = await mustSelect(
             ui,
@@ -287,14 +460,10 @@ export async function runRvInteractiveWizard(
       }
     } else if (!seed.model && labels.length > 0) {
       // Shared default model when not assigning per-reviewer
-      const pick = await mustSelect(ui, zh ? "默认模型（全体 reviewer）" : "Default model (all reviewers)", [
-        ...(zh ? ["跳过（用 Pi 默认）"] : ["Skip (Pi default)"]),
-        ...labels.slice(0, 40),
-      ]);
+      const pick = await pickModelLabel(ui, models, mode, locale, zh ? "默认模型（全体 reviewer）" : "Default model (all reviewers)", true);
       if (pick === CANCEL) return undefined;
-      const model = stripSkip(pick, locale);
-      if (model) {
-        const m = modelByLabel(models, model);
+      if (pick !== undefined) {
+        const m = modelByLabel(models, pick);
         const thinkingPick = await mustSelect(
           ui,
           zh ? "默认思考强度" : "Default thinking",
@@ -302,21 +471,17 @@ export async function runRvInteractiveWizard(
         );
         if (thinkingPick === CANCEL) return undefined;
         const thinking = stripSkip(thinkingPick, locale);
-        seed.model = model;
+        seed.model = pick;
         if (thinking) seed.thinking = thinking;
       }
     }
   } else if (!seed.model && labels.length > 0) {
     // Single-reviewer path
-    const pick = await mustSelect(ui, zh ? "模型" : "Model", [
-      ...(zh ? ["跳过（用 Pi 默认）"] : ["Skip (Pi default)"]),
-      ...labels.slice(0, 40),
-    ]);
+    const pick = await pickModelLabel(ui, models, mode, locale, zh ? "模型" : "Model", true);
     if (pick === CANCEL) return undefined;
-    const model = stripSkip(pick, locale);
-    if (model) {
-      seed.model = model;
-      const m = modelByLabel(models, model);
+    if (pick !== undefined) {
+      seed.model = pick;
+      const m = modelByLabel(models, pick);
       const thinkingPick = await mustSelect(ui, zh ? "思考强度" : "Thinking", thinkingOptions(m, locale));
       if (thinkingPick === CANCEL) return undefined;
       const thinking = stripSkip(thinkingPick, locale);

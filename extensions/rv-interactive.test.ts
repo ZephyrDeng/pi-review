@@ -30,6 +30,27 @@ const models: ModelInfo[] = [
   },
 ];
 
+// 12 models across 3 providers (5/4/3) — above the MODEL_PICKER_THRESHOLD of 8,
+// so the wizard offers provider browse / search / ranked list / skip.
+// code-profile presets match claude-sonnet-4-5 and gpt-5.6-luna (ranked first).
+const manyModels: ModelInfo[] = [
+  // anthropic (5)
+  { provider: "anthropic", id: "claude-sonnet-4-5", label: "anthropic/claude-sonnet-4-5", name: "sonnet", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "anthropic", id: "claude-opus-4", label: "anthropic/claude-opus-4", name: "opus", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "anthropic", id: "claude-haiku-5", label: "anthropic/claude-haiku-5", name: "haiku", reasoning: false, contextWindow: 200000, thinkingLevels: [] },
+  { provider: "anthropic", id: "claude-fable-5", label: "anthropic/claude-fable-5", name: "fable", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "anthropic", id: "claude-solomon", label: "anthropic/claude-solomon", name: "solomon", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  // openai (4)
+  { provider: "openai", id: "gpt-5.6-sol", label: "openai/gpt-5.6-sol", name: "sol", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "openai", id: "gpt-5.6-luna", label: "openai/gpt-5.6-luna", name: "luna", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "openai", id: "gpt-5.5", label: "openai/gpt-5.5", name: "gpt55", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "openai", id: "o3", label: "openai/o3", name: "o3", reasoning: true, contextWindow: 200000, thinkingLevels: ["high"] },
+  // google (3)
+  { provider: "google", id: "gemini-3-pro", label: "google/gemini-3-pro", name: "pro", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "xhigh"] },
+  { provider: "google", id: "gemini-3-flash", label: "google/gemini-3-flash", name: "flash", reasoning: true, contextWindow: 200000, thinkingLevels: ["high", "medium"] },
+  { provider: "google", id: "gemma-3", label: "google/gemma-3", name: "gemma", reasoning: false, contextWindow: 200000, thinkingLevels: [] },
+];
+
 function seed(over: Partial<RvParsed> = {}): RvParsed {
   return {
     strategy: "loop",
@@ -240,4 +261,173 @@ test("wizard can select until-clean with a hard budget", async () => {
   assert.equal(result!.until, "clean");
   assert.equal(result!.maxRounds, 10);
   assert.equal(result!.panel, "code-experts");
+});
+
+// --- Model picker with a large catalog (> MODEL_PICKER_THRESHOLD) ---
+// These exercise the provider browse / search / ranked-list / skip chooser that
+// replaces the old flat `labels.slice(0, 40)` list. With <= 8 models the wizard
+// still uses the flat list (covered by the tests above with the 2-model fixture).
+
+test("wizard model picker browses by provider for a large catalog", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      "Browse by provider (arrows switch provider, enter drills in)",
+      "▸ anthropic (5)",
+      "anthropic/claude-sonnet-4-5",
+      "xhigh",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.reviewers, 1);
+  assert.equal(result!.panel, undefined);
+  assert.equal(result!.model, "anthropic/claude-sonnet-4-5");
+  assert.equal(result!.thinking, "xhigh");
+  // The provider picker was actually visited.
+  assert.ok(ui.log.some((e) => e.startsWith("select:Model · pick provider")), ui.log.join("\n"));
+});
+
+test("wizard model picker can switch providers via the back entry", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      "Browse by provider (arrows switch provider, enter drills in)",
+      "▸ anthropic (5)",
+      "← Switch provider",
+      "  openai (4)",
+      "openai/gpt-5.6-luna",
+      "xhigh",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, "openai/gpt-5.6-luna");
+  assert.equal(result!.thinking, "xhigh");
+  // Provider list was shown twice (initial + after switching back).
+  const providerPicks = ui.log.filter((e) => e.startsWith("select:Model · pick provider"));
+  assert.equal(providerPicks.length, 2, ui.log.join("\n"));
+});
+
+test("wizard model picker searches by keyword", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src", "claude"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      "Search models (type a provider or model keyword)",
+      "anthropic/claude-opus-4",
+      "high",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, "anthropic/claude-opus-4");
+  assert.equal(result!.thinking, "high");
+  assert.ok(ui.log.some((e) => e.startsWith("input:Model · search")), ui.log.join("\n"));
+  assert.ok(ui.log.some((e) => e.startsWith("select:Model · results (5)")), ui.log.join("\n"));
+});
+
+test("wizard model picker re-prompts when a search has no matches", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src", "zzz", "claude"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      "Search models (type a provider or model keyword)",
+      "anthropic/claude-sonnet-4-5",
+      "xhigh",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, "anthropic/claude-sonnet-4-5");
+  assert.ok(ui.log.some((e) => e.includes(`No models match "zzz"`)), ui.log.join("\n"));
+  // Search input was called twice (first miss + retry).
+  const searchInputs = ui.log.filter((e) => e.startsWith("input:Model · search"));
+  assert.equal(searchInputs.length, 2, ui.log.join("\n"));
+});
+
+test("wizard model picker can use the full ranked list", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      "Ranked list (all models)",
+      "openai/gpt-5.6-luna",
+      "xhigh",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, "openai/gpt-5.6-luna");
+  assert.equal(result!.thinking, "xhigh");
+});
+
+test("wizard model picker supports skip for a large catalog", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "code review (code)",
+      "Single reviewer non-panel (no consensus; shell single review)",
+      "Skip (Pi default)",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models: manyModels,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.model, undefined);
+  assert.equal(result!.thinking, undefined);
 });
