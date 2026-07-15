@@ -140,10 +140,10 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
           emit("reviewer.turn.started", { reviewerId: reviewer.id, turn: event.turn });
           break;
         case "tool.started":
-          emit("reviewer.tool.started", { reviewerId: reviewer.id, tool: event.tool });
+          emit("reviewer.tool.started", { reviewerId: reviewer.id, tool: event.tool, ...(event.summary ? { summary: event.summary } : {}) });
           break;
         case "tool.finished":
-          emit("reviewer.tool.finished", { reviewerId: reviewer.id, tool: event.tool });
+          emit("reviewer.tool.finished", { reviewerId: reviewer.id, tool: event.tool, ...(event.summary ? { summary: event.summary } : {}) });
           break;
         case "text.delta":
           emit("reviewer.text.delta", { reviewerId: reviewer.id, text: event.text });

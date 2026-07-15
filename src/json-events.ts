@@ -10,6 +10,7 @@ interface AssistantLikeMessage {
 }
 
 import type { TokenUsage } from "./types.js";
+import { redactReviewEventText } from "./review-events.js";
 
 export interface ExtractedFinalText {
   text: string;
@@ -220,11 +221,37 @@ export interface StreamEventEmitter {
 
 export type JsonStreamActivity =
   | { type: "turn.started"; turn: number }
-  | { type: "tool.started"; tool: string }
-  | { type: "tool.finished"; tool: string }
+  | { type: "tool.started"; tool: string; summary?: string }
+  | { type: "tool.finished"; tool: string; summary?: string }
   | { type: "text.delta"; text: string }
   | { type: "usage"; usage: TokenUsage }
   | { type: "agent.finished" };
+
+/** Compact, redacted tool args for renderer-visible activity rows. */
+export function summarizeToolArgs(toolName: string, args: Record<string, unknown> | undefined): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const pathValue = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : undefined;
+  const pattern = typeof args.pattern === "string" ? args.pattern : undefined;
+  let summary: string | undefined;
+  switch (toolName) {
+    case "read":
+    case "ls":
+      summary = pathValue;
+      break;
+    case "grep":
+      if (pattern) summary = `/${pattern}/${pathValue ? ` in ${pathValue}` : ""}`;
+      break;
+    case "find":
+      if (pattern) summary = `${pattern}${pathValue ? ` in ${pathValue}` : ""}`;
+      break;
+    default: {
+      const raw = JSON.stringify(args);
+      summary = raw.length > 80 ? `${raw.slice(0, 79)}…` : raw;
+      break;
+    }
+  }
+  return summary ? redactReviewEventText(summary) : undefined;
+}
 
 export interface StreamedUsage {
   usage?: TokenUsage;
@@ -234,6 +261,8 @@ export interface StreamedUsage {
 interface StreamLikeEvent {
   type?: string;
   toolName?: string;
+  toolCallId?: string;
+  args?: Record<string, unknown>;
   message?: UsageMessageLike;
   messages?: UsageMessageLike[];
   assistantMessageEvent?: {
@@ -258,6 +287,8 @@ export class JsonEventStream {
   private responseModel: string | undefined;
   private turn = 0;
   private inAssistantTurn = false;
+  /** Pi end events omit args; keep start summaries keyed by toolCallId. */
+  private readonly toolSummaries = new Map<string, string>();
 
   constructor(emit: StreamEventEmitter) {
     this.emit = emit;
@@ -361,14 +392,23 @@ export class JsonEventStream {
       case "message_start":
         if (event.message?.role === "assistant") this.inAssistantTurn = true;
         break;
-      case "tool_execution_start":
-        this.emit.onMilestone(`pi-review: tool ${event.toolName ?? "unknown"} started\n`);
-        this.emit.onActivity?.({ type: "tool.started", tool: event.toolName ?? "unknown" });
+      case "tool_execution_start": {
+        const tool = event.toolName ?? "unknown";
+        const summary = summarizeToolArgs(tool, event.args);
+        if (event.toolCallId && summary) this.toolSummaries.set(event.toolCallId, summary);
+        this.emit.onMilestone(`pi-review: tool ${tool} started\n`);
+        this.emit.onActivity?.({ type: "tool.started", tool, ...(summary ? { summary } : {}) });
         break;
-      case "tool_execution_end":
-        this.emit.onMilestone(`pi-review: tool ${event.toolName ?? "unknown"} finished\n`);
-        this.emit.onActivity?.({ type: "tool.finished", tool: event.toolName ?? "unknown" });
+      }
+      case "tool_execution_end": {
+        const tool = event.toolName ?? "unknown";
+        const summary = (event.toolCallId ? this.toolSummaries.get(event.toolCallId) : undefined)
+          ?? summarizeToolArgs(tool, event.args);
+        if (event.toolCallId) this.toolSummaries.delete(event.toolCallId);
+        this.emit.onMilestone(`pi-review: tool ${tool} finished\n`);
+        this.emit.onActivity?.({ type: "tool.finished", tool, ...(summary ? { summary } : {}) });
         break;
+      }
       case "agent_end":
         this.emit.onMilestone("pi-review: review finished\n");
         this.emit.onActivity?.({ type: "agent.finished" });

@@ -27,8 +27,23 @@ test("panel reducer produces the same final state during live delivery and repla
   assert.deepEqual(replay, live);
   assert.equal(live.reviewers.security?.status, "completed");
   assert.equal(live.reviewers.security?.activeTool, undefined);
+  assert.equal(live.reviewers.security?.activeToolSummary, undefined);
   assert.equal(live.aggregate.completed, 1);
   assert.equal(live.phase, "aggregating");
+});
+
+test("panel reducer keeps the active tool summary while a tool is running", () => {
+  let state = reducePanelEvent(createPanelViewState(), event("panel.started", 1, {
+    target: "@src",
+    mode: "code",
+    reviewers: [{ reviewerId: "security", role: "Security", model: null }],
+  }));
+  state = reducePanelEvent(state, event("reviewer.tool.started", 2, { reviewerId: "security", tool: "read", summary: "src/panel.ts" }));
+  assert.equal(state.reviewers.security?.activeTool, "read");
+  assert.equal(state.reviewers.security?.activeToolSummary, "src/panel.ts");
+  state = reducePanelEvent(state, event("reviewer.tool.finished", 3, { reviewerId: "security", tool: "read" }));
+  assert.equal(state.reviewers.security?.activeTool, undefined);
+  assert.equal(state.reviewers.security?.activeToolSummary, undefined);
 });
 
 test("terminal panel usage reuses the CLI aggregation semantics", () => {

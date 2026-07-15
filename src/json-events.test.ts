@@ -297,6 +297,30 @@ test("JsonEventStream forwards text deltas and emits milestones", () => {
   assert.ok(usage.responseModel === "fake/model" || usage.responseModel === undefined);
 });
 
+test("JsonEventStream attaches a redacted tool summary from tool args", () => {
+  const activities: Array<{ type: string; tool?: string; summary?: string }> = [];
+  const stream = new JsonEventStream({
+    onText: () => {},
+    onMilestone: () => {},
+    onActivity: (event) => {
+      if (event.type === "tool.started" || event.type === "tool.finished") activities.push(event);
+    },
+  });
+  stream.feed(lines(
+    { type: "tool_execution_start", toolCallId: "call-1", toolName: "read", args: { path: "src/panel.ts" } },
+    { type: "tool_execution_end", toolCallId: "call-1", toolName: "read", result: {}, isError: false },
+    { type: "tool_execution_start", toolCallId: "call-2", toolName: "grep", args: { pattern: "token=sk-secret-value", path: "src" } },
+    { type: "tool_execution_end", toolCallId: "call-2", toolName: "grep", result: {}, isError: false },
+  ));
+  stream.flush();
+  assert.deepEqual(activities, [
+    { type: "tool.started", tool: "read", summary: "src/panel.ts" },
+    { type: "tool.finished", tool: "read", summary: "src/panel.ts" },
+    { type: "tool.started", tool: "grep", summary: "/token=[REDACTED] in src" },
+    { type: "tool.finished", tool: "grep", summary: "/token=[REDACTED] in src" },
+  ]);
+});
+
 test("JsonEventStream accumulates token usage from streamed events", () => {
   const stream = new JsonEventStream({ onText: () => {}, onMilestone: () => {} });
   stream.feed(lines(

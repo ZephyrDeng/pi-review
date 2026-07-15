@@ -25,15 +25,19 @@ function statusSymbol(status: string): string {
   return status === "completed" ? "✓" : status === "failed" || status === "cancelled" ? "✗" : status === "running" ? "●" : "○";
 }
 
-function compactText(state: PanelViewState, theme: Theme): string {
-  const elapsed = state.startedAt ? duration((state.completedAt ?? Date.now()) - state.startedAt) : "0s";
+function compactText(state: PanelViewState, theme: Theme, now = Date.now()): string {
+  const elapsed = state.startedAt ? duration((state.completedAt ?? now) - state.startedAt) : "0s";
   const progress = `${state.aggregate.completed}/${state.aggregate.total} completed`;
   const header = theme.fg("toolTitle", theme.bold(`pi-review panel ${progress}`)) + theme.fg("muted", ` · ${state.phase} · ${elapsed} · ${usageTokens(state)}`);
   const rows = Object.values(state.reviewers).map((reviewer) => {
+    const model = reviewer.model ? ` · ${reviewer.model}` : "";
+    const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
     const active = reviewer.activeTool ? ` · ${reviewer.activeTool}` : "";
-    const elapsed = reviewer.startedAt ? ` · ${duration((reviewer.completedAt ?? Date.now()) - reviewer.startedAt)}` : "";
+    const activeSummary = reviewer.activeToolSummary ? ` · ${reviewer.activeToolSummary}` : "";
+    const reviewerElapsed = reviewer.startedAt ? ` · ${duration((reviewer.completedAt ?? now) - reviewer.startedAt)}` : "";
+    const idle = reviewer.status === "running" && reviewer.activityAt ? ` · idle ${duration(now - reviewer.activityAt)}` : "";
     const tokens = reviewer.usage ? ` · ${reviewer.usage.totalTokens.toLocaleString()} tok` : "";
-    return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${active}${elapsed}${tokens}`)}`;
+    return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${model}${thinking}${active}${activeSummary}${reviewerElapsed}${idle}${tokens}`)}`;
   });
   return [header, ...rows].join("\n");
 }
@@ -43,12 +47,19 @@ function finalMarkdown(state: PanelViewState): string {
   if (!meta) return "";
   const confirmed = meta.confirmedClusters.map((finding) => `- ${finding.summary} (${finding.supportingReviewerIds.join(", ")})`);
   const advisories = meta.advisories.map((finding) => `- ${finding.summary} (${finding.supportingReviewerIds.join(", ")})`);
+  const provenance = meta.reviewers.map((reviewer) => {
+    const role = reviewer.role ? ` · ${reviewer.role}` : "";
+    const model = reviewer.model ? ` · ${reviewer.model}` : "";
+    const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
+    return `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status}`;
+  });
   return [
     "### Panel result",
     `Health: ${meta.panelHealth}; status: ${meta.status}.`,
     confirmed.length ? `### Confirmed findings\n${confirmed.join("\n")}` : "### Confirmed findings\nNone.",
-    advisories.length ? `### Advisories\n${advisories.join("\n")}` : "",
-  ].filter(Boolean).join("\n\n");
+    advisories.length ? `### Advisories\n${advisories.join("\n")}` : "### Advisories\nNone.",
+    provenance.length ? `### Provenance\n${provenance.join("\n")}` : "### Provenance\nNone.",
+  ].join("\n\n");
 }
 
 export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component): Component {

@@ -10,6 +10,7 @@ export type PanelPhase = "idle" | "running" | "aggregating" | "completed";
 export interface PanelReviewerView extends ReviewerIdentity {
   status: ReviewerViewStatus;
   activeTool?: string;
+  activeToolSummary?: string;
   activityAt?: number;
   startedAt?: number;
   completedAt?: number;
@@ -102,10 +103,10 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
       reviewer = addActivity({ ...previous, status: "running", turns: event.turn, activityAt: event.at }, `turn ${event.turn}`);
       break;
     case "reviewer.tool.started":
-      reviewer = addActivity({ ...previous, status: "running", activeTool: event.tool, activityAt: event.at }, `tool ${event.tool}${event.summary ? `: ${event.summary}` : ""}`);
+      reviewer = addActivity({ ...previous, status: "running", activeTool: event.tool, activeToolSummary: event.summary, activityAt: event.at }, `tool ${event.tool}${event.summary ? `: ${event.summary}` : ""}`);
       break;
     case "reviewer.tool.finished":
-      reviewer = addActivity({ ...previous, status: "running", activeTool: undefined, activityAt: event.at }, `tool ${event.tool} finished${event.summary ? `: ${event.summary}` : ""}`);
+      reviewer = addActivity({ ...previous, status: "running", activeTool: undefined, activeToolSummary: undefined, activityAt: event.at }, `tool ${event.tool} finished${event.summary ? `: ${event.summary}` : ""}`);
       break;
     case "reviewer.text.delta":
       reviewer = addActivity({ ...previous, status: "running", activityAt: event.at }, event.text);
@@ -114,13 +115,13 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
       reviewer = { ...previous, usage: event.usage, activityAt: event.at };
       break;
     case "reviewer.completed":
-      reviewer = addActivity({ ...previous, status: "completed", activeTool: undefined, completedAt: event.at, activityAt: event.at, usage: event.submission.usage ?? previous.usage, submission: event.submission }, "review completed");
+      reviewer = addActivity({ ...previous, status: "completed", activeTool: undefined, activeToolSummary: undefined, completedAt: event.at, activityAt: event.at, usage: event.submission.usage ?? previous.usage, submission: event.submission }, "review completed");
       break;
     case "reviewer.failed":
-      reviewer = addActivity({ ...previous, status: "failed", activeTool: undefined, completedAt: event.at, activityAt: event.at, error: event.message }, event.message);
+      reviewer = addActivity({ ...previous, status: "failed", activeTool: undefined, activeToolSummary: undefined, completedAt: event.at, activityAt: event.at, error: event.message }, event.message);
       break;
     case "reviewer.cancelled":
-      reviewer = addActivity({ ...previous, status: "cancelled", activeTool: undefined, completedAt: event.at, activityAt: event.at, ...(event.message ? { error: event.message } : {}) }, event.message ?? "review cancelled");
+      reviewer = addActivity({ ...previous, status: "cancelled", activeTool: undefined, activeToolSummary: undefined, completedAt: event.at, activityAt: event.at, ...(event.message ? { error: event.message } : {}) }, event.message ?? "review cancelled");
       break;
   }
   next = { ...next, reviewers: { ...state.reviewers, [reviewerId]: reviewer } };
