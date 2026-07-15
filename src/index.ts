@@ -8,7 +8,7 @@ export { runPanelReview, runPanelReviewOnce, emitPanelFooter } from "./panel.js"
 export { spawnStreamingChild } from "./child-process.js";
 export { createPanelViewState, reducePanelEvent } from "./panel-view.js";
 export type { PanelViewState, PanelReviewerView, PanelPhase, ReviewerViewStatus } from "./panel-view.js";
-export { createReviewEventEmitter, redactReviewEventText, REVIEW_EVENT_VERSION, REVIEW_EVENT_TEXT_LIMIT } from "./review-events.js";
+export { createReviewEventEmitter, redactReviewEventPayload, redactReviewEventText, REVIEW_EVENT_VERSION, REVIEW_EVENT_TEXT_LIMIT } from "./review-events.js";
 export type { ReviewEvent, ReviewEventListener, ReviewerIdentity } from "./review-events.js";
 export { formatLoopSummary, runReviewLoop } from "./loop.js";
 export type { LoopReviewResult, LoopRoundSummary, LoopRoundPanelSummary, LoopStopReason, RunOneReview } from "./loop.js";

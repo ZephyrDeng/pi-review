@@ -60,9 +60,14 @@ function redactValue(value: unknown): unknown {
   return value;
 }
 
+/** Redact and bound arbitrary renderer-visible data while preserving its shape. */
+export function redactReviewEventPayload<T>(value: T): T {
+  return redactValue(value) as T;
+}
+
 function redactEvent<T extends ReviewEvent>(event: T): T {
   const { v, runId, seq, at, type, ...payload } = event;
-  return { v, runId, seq, at, type, ...(redactValue(payload) as object) } as T;
+  return { v, runId, seq, at, type, ...(redactReviewEventPayload(payload) as object) } as T;
 }
 
 /** Build one ordered event stream for exactly one panel run. */

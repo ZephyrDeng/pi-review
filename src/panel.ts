@@ -30,7 +30,7 @@ import { resolvePanelConfig, type ResolvedPanelConfig } from "./panel-config.js"
 import { aggregatePanel } from "./panel-aggregate.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
-import { createReviewEventEmitter, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
+import { createReviewEventEmitter, redactReviewEventPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
 /** Sum token usage across reviewers (prompt-scoped fields as maxima, output as additive). */
@@ -399,7 +399,7 @@ export async function runPanelReviewOnce(
         emit,
         quietProgress: parsed.outputFormat === "events-jsonl",
       });
-      const completed = { ...submission, durationMs: Date.now() - reviewerStart };
+      const completed = redactReviewEventPayload({ ...submission, durationMs: Date.now() - reviewerStart }) as ReviewerSubmission;
       if (options.signal?.aborted) {
         emit("reviewer.cancelled", { reviewerId: reviewer.id, message: "panel review cancelled" });
       } else if (completed.result.verdictSource === "runtime_error") {
@@ -428,7 +428,7 @@ export async function runPanelReviewOnce(
     matcher,
   });
 
-  const panelMeta: PanelReviewMeta = {
+  const panelMeta = redactReviewEventPayload({
     ...aggregate,
     reviewMode: parsed.mode,
     durationMs: Date.now() - startedAt,
@@ -436,7 +436,7 @@ export async function runPanelReviewOnce(
     thinking: parsed.thinking || preset.thinking,
     usage: sumUsage(submissions.map((s) => s.usage)),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
-  };
+  }) as PanelReviewMeta;
 
   emit("panel.completed", { meta: panelMeta });
   if (options.emitFooter !== false && parsed.outputFormat !== "events-jsonl") emitPanelFooter(panelMeta);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createReviewEventEmitter, redactReviewEventText } from "./review-events.js";
+import { createReviewEventEmitter, redactReviewEventPayload, redactReviewEventText } from "./review-events.js";
 
 test("ReviewEvent v1 emits a monotonic, replayable panel lifecycle", () => {
   const events: Array<{ type: string; seq: number; runId: string }> = [];
@@ -36,4 +36,11 @@ test("ReviewEvent v1 redacts bounded final reviewer findings before renderers re
   const summary = events[0]!.submission.result.findings[0]!.summary;
   assert.doesNotMatch(summary, /sk-final-secret/);
   assert.ok(summary.length <= 512);
+});
+
+test("redacted panel metadata keeps its renderer-safe shape", () => {
+  const meta = redactReviewEventPayload({ model: "token=sk-model-secret", confirmedClusters: [{ summary: "x".repeat(900) }] });
+  assert.equal(meta.confirmedClusters.length, 1);
+  assert.doesNotMatch(meta.model, /sk-model-secret/);
+  assert.ok(meta.confirmedClusters[0]!.summary.length <= 512);
 });
