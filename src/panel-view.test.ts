@@ -67,3 +67,59 @@ test("panel reducer ignores duplicates, unknown events, and out-of-order deliver
   assert.equal(outOfOrder.lastSeq, 3);
   assert.equal(outOfOrder.phase, "aggregating");
 });
+
+test("text.delta chunks coalesce into one activity line instead of one row per chunk", () => {
+  let state = reducePanelEvent(createPanelViewState(), event("panel.started", 1, {
+    target: "@src",
+    mode: "code",
+    reviewers: [{ reviewerId: "r2", role: "r2", model: null }],
+  }));
+  state = reducePanelEvent(state, event("reviewer.started", 2, { reviewerId: "r2" }));
+  // Simulate CJK streaming one character at a time (the bug that rendered one char per line).
+  for (const [i, ch] of [..."上的独立发现是否可被聚合？"].entries()) {
+    state = reducePanelEvent(state, event("reviewer.text.delta", 3 + i, { reviewerId: "r2", text: ch }));
+  }
+  const activity = state.reviewers.r2?.recentActivity ?? [];
+  // System milestone + one coalesced prose line — not N single-char rows.
+  assert.equal(activity.filter((line) => line === "review started").length, 1);
+  const prose = activity.filter((line) => line !== "review started");
+  assert.equal(prose.length, 1, `expected one prose line, got: ${JSON.stringify(prose)}`);
+  assert.equal(prose[0], "上的独立发现是否可被聚合？");
+});
+
+test("text.delta after a tool milestone starts a new prose line", () => {
+  let state = reducePanelEvent(createPanelViewState(), event("panel.started", 1, {
+    target: "@src",
+    mode: "code",
+    reviewers: [{ reviewerId: "r1", role: "r1", model: null }],
+  }));
+  state = reducePanelEvent(state, event("reviewer.started", 2, { reviewerId: "r1" }));
+  state = reducePanelEvent(state, event("reviewer.text.delta", 3, { reviewerId: "r1", text: "## Open" }));
+  state = reducePanelEvent(state, event("reviewer.text.delta", 4, { reviewerId: "r1", text: " Questions\nNone." }));
+  state = reducePanelEvent(state, event("reviewer.tool.started", 5, { reviewerId: "r1", tool: "read", summary: "src/x.ts" }));
+  state = reducePanelEvent(state, event("reviewer.text.delta", 6, { reviewerId: "r1", text: "after tool" }));
+  const activity = state.reviewers.r1?.recentActivity ?? [];
+  assert.deepEqual(activity, [
+    "review started",
+    "## Open Questions\nNone.",
+    "tool read: src/x.ts",
+    "after tool",
+  ]);
+});
+
+test("coalesced text.delta is capped to a rolling tail", () => {
+  let state = reducePanelEvent(createPanelViewState(), event("panel.started", 1, {
+    target: "@src",
+    mode: "code",
+    reviewers: [{ reviewerId: "r1", role: "r1", model: null }],
+  }));
+  state = reducePanelEvent(state, event("reviewer.started", 2, { reviewerId: "r1" }));
+  // 600 chars of prose in 1-char deltas → capped to 480.
+  for (let i = 0; i < 600; i++) {
+    state = reducePanelEvent(state, event("reviewer.text.delta", 3 + i, { reviewerId: "r1", text: "x" }));
+  }
+  const prose = (state.reviewers.r1?.recentActivity ?? []).find((line) => line !== "review started");
+  assert.ok(prose);
+  assert.equal(prose!.length, 480);
+  assert.equal(prose, "x".repeat(480));
+});

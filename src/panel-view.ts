@@ -36,6 +36,8 @@ export interface PanelViewState {
 }
 
 const ACTIVITY_LIMIT = 8;
+/** Rolling cap for a coalesced text-delta line so activity stays readable. */
+const TEXT_ACTIVITY_LIMIT = 480;
 
 export function createPanelViewState(): PanelViewState {
   return {
@@ -48,6 +50,33 @@ export function createPanelViewState(): PanelViewState {
 
 function addActivity(reviewer: PanelReviewerView, activity: string): PanelReviewerView {
   return { ...reviewer, recentActivity: [...reviewer.recentActivity, activity].slice(-ACTIVITY_LIMIT) };
+}
+
+/**
+ * Discrete milestone lines we emit ourselves. Everything else is treated as
+ * coalescable review prose so consecutive `text.delta` chunks do not each
+ * become a one-character activity row (which rendered as one char per line).
+ */
+function isSystemActivity(line: string): boolean {
+  if (line === "review started" || line === "review completed" || line === "review cancelled") return true;
+  if (/^turn \d+$/.test(line)) return true;
+  if (/^tool /.test(line)) return true;
+  return false;
+}
+
+/** Append a streaming text delta into the last open prose line, or start a new one. */
+function appendTextDelta(reviewer: PanelReviewerView, text: string): PanelReviewerView {
+  if (!text) return reviewer;
+  const activities = [...reviewer.recentActivity];
+  const last = activities[activities.length - 1];
+  if (last !== undefined && !isSystemActivity(last)) {
+    const merged = last + text;
+    activities[activities.length - 1] =
+      merged.length > TEXT_ACTIVITY_LIMIT ? merged.slice(-TEXT_ACTIVITY_LIMIT) : merged;
+  } else {
+    activities.push(text.length > TEXT_ACTIVITY_LIMIT ? text.slice(-TEXT_ACTIVITY_LIMIT) : text);
+  }
+  return { ...reviewer, recentActivity: activities.slice(-ACTIVITY_LIMIT) };
 }
 
 function fallbackReviewer(reviewerId: string): PanelReviewerView {
@@ -109,7 +138,9 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
       reviewer = addActivity({ ...previous, status: "running", activeTool: undefined, activeToolSummary: undefined, activityAt: event.at }, `tool ${event.tool} finished${event.summary ? `: ${event.summary}` : ""}`);
       break;
     case "reviewer.text.delta":
-      reviewer = addActivity({ ...previous, status: "running", activityAt: event.at }, event.text);
+      // Coalesce stream chunks into one activity line. Without this, each
+      // character/token becomes its own row and the TUI renders one char/line.
+      reviewer = appendTextDelta({ ...previous, status: "running", activityAt: event.at }, event.text);
       break;
     case "reviewer.usage":
       reviewer = { ...previous, usage: event.usage, activityAt: event.at };
