@@ -55,5 +55,5 @@ export {
 export { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 export { parseVerdict } from "./verdict.js";
 export { parseReviewResult, reviewExitCode } from "./review-result.js";
-export { formatDurationMs, formatTokens, formatUsage, formatReviewMetaAscii, formatReviewMetaJsonLine, formatPanelMetaAscii, formatPanelFindingsMarkdown } from "./meta-footer.js";
+export { formatCost, formatDurationMs, formatTokens, formatUsage, formatReviewMetaAscii, formatReviewMetaJsonLine, formatPanelMetaAscii, formatPanelFindingsMarkdown } from "./meta-footer.js";
 export { installSkill, uninstallSkill } from "./skill.js";

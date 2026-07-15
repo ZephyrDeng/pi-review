@@ -4,13 +4,14 @@ import { Writable } from "node:stream";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text, type Component } from "@earendil-works/pi-tui";
-import { createPanelViewState, reducePanelEvent, spawnStreamingChild, type PanelViewState, type ReviewEvent } from "@zephyrdeng/pi-review";
+import { createPanelViewState, formatCost, formatDurationMs, formatTokens, formatUsage, reducePanelEvent, spawnStreamingChild, type PanelViewState, type ReviewEvent } from "@zephyrdeng/pi-review";
 
 type Theme = { fg: (color: "toolTitle" | "muted" | "error" | "success" | "accent", text: string) => string; bold: (text: string) => string };
 type PanelToolDetails = { state: PanelViewState; error?: string };
 
 const extensionDir = path.dirname(fileURLToPath(import.meta.url));
 const cliPath = path.resolve(extensionDir, "../bin/pi-review.js");
+const PANEL_TOOL_DISPLAY_NAME = "Pi Review Panel";
 
 function duration(ms: number | undefined): string {
   if (!ms) return "0s";
@@ -18,7 +19,10 @@ function duration(ms: number | undefined): string {
 }
 
 function usageTokens(state: PanelViewState): string {
-  return state.aggregate.usage ? `${state.aggregate.usage.totalTokens.toLocaleString()} tok` : "—";
+  const usage = state.aggregate.usage;
+  if (!usage) return "—";
+  const cost = typeof usage.costTotal === "number" ? formatCost(usage.costTotal) : "n/a";
+  return `${formatTokens(usage.totalTokens)} tok · cost ${cost}`;
 }
 
 function statusSymbol(status: string): string {
@@ -28,16 +32,18 @@ function statusSymbol(status: string): string {
 function compactText(state: PanelViewState, theme: Theme, now = Date.now()): string {
   const elapsed = state.startedAt ? duration((state.completedAt ?? now) - state.startedAt) : "0s";
   const progress = `${state.aggregate.completed}/${state.aggregate.total} completed`;
-  const header = theme.fg("toolTitle", theme.bold(`pi-review panel ${progress}`)) + theme.fg("muted", ` · ${state.phase} · ${elapsed} · ${usageTokens(state)}`);
+  const header = theme.fg("toolTitle", theme.bold(`${PANEL_TOOL_DISPLAY_NAME} ${progress}`)) + theme.fg("muted", ` · ${state.phase} · ${elapsed} · ${usageTokens(state)}`);
   const rows = Object.values(state.reviewers).map((reviewer) => {
+    const lifecycle = ` · ${reviewer.status}`;
     const model = reviewer.model ? ` · ${reviewer.model}` : "";
     const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
     const active = reviewer.activeTool ? ` · ${reviewer.activeTool}` : "";
     const activeSummary = reviewer.activeToolSummary ? ` · ${reviewer.activeToolSummary}` : "";
     const reviewerElapsed = reviewer.startedAt ? ` · ${duration((reviewer.completedAt ?? now) - reviewer.startedAt)}` : "";
     const idle = reviewer.status === "running" && reviewer.activityAt ? ` · idle ${duration(now - reviewer.activityAt)}` : "";
-    const tokens = reviewer.usage ? ` · ${reviewer.usage.totalTokens.toLocaleString()} tok` : "";
-    return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${model}${thinking}${active}${activeSummary}${reviewerElapsed}${idle}${tokens}`)}`;
+    const tokens = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok` : "";
+    const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
+    return `${theme.fg(reviewer.status === "failed" ? "error" : reviewer.status === "completed" ? "success" : "accent", statusSymbol(reviewer.status))} ${theme.fg("toolTitle", reviewer.reviewerId)}${theme.fg("muted", ` ${reviewer.role}${lifecycle}${model}${thinking}${active}${activeSummary}${reviewerElapsed}${idle}${tokens}${cost}`)}`;
   });
   return [header, ...rows].join("\n");
 }
@@ -50,7 +56,9 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
       const role = reviewer.role ? ` · ${reviewer.role}` : "";
       const model = reviewer.model ? ` · ${reviewer.model}` : "";
       const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
-      const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status} · ${reviewer.verdict}`;
+      const usage = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok · ${formatUsage(reviewer.usage)}` : "";
+      const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
+      const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status} · ${reviewer.verdict} · ${formatDurationMs(reviewer.durationMs)}${usage}${cost}`;
       const findings = live?.submission?.result.findings?.map((finding) => finding.summary).filter(Boolean).slice(0, 5) ?? [];
       if (findings.length > 0) return `${head}\n  ${findings.map((summary) => `• ${summary}`).join("\n  ")}`;
       if (reviewer.runtimeError || reviewer.parseError) return `${head}\n  • ${reviewer.runtimeError ?? reviewer.parseError}`;
@@ -64,7 +72,10 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
     const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
     const status = reviewer.submission?.result.status ?? reviewer.status;
     const verdict = reviewer.submission?.result.verdict ? ` · ${reviewer.submission.result.verdict}` : "";
-    const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${status}${verdict}`;
+    const durationMs = reviewer.startedAt ? (reviewer.completedAt ?? Date.now()) - reviewer.startedAt : undefined;
+    const usage = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok · ${formatUsage(reviewer.usage)}` : "";
+    const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
+    const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${status}${verdict}${durationMs !== undefined ? ` · ${formatDurationMs(durationMs)}` : ""}${usage}${cost}`;
     const findings = reviewer.submission?.result.findings?.map((finding) => finding.summary).filter(Boolean).slice(0, 5) ?? [];
     if (findings.length > 0) return `${head}\n  ${findings.map((summary) => `• ${summary}`).join("\n  ")}`;
     if (reviewer.error) return `${head}\n  • ${reviewer.error}`;
@@ -84,12 +95,21 @@ export function buildPanelResultContent(state: PanelViewState, error?: string): 
     const role = reviewer.role ? ` · ${reviewer.role}` : "";
     const model = reviewer.model ? ` · ${reviewer.model}` : "";
     const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
-    return `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status}`;
+    const usage = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok` : "";
+    const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
+    return `- ${reviewer.reviewerId}${role}${model}${thinking} · ${reviewer.status} · ${formatDurationMs(reviewer.durationMs)}${usage}${cost}`;
   });
+  const metrics = [
+    "### Run metrics",
+    `- Duration: ${formatDurationMs(meta.durationMs)}`,
+    meta.usage ? `- Tokens: ${formatTokens(meta.usage.totalTokens)} total (${formatUsage(meta.usage)})` : "- Tokens: not reported",
+    `- Cost: ${meta.usage && typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "not reported"}`,
+  ].join("\n");
   const summaries = reviewerSummaryLines(state);
   const body = [
-    "### Panel result",
+    `### ${PANEL_TOOL_DISPLAY_NAME} result`,
     `Health: ${meta.panelHealth}; status: ${meta.status}.`,
+    metrics,
     confirmed.length ? `### Confirmed findings\n${confirmed.join("\n")}` : "### Confirmed findings\nNone.",
     advisories.length ? `### Advisories\n${advisories.join("\n")}` : "### Advisories\nNone.",
     provenance.length ? `### Provenance\n${provenance.join("\n")}` : "### Provenance\nNone.",
@@ -102,8 +122,8 @@ function finalMarkdown(state: PanelViewState): string {
   return buildPanelResultContent(state);
 }
 
-export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component): Component {
-  if (!details) return new Text(theme.fg("muted", "Panel review has no progress details."), 0, 0);
+export function renderPanelResult(details: PanelToolDetails | undefined, expanded: boolean, theme: Theme, previous?: Component, isPartial = false): Component {
+  if (!details) return new Text(theme.fg("muted", isPartial ? `${PANEL_TOOL_DISPLAY_NAME} · starting…` : "Panel review has no progress details."), 0, 0);
   if (!expanded) {
     const text = previous instanceof Text ? previous : new Text("", 0, 0);
     text.setText(compactText(details.state, theme));
@@ -117,7 +137,7 @@ export function renderPanelResult(details: PanelToolDetails | undefined, expande
     container.addChild(new Text(theme.fg("muted", `${reviewer.reviewerId} activity`), 0, 0));
     container.addChild(new Text(reviewer.recentActivity.join("\n"), 0, 0));
   }
-  const markdown = finalMarkdown(details.state);
+  const markdown = !isPartial && details.state.meta ? finalMarkdown(details.state) : "";
   if (markdown) {
     container.addChild(new Spacer(1));
     // Pi supplies a Markdown theme to built-in renderers; plain text keeps this
@@ -186,7 +206,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       let state = createPanelViewState();
       let buffer = "";
       let stderr = "";
-      const publish = () => onUpdate?.({ content: [{ type: "text", text: `Panel: ${state.aggregate.completed}/${state.aggregate.total} completed` }], details: { state } });
+      const publish = () => onUpdate?.({ content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${state.aggregate.completed}/${state.aggregate.total} completed` }], details: { state } });
       const consume = (chunk: string) => {
         buffer += chunk;
         let newline: number;
@@ -213,7 +233,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       const paramError = panelToolParamError(params);
       if (paramError) {
         return {
-          content: [{ type: "text", text: `pi_review: ${paramError}` }],
+          content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${paramError}` }],
           details: { state, error: paramError },
           isError: true,
         };
@@ -254,11 +274,11 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
     renderCall(args, theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       const width = args.reviewers !== undefined ? `reviewers=${args.reviewers}` : (args.panel ?? "code-experts");
-      text.setText(theme.fg("toolTitle", theme.bold("pi_review ")) + theme.fg("muted", `${width} · ${args.mode ?? "code"} · ${args.target}`));
+      text.setText(theme.fg("toolTitle", theme.bold(`${PANEL_TOOL_DISPLAY_NAME} `)) + theme.fg("muted", `${width} · ${args.mode ?? "code"} · ${args.target}`));
       return text;
     },
-    renderResult(result, { expanded }, theme, context) {
-      return renderPanelResult(result.details as PanelToolDetails | undefined, expanded, theme, context.lastComponent);
+    renderResult(result, { expanded, isPartial }, theme, context) {
+      return renderPanelResult(result.details as PanelToolDetails | undefined, expanded, theme, context.lastComponent, isPartial);
     },
   });
 }

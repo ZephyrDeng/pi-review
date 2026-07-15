@@ -178,7 +178,7 @@ In Pi, slash commands select strategy only:
 - `/rv-loop <natural-language target>` → loop closeout via shell CLI
 - `/rv-models` → model catalog
 
-Targets stay natural language as given. Path mentions like `@src` remain text; the CLI keeps directories as tool path targets and only attaches real files. Remaining strategy matching lives in the skill/CLI. Panel runs render each reviewer as an independent live row with lifecycle state, active tool, elapsed time, and token usage; expand the tool result with `Ctrl+O` for bounded activity and final findings/provenance.
+Targets stay natural language as given. Path mentions like `@src` remain text; the CLI keeps directories as tool path targets and only attaches real files. Remaining strategy matching lives in the skill/CLI. In Pi, the user-facing tool name is **Pi Review Panel** (the API identifier remains `pi_review`); each reviewer renders as an independent live row with explicit `queued/running/completed/failed/cancelled` state, active tool, elapsed time, and token usage. Expand the tool result with `Ctrl+O` for bounded activity, final findings/provenance, duration, token totals, and cost.
 
 Renderer adapters can consume the stable, versioned event stream directly:
 
@@ -222,12 +222,13 @@ The CLI appends a readable ASCII footer on **stdout**:
   Findings    1 actionable / 1 total
   Model       provider/model
   Thinking    xhigh
-  Tokens      in 17.6K · out 512 · cache 2.0K · reason 0
+  Tokens      in 17.6K · out 512 · cache 2.0K · reason 0 · total 18.2K
+  Cost        $0.05
   Duration    42.3s
 ──────────────────────────────────────────
 ```
 
-`Thinking` shows the requested thinking level when set; `Tokens` shows the child session's token usage (`in`/`out`/`cache`/`reason`) parsed from the `--mode json` event stream — available only when `--progress-log` is used (otherwise both lines are omitted).
+`Thinking` shows the requested thinking level when set; `Tokens` shows the child session's token usage (`in`/`out`/`cache`/`reason` plus total) parsed from the `--mode json` event stream. `Cost` shows the provider-reported total, or `n/a` when the provider does not report one. Both are collected during normal streaming; `--progress-log` is not required.
 
 For scripts, parse **`PI_REVIEW_META_JSON:`** from **stderr**. Existing keys remain, with additive fields:
 
@@ -235,7 +236,7 @@ For scripts, parse **`PI_REVIEW_META_JSON:`** from **stderr**. Existing keys rem
 {"reviewMode":"code","verdict":"request_changes","verdictSource":"parsed","status":"has_findings","findings":[{"id":"F1","severity":"high","path":"src/cli.ts","summary":"Dirty reviews exit zero","actionable":true}],"actionableCount":1,"durationMs":42300,"model":"provider/model","thinking":"xhigh","usage":{"input":18031,"output":512,"cacheRead":2048,"cacheWrite":0,"reasoning":0,"totalTokens":18591,"costTotal":0.05}}
 ```
 
-`status` is one of `clean`, `has_findings`, `needs_human`, or `blocked`: `approve` with no actionable findings is `clean`; `request_changes` or actionable findings are `has_findings`; `needs_clarification` is `needs_human`; runtime/fatal failures are `blocked`. Each finding always has `summary` and `actionable`; `id`, `severity`, and `path` are present when parsed. `thinking` and `usage` are additive and present only when available (token usage requires `--progress-log`). The line remains a single additive JSON record, so older consumers can ignore unknown keys. Set `PI_REVIEW_META_STDOUT=1` to emit it on stdout instead.
+`status` is one of `clean`, `has_findings`, `needs_human`, or `blocked`: `approve` with no actionable findings is `clean`; `request_changes` or actionable findings are `has_findings`; `needs_clarification` is `needs_human`; runtime/fatal failures are `blocked`. Each finding always has `summary` and `actionable`; `id`, `severity`, and `path` are present when parsed. `thinking` and `usage` are additive and present when reported by the child; `usage` includes token totals and may include `costTotal`. The line remains a single additive JSON record, so older consumers can ignore unknown keys. Set `PI_REVIEW_META_STDOUT=1` to emit it on stdout instead.
 
 The parser prefers the exact `### F1` shape above but also accepts legacy `###` headings and top-level finding lists. When `Actionable` is missing, findings under `request_changes` default to actionable and other verdicts default to non-actionable. A missing/unrecognized verdict falls back to `needs_clarification` / `needs_human` and includes `parseError`; runtime failures always remain `blocked`.
 

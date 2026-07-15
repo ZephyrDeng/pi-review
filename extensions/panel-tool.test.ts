@@ -49,9 +49,51 @@ test("Pi panel renderer exposes compact reviewer progress and expanded activity"
   const running = reducePanelEvent(reviewerStarted, { v: 1, runId: "run-1", seq: 3, at: now - 4500, type: "reviewer.tool.started", reviewerId: "security", tool: "read", summary: "src/panel.ts" });
   const compact = renderPanelResult({ state: running }, false, theme).render(120).join("\n");
   const expanded = renderPanelResult({ state: running }, true, theme).render(120).join("\n");
-  assert.match(compact, /pi-review panel 0\/1 completed/);
-  assert.match(compact, /security Security · openai\/gpt · high · read · src\/panel\.ts · 0s · idle 4s/);
+  assert.match(compact, /Pi Review Panel 0\/1 completed/);
+  assert.match(compact, /security Security · running · openai\/gpt · high · read · src\/panel\.ts · 0s · idle 4s/);
   assert.match(expanded, /security activity/);
+});
+
+test("Pi panel partial renderer shows explicit lifecycle state and uses the human-facing name", () => {
+  const now = Date.now();
+  let state = reducePanelEvent(createPanelViewState(), {
+    v: 1,
+    runId: "run-live",
+    seq: 1,
+    at: now,
+    type: "panel.started",
+    target: "@src",
+    mode: "code",
+    reviewers: [
+      { reviewerId: "r1", role: "Independent reviewer", model: "openai/gpt", thinking: "high" },
+      { reviewerId: "r2", role: "Independent reviewer", model: "openai/gpt", thinking: "high" },
+    ],
+  });
+  state = reducePanelEvent(state, { v: 1, runId: "run-live", seq: 2, at: now, type: "reviewer.started", reviewerId: "r1" });
+  state = reducePanelEvent(state, { v: 1, runId: "run-live", seq: 3, at: now, type: "reviewer.tool.started", reviewerId: "r1", tool: "read", summary: "src/panel.ts" });
+
+  const partial = renderPanelResult({ state }, false, theme, undefined, true).render(160).join("\n");
+  assert.match(partial, /Pi Review Panel/);
+  assert.doesNotMatch(partial, /pi_review/);
+  assert.match(partial, /r1 Independent reviewer · running · openai\/gpt · high · read · src\/panel\.ts/);
+  assert.match(partial, /r2 Independent reviewer · queued · openai\/gpt · high/);
+});
+
+test("Pi panel tool call uses the same human-facing name as its result", () => {
+  let registered: { renderCall: (...args: any[]) => any } | undefined;
+  registerPanelReviewTool({
+    registerTool(tool: { renderCall: (...args: any[]) => any }) {
+      registered = tool;
+    },
+  } as never);
+  assert.ok(registered);
+  const rendered = registered!.renderCall(
+    { target: "@src", reviewers: 2, mode: "code" },
+    theme,
+    { lastComponent: undefined },
+  ).render(160).join("\n");
+  assert.match(rendered, /Pi Review Panel/);
+  assert.doesNotMatch(rendered, /pi_review/);
 });
 
 test("Pi panel renderer expands final findings and reviewer provenance", () => {
@@ -132,6 +174,60 @@ test("Pi panel renderer expands final findings and reviewer provenance", () => {
   assert.match(empty, /Confirmed findings[\s\S]*None\./);
   assert.match(empty, /Advisories[\s\S]*None\./);
   assert.match(empty, /Provenance[\s\S]*None\./);
+});
+
+test("Pi panel result content includes duration, token, and cost metrics", () => {
+  const state = reducePanelEvent(createPanelViewState(), {
+    v: 1,
+    runId: "run-metrics",
+    seq: 1,
+    at: Date.now(),
+    type: "panel.completed",
+    meta: {
+      strategy: "panel",
+      reviewMode: "code",
+      status: "clean",
+      verdict: "approve",
+      verdictSource: "parsed",
+      findings: [],
+      actionableCount: 0,
+      durationMs: 1234,
+      model: "openai/gpt",
+      usage: { input: 900, output: 200, cacheRead: 100, cacheWrite: 0, reasoning: 50, totalTokens: 1200, costTotal: 0.1234 },
+      configuredReviewers: 2,
+      successfulReviewers: 2,
+      consensusPolicy: "quorum",
+      consensusThreshold: 2,
+      panelHealth: "healthy",
+      confirmedClusters: [],
+      advisories: [],
+      reviewers: [
+        {
+          reviewerId: "r1",
+          role: "Independent reviewer",
+          model: "openai/gpt",
+          durationMs: 1100,
+          usage: { input: 450, output: 100, cacheRead: 50, cacheWrite: 0, reasoning: 25, totalTokens: 600, costTotal: 0.0617 },
+          status: "clean",
+          verdict: "approve",
+          verdictSource: "parsed",
+          contributed: false,
+        },
+      ],
+      adjudicationUsed: false,
+    },
+  });
+
+  const compact = renderPanelResult({ state }, false, theme).render(160).join("\n");
+  assert.match(compact, /1\.2K tok/);
+  assert.match(compact, /\$0\.1234/);
+
+  const content = buildPanelResultContent(state);
+  assert.match(content, /### Run metrics/);
+  assert.match(content, /Duration: 1\.2s/);
+  assert.match(content, /Tokens: 1\.2K total/);
+  assert.match(content, /Cost: \$0\.1234/);
+  assert.match(content, /r1[\s\S]*1\.1s[\s\S]*600 tok[\s\S]*\$0\.0617/);
 });
 
 test("panel tool content carries full conclusion for the parent LLM", () => {

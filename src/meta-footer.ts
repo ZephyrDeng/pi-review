@@ -1,4 +1,4 @@
-import type { PanelReviewMeta, ReviewMeta } from "./types.js";
+import type { PanelReviewMeta, ReviewMeta, TokenUsage } from "./types.js";
 
 const VERDICT_DISPLAY: Record<ReviewMeta["verdict"], { label: string; mark: string }> = {
   approve: { label: "APPROVE", mark: "✓" },
@@ -37,8 +37,16 @@ export function formatTokens(n: number): string {
   return `${value.toFixed(digits)}${units[unitIndex]}`;
 }
 
+/** Format a model-reported cost without hiding sub-cent values through rounding. */
+export function formatCost(value: number): string {
+  if (!Number.isFinite(value)) return "n/a";
+  if (Object.is(value, -0) || value === 0) return "$0";
+  const trimmed = value.toFixed(4).replace(/\.?0+$/, "");
+  return `$${trimmed}`;
+}
+
 /** Format a token-usage breakdown as "in X · out Y · cache Z · reason W" for compact display. */
-export function formatUsage(usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number }): string {
+export function formatUsage(usage: Pick<TokenUsage, "input" | "output" | "cacheRead" | "cacheWrite" | "reasoning">): string {
   return `in ${formatTokens(usage.input)} · out ${formatTokens(usage.output)} · cache ${formatTokens(usage.cacheRead + usage.cacheWrite)} · reason ${formatTokens(usage.reasoning)}`;
 }
 
@@ -61,7 +69,10 @@ export function formatReviewMetaAscii(meta: ReviewMeta): string {
   }
   if (meta.model) lines.push(`  ${padLabel("Model", labelW)}  ${meta.model}`);
   if (meta.thinking) lines.push(`  ${padLabel("Thinking", labelW)}  ${meta.thinking}`);
-  if (meta.usage) lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)}`);
+  if (meta.usage) {
+    lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)} · total ${formatTokens(meta.usage.totalTokens)}`);
+    lines.push(`  ${padLabel("Cost", labelW)}  ${typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "n/a"}`);
+  }
   lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
   if (meta.sessionHandle) {
     lines.push(`  ${padLabel("Session", labelW)}  ${meta.sessionHandle}`);
@@ -124,7 +135,10 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
   ];
   if (meta.panelPreset) lines.push(`  ${padLabel("Panel", labelW)}  ${meta.panelPreset}`);
   if (meta.thinking) lines.push(`  ${padLabel("Thinking", labelW)}  ${meta.thinking}`);
-  if (meta.usage) lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)}`);
+  if (meta.usage) {
+    lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)} · total ${formatTokens(meta.usage.totalTokens)}`);
+    lines.push(`  ${padLabel("Cost", labelW)}  ${typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "n/a"}`);
+  }
   if (meta.adjudicationUsed) lines.push(`  ${padLabel("Adjudicator", labelW)}  used`);
   if (meta.adjudicationErrors?.length) {
     lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationErrors.join("; ")}`);
@@ -139,7 +153,8 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
       ...(r.role ? [`role:${r.role.split(" ")[0]}`] : []),
       ...(r.model ? [r.model] : []),
       ...(r.thinking ? [`think:${r.thinking}`] : []),
-      ...(r.usage ? [formatUsage(r.usage)] : []),
+      ...(r.usage ? [`total:${formatTokens(r.usage.totalTokens)}`, formatUsage(r.usage)] : []),
+      ...(r.usage && typeof r.usage.costTotal === "number" ? [`cost:${formatCost(r.usage.costTotal)}`] : []),
       formatDurationMs(r.durationMs),
     ];
     lines.push(`    - ${bits.join(" | ")}`);

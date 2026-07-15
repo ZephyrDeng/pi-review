@@ -34,7 +34,7 @@ When resolving this fallback, use the actual directory that contains this `SKILL
 
 | Host | How to run `pi-review` |
 |------|-------------------------|
-| **Pi** (`/rv`) | New reviews call the native `pi_review` tool, which launches the packaged CLI in event mode and renders live Panel state. Continuations, kept sessions, and explicit `--no-stream` retain the foreground CLI path. |
+| **Pi** (`/rv`) | New reviews call the native `pi_review` API tool (shown to users as **Pi Review Panel**), which launches the packaged CLI in event mode and renders explicit live reviewer state. Continuations, kept sessions, and explicit `--no-stream` retain the foreground CLI path. |
 | **Claude Code, Codex, Cursor**, and similar AI agents | **Default: `--progress-log <path>` + background run + tail** (see below). Do **not** rely on foreground Bash stdout for “streaming” — the tool buffers until exit. |
 | Scripts / CI | Foreground is fine; use `--no-stream` only when you must buffer until exit. |
 
@@ -44,7 +44,7 @@ Slash commands select **strategy only**. Everything after the command is a **nat
 
 | Command | Strategy |
 |---------|----------|
-| `/rv <natural-language target>` | Panel review via native `pi_review` |
+| `/rv <natural-language target>` | Panel review via native `Pi Review Panel` (`pi_review` API tool) |
 | `/rv-loop <natural-language target>` | Loop closeout via shell `pi-review loop` |
 | `/rv-models` | Model catalog only |
 | `/rv --continue <handle> [text]` | Continue a kept single-review session |
@@ -63,7 +63,7 @@ Slash commands select **strategy only**. Everything after the command is a **nat
 - `pi-review` always runs the child in `--mode json` internally. In streaming mode it forwards **readable text deltas** to stdout live and writes **semantic milestone notices** (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`) to **stderr**. Token usage (`input`/`output`/`cache`/`reasoning`) is accumulated by default — no `--progress-log` required to see it in the ASCII footer or `PI_REVIEW_META_JSON`.
 - `--progress-log <path>` is now an **optional** convenience: it tees the raw `--mode json` event stream to a file for external observation (tail, debugging). It no longer gates token visibility.
 - **Claude Code, Cursor, Codex** and similar hosts still buffer a Bash tool's stdout until the command exits. The semantic milestone notices on stderr + the final Markdown + ASCII footer on stdout give you progress and the result without needing to tail a file. If you still want the full event log for fine-grained debugging, add `--progress-log <path>` and tail it.
-- **Pi interactive** sessions stream text deltas live to the terminal by default — no `--no-stream` or `--progress-log` needed.
+- **Pi interactive** sessions stream text deltas live to the terminal by default — no `--no-stream` or `--progress-log` needed. The native Pi Review Panel also shows each reviewer as `queued/running/completed/failed/cancelled`, with active tool, elapsed time, token totals, and provider-reported cost when available; its expanded result repeats the run metrics.
 
 ## Review status (no slash command)
 
