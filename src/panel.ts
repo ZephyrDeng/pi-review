@@ -26,12 +26,13 @@ import { extractFinalText, JsonEventStream } from "./json-events.js";
 import type { TokenUsage } from "./types.js";
 import { fail, expandMaybeHome } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
-import { resolvePanelConfig, type ResolvedPanelConfig } from "./panel-config.js";
+import { resolvePanelConfig, resolveReviewerModelThinking, type ResolvedPanelConfig } from "./panel-config.js";
 import { aggregatePanel } from "./panel-aggregate.js";
 import { sumPanelUsage } from "./panel-usage.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
+import { launchPanelUi } from "./panel-ui.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
 export function emitPanelFooter(meta: PanelReviewMeta): void {
@@ -84,8 +85,10 @@ function buildReviewerArgs(
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
 
   const provider = reviewer.provider || parsed.provider || preset.provider;
-  const model = reviewer.model || parsed.model || preset.model;
-  const thinking = reviewer.thinking || parsed.thinking || preset.thinking;
+  const { model, thinking } = resolveReviewerModelThinking(reviewer, {
+    model: parsed.model || preset.model,
+    thinking: parsed.thinking || preset.thinking,
+  });
   if (provider) args.push("--provider", provider);
   if (model) args.push("--model", model);
   if (thinking) args.push("--thinking", thinking);
@@ -208,13 +211,15 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   }
 
   const structured: StructuredReviewResult = parseReviewResult(stdout, verdictInfo);
-  const model = reviewer.model || parsed.model || preset.model || null;
-  const thinking = reviewer.thinking || parsed.thinking || preset.thinking;
+  const { model, thinking } = resolveReviewerModelThinking(reviewer, {
+    model: parsed.model || preset.model,
+    thinking: parsed.thinking || preset.thinking,
+  });
 
   return {
     reviewerId: reviewer.id,
     role: reviewer.role,
-    model,
+    model: model ?? null,
     ...(thinking ? { thinking } : {}),
     ...(reviewerUsage ? { usage: reviewerUsage } : {}),
     durationMs: 0, // set by caller wrapper
@@ -368,12 +373,18 @@ export async function runPanelReviewOnce(
     if (parsed.outputFormat === "events-jsonl") process.stdout.write(`${JSON.stringify(event)}\n`);
     options.onEvent?.(event);
   });
-  const reviewerIdentities = resolved.reviewers.map((reviewer) => ({
-    reviewerId: reviewer.id,
-    role: reviewer.role,
-    model: reviewer.model || parsed.model || preset.model || null,
-    ...(reviewer.thinking || parsed.thinking || preset.thinking ? { thinking: reviewer.thinking || parsed.thinking || preset.thinking } : {}),
-  }));
+  const reviewerIdentities = resolved.reviewers.map((reviewer) => {
+    const { model, thinking } = resolveReviewerModelThinking(reviewer, {
+      model: parsed.model || preset.model,
+      thinking: parsed.thinking || preset.thinking,
+    });
+    return {
+      reviewerId: reviewer.id,
+      role: reviewer.role,
+      model: model ?? null,
+      ...(thinking ? { thinking } : {}),
+    };
+  });
   emit("panel.started", { target: parsed.payload.join(" "), mode: parsed.mode, ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}), reviewers: reviewerIdentities });
   for (const reviewer of resolved.reviewers) emit("reviewer.queued", { reviewerId: reviewer.id });
 
@@ -455,14 +466,34 @@ export async function runPanelReviewOnce(
   return { meta: panelMeta, exitCode: reviewExitCode(panelMeta.status) };
 }
 
-/** CLI-compatible panel review entrypoint. */
-export async function runPanelReview(parsed: ParsedArgs): Promise<never> {
+/** Run one panel evaluation wired to SIGINT/SIGTERM cancellation and exit with its gate exit code. */
+async function runPanelReviewToExit(parsed: ParsedArgs, options: PanelRunOptions = {}): Promise<never> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   process.once("SIGINT", abort);
   process.once("SIGTERM", abort);
-  const result = await runPanelReviewOnce(parsed, readReviewStdin(), { signal: controller.signal });
+  const result = await runPanelReviewOnce(parsed, readReviewStdin(), { ...options, signal: controller.signal });
   process.removeListener("SIGINT", abort);
   process.removeListener("SIGTERM", abort);
   process.exit(result.exitCode);
+}
+
+/** CLI-compatible panel review entrypoint. */
+export async function runPanelReview(parsed: ParsedArgs): Promise<never> {
+  return runPanelReviewToExit(parsed);
+}
+
+/**
+ * CLI-compatible panel review entrypoint with the loopback dashboard (issue
+ * #4). The dashboard server is a detached process: this review process still
+ * appends normalized events and exits with the existing review exit code
+ * immediately once the run completes, regardless of the dashboard's own
+ * idle-TTL lifetime.
+ */
+export async function runPanelReviewWithUi(parsed: ParsedArgs): Promise<never> {
+  const launch = await launchPanelUi({
+    ...(parsed.uiUrlFile ? { uiUrlFile: parsed.uiUrlFile } : {}),
+    ...(parsed.uiTtlSeconds !== undefined ? { ttlSeconds: parsed.uiTtlSeconds } : {}),
+  });
+  return runPanelReviewToExit(parsed, launch ? { onEvent: launch.onEvent } : {});
 }

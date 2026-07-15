@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { ArgsParseError } from "./args.js";
-import { resolvePanelConfig } from "./panel-config.js";
+import {
+  assignGenericReviewerRoles,
+  resolvePanelConfig,
+  resolveReviewerModelThinking,
+  splitModelThinking,
+} from "./panel-config.js";
 import type { PanelPreset, ParsedArgs } from "./types.js";
 
 function baseParsed(overrides: Partial<ParsedArgs> = {}): ParsedArgs {
@@ -30,10 +35,28 @@ test("generic panel builds N anonymous reviewers with default quorum two", () =>
   assert.equal(resolved.presetName, undefined);
   assert.equal(resolved.reviewerCount, 3);
   assert.deepEqual(resolved.reviewers.map((r) => r.id), ["r1", "r2", "r3"]);
+  // Roles are distinct personas, not the old identical "Independent reviewer".
+  const roles = resolved.reviewers.map((r) => r.role);
+  assert.equal(roles.length, 3);
+  assert.equal(new Set(roles).size, 3);
+  for (const role of roles) {
+    assert.notEqual(role, "Independent reviewer");
+    assert.ok(role.length > 0);
+  }
   assert.equal(resolved.consensus, "quorum");
   assert.equal(resolved.minAgree, 2);
   assert.equal(resolved.concurrency, 3);
   assert.equal(resolved.semanticEnabled, false);
+});
+
+test("assignGenericReviewerRoles returns unique labels within a panel", () => {
+  const roles = assignGenericReviewerRoles(5);
+  assert.equal(roles.length, 5);
+  assert.equal(new Set(roles).size, 5);
+  // Past the pool size, labels stay unique via suffix.
+  const many = assignGenericReviewerRoles(10);
+  assert.equal(many.length, 10);
+  assert.equal(new Set(many).size, 10);
 });
 
 test("generic panel applies per-reviewer model overrides", () => {
@@ -47,6 +70,52 @@ test("generic panel applies per-reviewer model overrides", () => {
   assert.equal(resolved.reviewers[0]?.model, "openai-codex/gpt-5.6-sol");
   assert.equal(resolved.reviewers[1]?.model, undefined);
   assert.equal(resolved.reviewers[2]?.model, "anthropic/claude-sonnet-4-5");
+});
+
+test("splitModelThinking strips trailing thinking and keeps provider colons", () => {
+  assert.deepEqual(splitModelThinking("zenmux/deepseek/deepseek-v4-flash:low"), {
+    model: "zenmux/deepseek/deepseek-v4-flash",
+    thinking: "low",
+  });
+  assert.deepEqual(splitModelThinking("px:openai/agnes-2.0-flash:high"), {
+    model: "px:openai/agnes-2.0-flash",
+    thinking: "high",
+  });
+  assert.deepEqual(splitModelThinking("openai/gpt-5.6-sol"), {
+    model: "openai/gpt-5.6-sol",
+  });
+  // Not a thinking level — leave intact (e.g. weird model id).
+  assert.deepEqual(splitModelThinking("vendor/model:experimental"), {
+    model: "vendor/model:experimental",
+  });
+});
+
+test("per-reviewer model:thinking is split so low is not overridden by shared high", () => {
+  const resolved = resolvePanelConfig(
+    baseParsed({
+      reviewers: 3,
+      thinking: "high", // shared default must NOT clobber per-reviewer :low
+      reviewerModels: [
+        "r1=zenmux/deepseek/deepseek-v4-flash:low",
+        "r2=zenmux/minimax/minimax-m3:low",
+        "r3=px:openai/agnes-2.0-flash:low",
+      ],
+    }),
+    {},
+  );
+  assert.equal(resolved.reviewers[0]?.model, "zenmux/deepseek/deepseek-v4-flash");
+  assert.equal(resolved.reviewers[0]?.thinking, "low");
+  assert.equal(resolved.reviewers[1]?.model, "zenmux/minimax/minimax-m3");
+  assert.equal(resolved.reviewers[1]?.thinking, "low");
+  assert.equal(resolved.reviewers[2]?.model, "px:openai/agnes-2.0-flash");
+  assert.equal(resolved.reviewers[2]?.thinking, "low");
+
+  // Effective resolution used by child spawn + identity display.
+  for (const reviewer of resolved.reviewers) {
+    const effective = resolveReviewerModelThinking(reviewer, { thinking: "high" });
+    assert.equal(effective.thinking, "low");
+    assert.ok(effective.model && !effective.model.endsWith(":low"), effective.model);
+  }
 });
 
 test("named panel applies overrides by preset reviewer id", () => {
