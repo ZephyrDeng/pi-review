@@ -93,16 +93,35 @@ export default function piReviewExtension(pi: ExtensionAPI) {
     }
   }
 
-  function argumentCompletions(prefix: string): ReturnType<typeof buildRvCompletions> {
+  function argumentCompletions(
+    prefix: string,
+    strategy: RvStrategy = "panel",
+  ): ReturnType<typeof buildRvCompletions> {
     if (capturedModels && capturedModels.length > 0) {
       const dynamic = buildRvCompletions(prefix, {
         models: capturedModels,
         primaryProvider: capturedPrimaryProvider,
         locale: capturedLocale,
+        strategy,
       });
       if (dynamic && dynamic.length) return dynamic;
     }
-    const filtered = RV_COMPLETIONS.filter((item) => item.value.startsWith(prefix));
+    // Strategy-aware static fallback when the live registry is unavailable.
+    const filtered = RV_COMPLETIONS.filter((item) => {
+      if (!item.value.startsWith(prefix) && !prefix.startsWith(item.value.trim())) {
+        // still allow bare model-ish typing to show --model hint
+        if (strategy !== "models" && !prefix.includes(" ") && !prefix.startsWith("-") && item.value.startsWith("--model")) {
+          return true;
+        }
+        return item.value.startsWith(prefix);
+      }
+      if (strategy === "loop" && (item.value.includes("--keep-session") || item.value.includes("--continue") || item.value === "models")) {
+        return false;
+      }
+      if (strategy === "models") return item.value === "models" || item.value.startsWith("models");
+      if (strategy !== "loop" && item.value.startsWith("--max-rounds")) return false;
+      return true;
+    });
     return filtered.length
       ? filtered.map(({ value, hint }) => ({ value, label: value, description: hint }))
       : null;
@@ -147,19 +166,20 @@ export default function piReviewExtension(pi: ExtensionAPI) {
   pi.registerCommand("rv", {
     description:
       "Panel review. Usage: /rv [--mode plan|challenge] [--model id] [--thinking level] [--keep-session] <natural-language target> | /rv --continue <handle> [opts] [text] | /rv models",
-    getArgumentCompletions: argumentCompletions,
+    getArgumentCompletions: (prefix) => argumentCompletions(prefix, "panel"),
     handler: async (rawArgs, ctx) => handleRvCommand("panel", rawArgs, ctx),
   });
 
   pi.registerCommand("rv-loop", {
     description:
       "Loop closeout review. Usage: /rv-loop [--mode plan|challenge] [--model id] [--max-rounds n] <natural-language target>",
-    getArgumentCompletions: argumentCompletions,
+    getArgumentCompletions: (prefix) => argumentCompletions(prefix, "loop"),
     handler: async (rawArgs, ctx) => handleRvCommand("loop", rawArgs, ctx),
   });
 
   pi.registerCommand("rv-models", {
     description: "List pi-review models. Usage: /rv-models",
+    getArgumentCompletions: (prefix) => argumentCompletions(prefix, "models"),
     handler: async (_rawArgs, ctx) => handleRvCommand("models", "", ctx),
   });
 }

@@ -174,7 +174,35 @@ describe("buildRvCompletions", () => {
     assert.ok(items!.some((i) => i.label === ui.listModels));
     assert.ok(items!.some((i) => i.label === ui.codePreset));
     const tmpl = items!.find((i) => i.label === ui.codePreset)!;
-    assert.ok(tmpl.value.endsWith(" @"));
+    assert.match(tmpl.value, /--model .*@src/);
+  });
+
+  it("/rv-loop empty top-level offers loop presets instead of panel keep-session templates", () => {
+    const items = buildRvCompletions("", { ...deps, strategy: "loop" });
+    assert.ok(items);
+    assert.ok(items!.some((i) => /Loop closeout/.test(i.label)));
+    assert.ok(!items!.some((i) => /Challenge review \(preset\)/.test(i.label)));
+    assert.ok(!items!.some((i) => i.value.includes("--keep-session")));
+  });
+
+  it("/rv-loop bare model typing surfaces catalog matches as --model values", () => {
+    const items = buildRvCompletions("gpt-5.5", { ...deps, strategy: "loop" });
+    assert.ok(items);
+    assert.ok(items!.some((i) => i.value.includes("--model") && i.label.includes("gpt-5.5")));
+  });
+
+  it("/rv-models does not offer panel scene templates or targets", () => {
+    const items = buildRvCompletions("", { ...deps, strategy: "models" });
+    assert.ok(items);
+    assert.ok(items!.every((i) => /model/i.test(i.label)));
+    assert.ok(!items!.some((i) => i.value.includes("@src") || i.value.includes("--model")));
+  });
+
+  it("/rv-loop flag completion includes --max-rounds and excludes --keep-session", () => {
+    const maxRounds = buildRvCompletions("--max", { ...deps, strategy: "loop" });
+    assert.ok(maxRounds?.some((i) => i.label === "--max-rounds"));
+    const keep = buildRvCompletions("--keep", { ...deps, strategy: "loop" });
+    assert.ok(!keep?.some((i) => i.label === "--keep-session"));
   });
 
   it("does not duplicate list-models completion at top level", () => {

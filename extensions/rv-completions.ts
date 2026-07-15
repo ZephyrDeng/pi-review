@@ -39,6 +39,7 @@ export const RV_FLAGS = [
   "--keep-session",
   "--no-stream",
   "--continue",
+  "--max-rounds",
 ] as const;
 
 export const MODE_HINTS: Record<string, string> = {
@@ -49,11 +50,12 @@ export const MODE_HINTS: Record<string, string> = {
 
 export const FLAG_HINTS: Record<string, string> = {
   "--mode": "Review mode: code | plan | challenge",
-  "--model": "provider/model[:thinking]",
+  "--model": "provider/model[:thinking] (short ids ok)",
   "--thinking": "off | minimal | low | medium | high | xhigh",
   "--keep-session": "Keep session for /rv --continue follow-up",
   "--no-stream": "Buffer output until exit (not default)",
   "--continue": "Resume an existing review session",
+  "--max-rounds": "Loop budget ( /rv-loop only )",
 };
 
 /** Minimal model metadata we need; converted from the host's Model registry. */
@@ -77,11 +79,15 @@ export interface ReviewSignals {
   primaryProvider?: string;
 }
 
+export type CompletionStrategy = "panel" | "loop" | "models";
+
 export interface CompletionDeps {
   models?: ModelInfo[];
   primaryProvider?: string;
   priorities?: ReviewModelPriorities;
   locale?: RvLocale;
+  /** Slash-command strategy so completions stay relevant for /rv, /rv-loop, /rv-models. */
+  strategy?: CompletionStrategy;
 }
 
 function localeOf(deps: CompletionDeps): RvLocale {
@@ -365,52 +371,112 @@ function sceneTemplates(
   const codePrimary = primaryPresetForProfile(models, "code", priorities);
   const planPrimary = primaryPresetForProfile(models, "plan", priorities);
   const frontendPrimary = primaryPresetForProfile(models, "frontend", priorities);
+  const strategy = deps.strategy ?? "panel";
 
   const ui = rvUi(localeOf(deps));
-  const templates: { cmd: string; label: string }[] = [];
-  if (codePrimary) {
-    const m = codePrimary.model;
-    templates.push({
-      cmd: `${ui.modeCode} --model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "xhigh")} @`,
-      label: ui.codePreset,
-    });
+  const templates: { cmd: string; label: string; description?: string }[] = [];
+
+  if (strategy === "models") {
+    return [{
+      value: headPrefix.trimEnd(),
+      label: ui.listModels,
+      description: ui.listModelsDesc,
+    }].filter((t) => !tail || fuzzyMatch(t.label, tail) || fuzzyMatch("models", tail));
   }
-  if (frontendPrimary) {
-    const m = frontendPrimary.model;
-    templates.push({
-      cmd: `${ui.modeCode} --model ${m.label}${thinkingSuffixForModel(m, frontendPrimary.thinking)} @`,
-      label: ui.frontendPreset,
-    });
-  }
-  if (planPrimary) {
-    const m = planPrimary.model;
-    templates.push({
-      cmd: `${ui.modePlan} --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @`,
-      label: ui.planPreset,
-    });
-    templates.push({
-      cmd: `${ui.modeChallenge} ${ui.keepSession} --model ${m.label}${thinkingSuffixForModel(m, "xhigh")} @`,
-      label: ui.challengePreset,
-    });
+
+  if (strategy === "loop") {
+    if (codePrimary) {
+      const m = codePrimary.model;
+      templates.push({
+        cmd: `--model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "high")} @src`,
+        label: localeOf(deps) === "zh" ? "Loop 关单（代码）" : "Loop closeout (code)",
+        description: localeOf(deps) === "zh" ? "宿主修 → 再审，直到 clean" : "Host fixes, re-review until clean",
+      });
+      templates.push({
+        cmd: `--max-rounds 2 --model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "high")} fix until clean @src`,
+        label: localeOf(deps) === "zh" ? "Loop 两轮关单" : "Loop closeout (2 rounds)",
+      });
+    }
+    if (planPrimary) {
+      const m = planPrimary.model;
+      templates.push({
+        cmd: `--mode plan --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @docs`,
+        label: localeOf(deps) === "zh" ? "Loop 关单（方案）" : "Loop closeout (plan)",
+      });
+    }
+  } else {
+    if (codePrimary) {
+      const m = codePrimary.model;
+      templates.push({
+        cmd: `--model ${m.label}${thinkingSuffixForModel(m, codePrimary.thinking ?? "xhigh")} @src`,
+        label: ui.codePreset,
+        description: localeOf(deps) === "zh" ? "Panel 代码审查预设" : "Panel code review preset",
+      });
+    }
+    if (frontendPrimary) {
+      const m = frontendPrimary.model;
+      templates.push({
+        cmd: `--model ${m.label}${thinkingSuffixForModel(m, frontendPrimary.thinking)} @src`,
+        label: ui.frontendPreset,
+        description: localeOf(deps) === "zh" ? "Panel 前端/多模态预设" : "Panel frontend / multimodal preset",
+      });
+    }
+    if (planPrimary) {
+      const m = planPrimary.model;
+      templates.push({
+        cmd: `--mode plan --model ${m.label}${thinkingSuffixForModel(m, planPrimary.thinking ?? "high")} @docs`,
+        label: ui.planPreset,
+        description: localeOf(deps) === "zh" ? "Panel 方案审查预设" : "Panel plan review preset",
+      });
+      templates.push({
+        cmd: `--mode challenge --keep-session --model ${m.label}${thinkingSuffixForModel(m, "xhigh")} @docs`,
+        label: ui.challengePreset,
+        description: localeOf(deps) === "zh" ? "Panel 对抗审查（可追问）" : "Panel challenge review (keep session)",
+      });
+    }
   }
 
   return templates
-    .filter((t) => fuzzyMatch(t.label, tail) || t.cmd.includes(tail))
+    .filter((t) => !tail || fuzzyMatch(t.label, tail) || t.cmd.includes(tail))
     .map((t) => ({
       value: `${headPrefix}${t.cmd}`,
       label: t.label,
-      description: t.cmd,
+      description: t.description ?? t.cmd,
     }));
 }
 
-function flagItems(head: string[], tail: string, headPrefix: string): AutocompleteItem[] | null {
+function flagItems(
+  head: string[],
+  tail: string,
+  headPrefix: string,
+  strategy: CompletionStrategy = "panel",
+): AutocompleteItem[] | null {
   // Don't re-suggest boolean flags already present.
   const present = new Set(head);
-  const candidates = filterList(RV_FLAGS, tail).filter((f) => {
+  const allowed = RV_FLAGS.filter((f) => {
+    if (strategy === "loop") {
+      // Loop rejects keep-session / continue; max-rounds is loop-only.
+      if (f === "--keep-session" || f === "--continue") return false;
+      return true;
+    }
+    if (strategy === "models") return false;
+    if (f === "--max-rounds") return false;
+    return true;
+  });
+  const candidates = filterList(allowed, tail).filter((f) => {
     if (f === "--keep-session" || f === "--no-stream") return !present.has(f);
     return true;
   });
   return wrap(candidates, headPrefix, FLAG_HINTS);
+}
+
+function looksLikeModelQuery(tail: string): boolean {
+  if (!tail || tail.startsWith("-") || tail.startsWith("@")) return false;
+  // provider/model, bare id fragments, or model:thinking
+  if (tail.includes("/") || tail.includes(":")) return true;
+  if (/^(gpt|claude|kimi|glm|opus|sonnet|deepseek|minimax|o[0-9]|gemini)/i.test(tail)) return true;
+  // short alphanumeric model-ish tokens (gpt55, kimi-k2)
+  return /^[a-z0-9][a-z0-9._-]{1,}$/i.test(tail) && /[0-9]|gpt|claude|kimi|glm|opus|sonnet/i.test(tail);
 }
 
 function topLevelCompletions(
@@ -421,31 +487,57 @@ function topLevelCompletions(
   sig: ReviewSignals,
 ): AutocompleteItem[] | null {
   const items: AutocompleteItem[] = [];
+  const strategy = deps.strategy ?? "panel";
 
-  // Scene templates (only at top level, before any target/mode chosen is fine).
+  if (strategy === "models") {
+    // /rv-models takes no target; only remind the user.
+    const ui = rvUi(localeOf(deps));
+    if (!tail || fuzzyMatch(ui.listModels, tail) || fuzzyMatch("models", tail)) {
+      items.push({ value: "", label: ui.listModels, description: `${ui.listModelsDesc} · no args needed` });
+    }
+    return items.length ? items : null;
+  }
+
+  // Scene templates for the active strategy.
   if (deps.models?.length) {
     items.push(...sceneTemplates(deps.models, sig, headPrefix, tail, deps));
   }
 
-  items.push(...semanticCompletionItems(localeOf(deps), tail, headPrefix, head));
+  // Panel keeps semantic phrases; loop only needs mode-ish phrases lightly.
+  if (strategy === "panel") {
+    items.push(...semanticCompletionItems(localeOf(deps), tail, headPrefix, head));
+    const ui = rvUi(localeOf(deps));
+    const hasListModelsItem = items.some((i) => i.label === ui.listModels);
+    if (
+      !hasListModelsItem &&
+      (fuzzyMatch(ui.modelsKeyword, tail) ||
+        ui.modelsKeyword.startsWith(tail) ||
+        fuzzyMatch("models", tail))
+    ) {
+      items.push({
+        value: `${headPrefix}${ui.listModels}`,
+        label: ui.listModels,
+        description: ui.listModelsDesc,
+      });
+    }
+  }
 
-  const ui = rvUi(localeOf(deps));
-  const hasListModelsItem = items.some((i) => i.label === ui.listModels);
-  if (
-    !hasListModelsItem &&
-    (fuzzyMatch(ui.modelsKeyword, tail) ||
-      ui.modelsKeyword.startsWith(tail) ||
-      fuzzyMatch("models", tail))
-  ) {
-    items.push({
-      value: `${headPrefix}${ui.listModels}`,
-      label: ui.listModels,
-      description: ui.listModelsDesc,
-    });
+  // Bare model typing: `/rv-loop gpt-5.5` / `/rv openai-codex/gpt-5.5`
+  if (deps.models?.length && looksLikeModelQuery(tail)) {
+    const modelMatches = modelItems(deps.models, sig, `${headPrefix}--model `, tail, deps);
+    if (modelMatches?.length) {
+      // Prefer inserting as --model <id> so the parser/resolver gets a clean flag.
+      items.unshift(
+        ...modelMatches.map((item) => ({
+          ...item,
+          description: [item.description, strategy === "loop" ? "loop model" : "panel model"].filter(Boolean).join(" · "),
+        })),
+      );
+    }
   }
 
   if (tail.startsWith("--")) {
-    const flags = flagItems(head, tail, headPrefix);
+    const flags = flagItems(head, tail, headPrefix, strategy);
     if (flags) items.push(...flags);
   }
 
@@ -464,6 +556,7 @@ export function buildRvCompletions(
   const joinedHead = rawHead.join(" ");
   const headPrefix = joinedHead ? `${joinedHead} ` : "";
   const sig = extractSignals(head, deps);
+  const strategy = deps.strategy ?? "panel";
 
   // 1) --model value position (model list or :thinking suffix).
   if (prev === "--model") {
@@ -485,17 +578,28 @@ export function buildRvCompletions(
     return wrap(filterList(THINKING_LEVELS, tail), headPrefix);
   }
 
-  // 4) --continue value position: defer (no static list; handler owns it).
-  if (prev === "--continue") return null;
-
-  // 5) Flag completion (tail starts with "--").
-  if (tail.startsWith("--")) {
-    return flagItems(head, tail, headPrefix);
+  // 4) --max-rounds value position (loop only).
+  if (prev === "--max-rounds") {
+    if (strategy !== "loop") return null;
+    const rounds = ["1", "2", "3"];
+    return wrap(filterList(rounds, tail), headPrefix, {
+      "1": "One gate, then host fix point",
+      "2": "Two review gates",
+      "3": "Three review gates",
+    });
   }
 
-  // 6) File attachment in progress → defer to built-in file completion.
+  // 5) --continue value position: defer (no static list; handler owns it).
+  if (prev === "--continue") return null;
+
+  // 6) Flag completion (tail starts with "--").
+  if (tail.startsWith("--")) {
+    return flagItems(head, tail, headPrefix, strategy);
+  }
+
+  // 7) File attachment in progress → defer to built-in file completion.
   if (tail.startsWith("@")) return null;
 
-  // 7) Top-level: scene templates + `models` + flags.
+  // 8) Top-level: strategy-aware templates + bare model hints + flags.
   return topLevelCompletions(head, tail, deps, headPrefix, sig);
 }
