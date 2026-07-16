@@ -8,7 +8,7 @@ Skills may use Claude Code tool names. On **Codex** or **Claude Code**, map them
 | `Read`, `Write`, `Edit` | Native file tools |
 | `Skill` | Load and follow the skill instructions directly |
 
-General Codex subagent and worktree mappings live in the **using-superpowers** skill (`references/codex-tools.md`) when that skill is installed; this file is **pi-review–specific** and ships with the pi-review package.
+This file is **pi-review–specific** and ships with the pi-review package.
 
 ## Long-running `pi-review` (default on Codex / Claude Code)
 
