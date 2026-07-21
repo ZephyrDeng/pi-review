@@ -224,7 +224,7 @@ export type JsonStreamActivity =
   | { type: "tool.started"; tool: string; summary?: string }
   | { type: "tool.finished"; tool: string; summary?: string }
   | { type: "text.delta"; text: string }
-  | { type: "usage"; usage: TokenUsage }
+  | { type: "usage"; usage: TokenUsage; responseModel?: string }
   | { type: "agent.finished" };
 
 /** Compact, redacted tool args for renderer-visible activity rows. */
@@ -426,12 +426,22 @@ export class JsonEventStream {
     addUsage(this.accumulate, usage);
     this.sawAnyUsage = true;
     if (responseId) this.completedResponseIds.add(responseId);
-    this.emit.onActivity?.({ type: "usage", usage: { ...this.accumulate } });
+    this.emit.onActivity?.({
+      type: "usage",
+      usage: { ...this.accumulate },
+      ...(this.responseModel ? { responseModel: this.responseModel } : {}),
+    });
   }
 
   private emitUsagePreview(usage: UsageLike): void {
     const preview = { ...this.accumulate };
     addUsage(preview, usage);
-    this.emit.onActivity?.({ type: "usage", usage: preview });
+    // Preview can fire before the first message_end, so the response model may
+    // not be known yet; omit rather than guess.
+    this.emit.onActivity?.({
+      type: "usage",
+      usage: preview,
+      ...(this.responseModel ? { responseModel: this.responseModel } : {}),
+    });
   }
 }

@@ -183,7 +183,10 @@ export type PanelHealth = "healthy" | "needs_human" | "blocked";
 export interface ReviewerOutcome {
   reviewerId: string;
   role?: string;
+  /** Model explicitly configured for this reviewer (CLI flag, preset, or override). */
   model?: string | null;
+  /** Model the provider actually reported for this reviewer's response, when known. */
+  responseModel?: string;
   thinking?: string;
   usage?: TokenUsage;
   durationMs: number;
@@ -222,7 +225,10 @@ export interface PanelReviewMeta extends ReviewMeta, PanelFields {}
 export interface ReviewerSubmission {
   reviewerId: string;
   role?: string;
+  /** Model explicitly configured for this reviewer (CLI flag, preset, or override). */
   model?: string | null;
+  /** Model the provider actually reported for this reviewer's response, when known. */
+  responseModel?: string;
   thinking?: string;
   usage?: TokenUsage;
   durationMs: number;

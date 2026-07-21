@@ -29,7 +29,7 @@ export type ReviewEvent =
   | (ReviewEventBase<"reviewer.tool.started"> & { reviewerId: string; tool: string; summary?: string })
   | (ReviewEventBase<"reviewer.tool.finished"> & { reviewerId: string; tool: string; summary?: string })
   | (ReviewEventBase<"reviewer.text.delta"> & { reviewerId: string; text: string })
-  | (ReviewEventBase<"reviewer.usage"> & { reviewerId: string; usage: TokenUsage })
+  | (ReviewEventBase<"reviewer.usage"> & { reviewerId: string; usage: TokenUsage; responseModel?: string })
   | (ReviewEventBase<"reviewer.completed"> & { reviewerId: string; submission: ReviewerSubmission })
   | (ReviewEventBase<"reviewer.failed"> & { reviewerId: string; message: string })
   | (ReviewEventBase<"reviewer.cancelled"> & { reviewerId: string; message?: string })

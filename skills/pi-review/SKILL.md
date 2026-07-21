@@ -40,7 +40,7 @@ Quote metrics from the run output; never estimate or invent them.
 
 - **ASCII footer** (the `── pi-review` / `── pi-review panel` block): Duration, Tokens as `in · out · cache · reason` plus total, and Cost — the provider-reported value, or `n/a` when the provider reports none. On Pi `/rv` the panel tool result is **plain text / ASCII only** (Pi does not render markdown in tool results) — same classic chrome as the CLI, no `###` headings or fenced code blocks.
 - **Pi Review Panel**: each reviewer row shows **role persona · lifecycle · model · thinking · elapsed · tokens**. Lifecycle is `queued` / `running` / `completed` / `failed` / `cancelled`. Expanded view adds bounded activity, plain-text findings, and the ASCII footer.
-- Machine output: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit it on stdout). Show users the plain review text and ASCII footer, not raw JSON, unless they ask for machine output. Do **not** rewrap the tool result into markdown tables or `###` report sections.
+- Machine output: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit it on stdout). Show users the plain review text and ASCII footer, not raw JSON, unless they ask for machine output. Do **not** rewrap the tool result into markdown tables or `###` report sections. On panel runs the top-level `model` is the reviewers' shared effective model (configured, else provider-reported) or the literal sentinel `"mixed"` when reviewers ran on different models; per-reviewer entries carry their own `model`/`responseModel`.
 
 ## Pi host (`/rv*`)
 

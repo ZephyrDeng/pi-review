@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { formatCost, formatDurationMs, formatReviewMetaAscii, formatReviewMetaJsonLine, formatTokens, formatUsage } from "./meta-footer.js";
-import type { ReviewMeta } from "./types.js";
+import { formatCost, formatDurationMs, formatPanelMetaAscii, formatReviewMetaAscii, formatReviewMetaJsonLine, formatTokens, formatUsage } from "./meta-footer.js";
+import type { PanelReviewMeta, ReviewMeta } from "./types.js";
 
 const sample: ReviewMeta = {
   reviewMode: "code",
@@ -84,4 +84,50 @@ test("ASCII footer shows thinking, tokens, cost, and duration when present", () 
   assert.match(ascii, /Tokens\s+in .*out .*cache/);
   assert.match(ascii, /Cost\s+\$0\.1234/);
   assert.match(ascii, /Duration\s+6m 24s/);
+});
+
+const panelSample: PanelReviewMeta = {
+  strategy: "panel",
+  reviewMode: "code",
+  status: "has_findings",
+  verdict: "request_changes",
+  verdictSource: "parsed",
+  findings: [],
+  actionableCount: 0,
+  durationMs: 1200,
+  model: "provider/model-a",
+  configuredReviewers: 2,
+  successfulReviewers: 2,
+  consensusPolicy: "quorum",
+  consensusThreshold: 2,
+  panelHealth: "healthy",
+  confirmedClusters: [],
+  advisories: [],
+  reviewers: [
+    { reviewerId: "r1", role: "one", model: "provider/model-a", durationMs: 100, status: "clean", verdict: "approve", verdictSource: "parsed", contributed: true },
+    { reviewerId: "r2", role: "two", model: null, responseModel: "provider/model-a", durationMs: 100, status: "clean", verdict: "approve", verdictSource: "parsed", contributed: true },
+  ],
+  adjudicationUsed: false,
+};
+
+test("panel ASCII footer shows a top-level Model line when every reviewer's effective model agrees", () => {
+  const ascii = formatPanelMetaAscii(panelSample);
+  assert.match(ascii, /Model\s+provider\/model-a/);
+});
+
+test("panel ASCII footer renders the mixed sentinel on the Model line as-is", () => {
+  const ascii = formatPanelMetaAscii({ ...panelSample, model: "mixed" });
+  assert.match(ascii, /Model\s+mixed/);
+});
+
+test("panel ASCII footer omits the Model line when no panel-level model is known", () => {
+  const ascii = formatPanelMetaAscii({ ...panelSample, model: null });
+  assert.doesNotMatch(ascii, /Model/);
+});
+
+test("panel ASCII footer reviewer rows fall back to the response model when unconfigured", () => {
+  const ascii = formatPanelMetaAscii(panelSample);
+  // r1 has an explicit configured model; r2 has none and falls back to responseModel.
+  assert.match(ascii, /r1 \| CLEAN \| approve \| role:one \| provider\/model-a/);
+  assert.match(ascii, /r2 \| CLEAN \| approve \| role:two \| provider\/model-a/);
 });

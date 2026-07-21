@@ -134,6 +134,7 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
     `  ${padLabel("Advisories", labelW)}  ${meta.advisories.length} non-blocking`,
   ];
   if (meta.panelPreset) lines.push(`  ${padLabel("Panel", labelW)}  ${meta.panelPreset}`);
+  if (meta.model) lines.push(`  ${padLabel("Model", labelW)}  ${meta.model}`);
   if (meta.thinking) lines.push(`  ${padLabel("Thinking", labelW)}  ${meta.thinking}`);
   if (meta.usage) {
     lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)} · total ${formatTokens(meta.usage.totalTokens)}`);
@@ -146,12 +147,15 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
   lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
   lines.push("  Reviewers:");
   for (const r of meta.reviewers) {
+    // Effective model: the configured model when set, else the model the
+    // provider actually reported (unconfigured reviewers still show what ran).
+    const effectiveModel = r.model ?? r.responseModel;
     const bits = [
       r.reviewerId,
       STATUS_DISPLAY[r.status],
       r.verdict,
       ...(r.role ? [`role:${r.role.split(" ")[0]}`] : []),
-      ...(r.model ? [r.model] : []),
+      ...(effectiveModel ? [effectiveModel] : []),
       ...(r.thinking ? [`think:${r.thinking}`] : []),
       ...(r.usage ? [`total:${formatTokens(r.usage.totalTokens)}`, formatUsage(r.usage)] : []),
       ...(r.usage && typeof r.usage.costTotal === "number" ? [`cost:${formatCost(r.usage.costTotal)}`] : []),

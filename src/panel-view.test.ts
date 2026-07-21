@@ -57,6 +57,75 @@ test("terminal panel usage reuses the CLI aggregation semantics", () => {
   assert.deepEqual(state.aggregate.usage, { input: 180, output: 40, cacheRead: 30, cacheWrite: 0, reasoning: 12, totalTokens: 220 });
 });
 
+test("reviewer.usage backfills an unconfigured reviewer's model from the response model, but never overrides a configured one", () => {
+  const now = Date.now();
+  let state = reducePanelEvent(createPanelViewState(), {
+    v: 1, runId: "run-model", seq: 1, at: now, type: "panel.started", target: "@src", mode: "code",
+    reviewers: [
+      { reviewerId: "r1", role: "one", model: null },
+      { reviewerId: "r2", role: "two", model: "configured/model" },
+    ],
+  });
+
+  // r1 has no configured model: the first usage event's response model fills it in.
+  state = reducePanelEvent(state, {
+    v: 1, runId: "run-model", seq: 2, at: now, type: "reviewer.usage", reviewerId: "r1",
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 2 },
+    responseModel: "provider/model-a",
+  });
+  assert.equal(state.reviewers.r1?.model, "provider/model-a");
+
+  // A later usage event with a different response model must not overwrite it.
+  state = reducePanelEvent(state, {
+    v: 1, runId: "run-model", seq: 3, at: now, type: "reviewer.usage", reviewerId: "r1",
+    usage: { input: 2, output: 2, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 4 },
+    responseModel: "provider/model-b",
+  });
+  assert.equal(state.reviewers.r1?.model, "provider/model-a");
+
+  // r2 already has a configured model: a usage event's response model is ignored.
+  state = reducePanelEvent(state, {
+    v: 1, runId: "run-model", seq: 4, at: now, type: "reviewer.usage", reviewerId: "r2",
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 2 },
+    responseModel: "other/reported-model",
+  });
+  assert.equal(state.reviewers.r2?.model, "configured/model");
+});
+
+test("reviewer.completed backfills model and thinking from the submission, keeping a configured model over the response model", () => {
+  const now = Date.now();
+  let state = reducePanelEvent(createPanelViewState(), {
+    v: 1, runId: "run-completed-model", seq: 1, at: now, type: "panel.started", target: "@src", mode: "code",
+    reviewers: [
+      { reviewerId: "configured", role: "one", model: "openai/gpt" },
+      { reviewerId: "unconfigured", role: "two", model: null },
+    ],
+  });
+
+  // Configured reviewer: submission carries both a matching model and a response
+  // model (plus thinking); the configured model must win, thinking backfills.
+  state = reducePanelEvent(state, {
+    v: 1, runId: "run-completed-model", seq: 2, at: now, type: "reviewer.completed", reviewerId: "configured",
+    submission: {
+      reviewerId: "configured", role: "one", model: "openai/gpt", responseModel: "actual/reported", thinking: "high",
+      durationMs: 10, result: { status: "clean", verdict: "approve", verdictSource: "parsed", findings: [], actionableCount: 0 },
+    },
+  });
+  assert.equal(state.reviewers.configured?.model, "openai/gpt");
+  assert.equal(state.reviewers.configured?.thinking, "high");
+
+  // Unconfigured reviewer: no configured model at all, so the response model backfills it.
+  state = reducePanelEvent(state, {
+    v: 1, runId: "run-completed-model", seq: 3, at: now, type: "reviewer.completed", reviewerId: "unconfigured",
+    submission: {
+      reviewerId: "unconfigured", role: "two", model: null, responseModel: "actual/reported",
+      durationMs: 10, result: { status: "clean", verdict: "approve", verdictSource: "parsed", findings: [], actionableCount: 0 },
+    },
+  });
+  assert.equal(state.reviewers.unconfigured?.model, "actual/reported");
+  assert.equal(state.reviewers.unconfigured?.thinking, undefined);
+});
+
 test("panel reducer ignores duplicates, unknown events, and out-of-order delivery", () => {
   const started = event("panel.started", 1, { target: "@src", mode: "code", reviewers: [] });
   const state = reducePanelEvent(createPanelViewState(), started);

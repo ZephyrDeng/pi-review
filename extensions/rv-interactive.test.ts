@@ -63,22 +63,28 @@ function seed(over: Partial<RvParsed> = {}): RvParsed {
   };
 }
 
+/** Push this into `selects` to simulate the user pressing Esc on that select step. */
+const SELECT_CANCEL = "__cancel__";
+
 function scriptedUi(answers: {
   selects?: string[];
   inputs?: string[];
   confirms?: boolean[];
   customModelPickerResults?: (string | "__skip__" | undefined)[];
-}): InteractiveUi & { log: string[] } {
+}): InteractiveUi & { log: string[]; confirmMessages: string[] } {
   const selects = [...(answers.selects ?? [])];
   const inputs = [...(answers.inputs ?? [])];
   const confirms = [...(answers.confirms ?? [])];
   const pickerResults = [...(answers.customModelPickerResults ?? [])];
   const log: string[] = [];
+  const confirmMessages: string[] = [];
   return {
     log,
+    confirmMessages,
     async select(title, options) {
       log.push(`select:${title} :: ${options.slice(0, 3).join(" | ")}`);
-      return selects.shift() ?? options[0];
+      const next = selects.length > 0 ? selects.shift() : options[0];
+      return next === SELECT_CANCEL ? undefined : next;
     },
     async input(title) {
       log.push(`input:${title}`);
@@ -87,6 +93,7 @@ function scriptedUi(answers: {
     async confirm(title, message) {
       log.push(`confirm:${title}`);
       log.push(message.split("\n")[0] ?? "");
+      confirmMessages.push(message);
       return confirms.shift() ?? true;
     },
     notify(message) {
@@ -152,7 +159,7 @@ test("wizard assigns per-reviewer models through select dialogs", async () => {
       "1 · host fix point (recommended)",
       "Custom reviewer count 2–8 (r1..rN, pick models)",
       "3",
-      "Pick separately for each reviewer",
+      "Pick a model for each reviewer",
       "openai-codex/gpt-5.6-sol",
       "xhigh",
       "anthropic/claude-sonnet-4-5",
@@ -162,7 +169,7 @@ test("wizard assigns per-reviewer models through select dialogs", async () => {
       "quorum · at least min-agree agree (default)",
       "2",
     ],
-    confirms: [true, true],
+    confirms: [true],
   });
 
   const result = await runRvInteractiveWizard(ui, {
@@ -184,6 +191,9 @@ test("wizard assigns per-reviewer models through select dialogs", async () => {
     "r2=anthropic/claude-sonnet-4-5:high",
     "r3=openai-codex/gpt-5.6-sol:xhigh",
   ]);
+  // Confirm summary shows every reviewer's resolved model, not a raw reviewer-models dump.
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /reviewer models: r1=openai-codex\/gpt-5\.6-sol:xhigh, r2=anthropic\/claude-sonnet-4-5:high, r3=openai-codex\/gpt-5\.6-sol:xhigh/);
 });
 
 test("wizard keeps an explicit single-reviewer non-panel choice", async () => {
@@ -208,6 +218,9 @@ test("wizard keeps an explicit single-reviewer non-panel choice", async () => {
   assert.equal(result!.reviewers, 1);
   assert.equal(result!.panel, undefined);
   assert.equal(result!.consensus, undefined);
+  // Single-reviewer summary keeps the `model:` line and shows the Pi default placeholder.
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /model: Pi default/);
 });
 
 test("wizard can use code-experts preset and shared model", async () => {
@@ -224,7 +237,7 @@ test("wizard can use code-experts preset and shared model", async () => {
       "quorum · at least min-agree agree (default)",
       "2",
     ],
-    confirms: [true, true],
+    confirms: [true],
   });
 
   const result = await runRvInteractiveWizard(ui, {
@@ -241,6 +254,62 @@ test("wizard can use code-experts preset and shared model", async () => {
     "security=openai-codex/gpt-5.6-sol:xhigh",
     "testing=openai-codex/gpt-5.6-sol:xhigh",
   ]);
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /reviewer models: correctness=openai-codex\/gpt-5\.6-sol:xhigh, security=openai-codex\/gpt-5\.6-sol:xhigh, testing=openai-codex\/gpt-5\.6-sol:xhigh/);
+});
+
+test("wizard can skip model assignment and use Pi's default model for every reviewer", async () => {
+  const ui = scriptedUi({
+    inputs: ["review auth"],
+    selects: [
+      "code review (code)",
+      "Single gate (fix then re-run /rv-loop) · recommended",
+      "1 · host fix point (recommended)",
+      "Preset code-experts (correctness/security/testing)",
+      "Use Pi's default model (resolved at runtime)",
+      "quorum · at least min-agree agree (default)",
+      "2",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "loop",
+    seed: seed(),
+    models,
+    locale: "en",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.panel, "code-experts");
+  // No per-reviewer overrides and no shared --model: every reviewer resolves at runtime.
+  assert.equal(result!.reviewerModels, undefined);
+  assert.equal(result!.model, undefined);
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /reviewer models: correctness=Pi default, security=Pi default, testing=Pi default/);
+});
+
+test("wizard cancels when the user escapes the model-assignment select", async () => {
+  const ui = scriptedUi({
+    inputs: ["review auth"],
+    selects: [
+      "code review (code)",
+      "Single gate (fix then re-run /rv-loop) · recommended",
+      "1 · host fix point (recommended)",
+      "Preset code-experts (correctness/security/testing)",
+      SELECT_CANCEL,
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "loop",
+    seed: seed(),
+    models,
+    locale: "en",
+  });
+
+  assert.equal(result, undefined);
 });
 
 test("wizard can select until-clean with a hard budget", async () => {
@@ -257,7 +326,7 @@ test("wizard can select until-clean with a hard budget", async () => {
       "quorum · at least min-agree agree (default)",
       "2",
     ],
-    confirms: [true, true],
+    confirms: [true],
   });
 
   const result = await runRvInteractiveWizard(ui, {
@@ -527,7 +596,7 @@ test("inline picker: per-reviewer models resolve through repeated picker calls",
       "1 · host fix point (recommended)",
       "Custom reviewer count 2–8 (r1..rN, pick models)",
       "3",
-      "Pick separately for each reviewer",
+      "Pick a model for each reviewer",
       // thinking selects for r1, r2, r3
       "xhigh",
       "high",
@@ -535,7 +604,7 @@ test("inline picker: per-reviewer models resolve through repeated picker calls",
       "quorum · at least min-agree agree (default)",
       "2",
     ],
-    confirms: [true, true],
+    confirms: [true],
     customModelPickerResults: [
       "openai/gpt-5.6-luna",
       "anthropic/claude-opus-4",
@@ -559,4 +628,106 @@ test("inline picker: per-reviewer models resolve through repeated picker calls",
   // The picker was invoked once per reviewer.
   const pickerCalls = uiPanel.log.filter((e) => e.startsWith("customModelPicker:"));
   assert.equal(pickerCalls.length, 3, uiPanel.log.join("\n"));
+});
+
+test("wizard (zh) per-reviewer branch routes on the exact zh option label", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "代码审查 (code)",
+      "预设 code-experts（正确性/安全/测试）",
+      "每位 reviewer 分别选择模型",
+      "openai-codex/gpt-5.6-sol",
+      "xhigh",
+      "anthropic/claude-sonnet-4-5",
+      "high",
+      "openai-codex/gpt-5.6-sol",
+      "xhigh",
+      "quorum · 至少 min-agree 人同意（默认）",
+      "2",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models,
+    locale: "zh",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.panel, "code-experts");
+  assert.deepEqual(result!.reviewerModels, [
+    "correctness=openai-codex/gpt-5.6-sol:xhigh",
+    "security=anthropic/claude-sonnet-4-5:high",
+    "testing=openai-codex/gpt-5.6-sol:xhigh",
+  ]);
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /reviewer 模型: correctness=openai-codex\/gpt-5\.6-sol:xhigh, security=anthropic\/claude-sonnet-4-5:high, testing=openai-codex\/gpt-5\.6-sol:xhigh/);
+});
+
+test("wizard (zh) Pi-default branch skips model prompts and shows the zh placeholder per reviewer", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "代码审查 (code)",
+      "预设 code-experts（正确性/安全/测试）",
+      "使用 Pi 默认模型（运行时解析实际模型）",
+      "quorum · 至少 min-agree 人同意（默认）",
+      "2",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models,
+    locale: "zh",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.panel, "code-experts");
+  assert.equal(result!.reviewerModels, undefined);
+  assert.equal(result!.model, undefined);
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /reviewer 模型: correctness=Pi 默认, security=Pi 默认, testing=Pi 默认/);
+  // No model picker step ran: the wizard never offered a model list select.
+  assert.ok(!ui.log.some((entry) => entry.startsWith("select:共用模型") || entry.startsWith("select:模型 · ")), ui.log.join("\n"));
+});
+
+test("wizard (zh) shared-model branch writes the same token for every reviewer id", async () => {
+  const ui = scriptedUi({
+    inputs: ["@src"],
+    selects: [
+      "代码审查 (code)",
+      "预设 code-experts（正确性/安全/测试）",
+      "所有 reviewer 使用同一模型",
+      "openai-codex/gpt-5.6-sol",
+      "xhigh",
+      "quorum · 至少 min-agree 人同意（默认）",
+      "2",
+    ],
+    confirms: [true],
+  });
+
+  const result = await runRvInteractiveWizard(ui, {
+    strategy: "panel",
+    seed: seed({ strategy: "panel" }),
+    models,
+    locale: "zh",
+  });
+
+  assert.ok(result);
+  assert.equal(result!.panel, "code-experts");
+  assert.deepEqual(result!.reviewerModels, [
+    "correctness=openai-codex/gpt-5.6-sol:xhigh",
+    "security=openai-codex/gpt-5.6-sol:xhigh",
+    "testing=openai-codex/gpt-5.6-sol:xhigh",
+  ]);
+  const summary = ui.confirmMessages.at(-1) ?? "";
+  assert.match(summary, /reviewer 模型: correctness=openai-codex\/gpt-5\.6-sol:xhigh, security=openai-codex\/gpt-5\.6-sol:xhigh, testing=openai-codex\/gpt-5\.6-sol:xhigh/);
+  // The shared-model picker (zh title) actually ran.
+  assert.ok(ui.log.some((entry) => entry.startsWith("select:共用模型")), ui.log.join("\n"));
 });

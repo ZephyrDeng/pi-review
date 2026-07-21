@@ -113,7 +113,7 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 ### 机器输出
 
-一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。
+一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。面板级 `model` 取各审查者的有效模型（显式配置优先，否则取 provider 上报的 `responseModel`）：全员一致时为该值，不一致时为字面量 `"mixed"` —— 解析 `model` 字段的机器消费方需要识别这个哨兵值；每个 reviewer 条目仍各自携带 `model`/`responseModel`。
 
 ### Pi 实时进度与事件回放
 

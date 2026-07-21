@@ -27,7 +27,7 @@ import type { TokenUsage } from "./types.js";
 import { fail, expandMaybeHome } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
 import { resolvePanelConfig, resolveReviewerModelThinking, type ResolvedPanelConfig } from "./panel-config.js";
-import { aggregatePanel } from "./panel-aggregate.js";
+import { aggregatePanel, resolvePanelEffectiveModel } from "./panel-aggregate.js";
 import { sumPanelUsage } from "./panel-usage.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
@@ -152,7 +152,7 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
           emit("reviewer.text.delta", { reviewerId: reviewer.id, text: event.text });
           break;
         case "usage":
-          emit("reviewer.usage", { reviewerId: reviewer.id, usage: event.usage });
+          emit("reviewer.usage", { reviewerId: reviewer.id, usage: event.usage, ...(event.responseModel ? { responseModel: event.responseModel } : {}) });
           break;
       }
     },
@@ -190,7 +190,7 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
 
   let extractedError: string | undefined;
   let extractedFatal = false;
-  const reviewerUsage = streamParser.usage().usage;
+  const { usage: reviewerUsage, responseModel } = streamParser.usage();
   {
     const extracted = extractFinalText(stdout);
     stdout = extracted.text;
@@ -222,6 +222,7 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
     model: model ?? null,
     ...(thinking ? { thinking } : {}),
     ...(reviewerUsage ? { usage: reviewerUsage } : {}),
+    ...(responseModel ? { responseModel } : {}),
     durationMs: 0, // set by caller wrapper
     result: structured,
   };
@@ -460,11 +461,16 @@ export async function runPanelReviewOnce(
         ? "mixed"
         : parsed.thinking || preset.thinking;
 
+  // Panel-level model: same one-value-or-mixed rule as thinking, over each
+  // reviewer's effective model (configured, else provider-reported) so an
+  // unconfigured panel still surfaces the model every reviewer actually ran on.
+  const panelModel = resolvePanelEffectiveModel(submissions, parsed.model || preset.model || null);
+
   const panelMeta: PanelReviewMeta = {
     ...aggregate,
     reviewMode: parsed.mode,
     durationMs: Date.now() - startedAt,
-    model: parsed.model || preset.model || null,
+    model: panelModel,
     thinking: panelThinking,
     usage: sumPanelUsage(submissions.map((s) => s.usage)),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),

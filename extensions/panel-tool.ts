@@ -112,7 +112,9 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
     return fromMeta.map((reviewer) => {
       const live = state.reviewers[reviewer.reviewerId];
       const role = reviewer.role ? ` · ${reviewer.role}` : "";
-      const model = reviewer.model ? ` · ${reviewer.model}` : "";
+      // Effective model: configured model when set, else the provider-reported model.
+      const effectiveModel = reviewer.model ?? reviewer.responseModel;
+      const model = effectiveModel ? ` · ${effectiveModel}` : "";
       const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
       const usage = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok · ${formatUsage(reviewer.usage)}` : "";
       const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";

@@ -275,6 +275,48 @@ test("Pi panel result content includes duration, token, and cost metrics", () =>
   assert.match(content, /\$0\.0617/);
 });
 
+test("panel tool reviewer summary falls back to the response model when a reviewer has no configured model", () => {
+  const content = buildPanelResultContent({
+    ...createPanelViewState(),
+    meta: {
+      strategy: "panel",
+      reviewMode: "code",
+      status: "clean",
+      verdict: "approve",
+      verdictSource: "parsed",
+      findings: [],
+      actionableCount: 0,
+      durationMs: 100,
+      model: "actual/reported-model",
+      configuredReviewers: 1,
+      successfulReviewers: 1,
+      consensusPolicy: "quorum",
+      consensusThreshold: 1,
+      panelHealth: "healthy",
+      confirmedClusters: [],
+      advisories: [],
+      reviewers: [
+        {
+          reviewerId: "r1",
+          role: "Independent reviewer",
+          model: null,
+          responseModel: "actual/reported-model",
+          durationMs: 90,
+          status: "clean",
+          verdict: "approve",
+          verdictSource: "parsed",
+          contributed: true,
+        },
+      ],
+      adjudicationUsed: false,
+    },
+  });
+  // Panel-level Model line (meta-footer.ts) and the reviewer summary line
+  // (panel-tool.ts fromMeta branch) both fall back to the response model.
+  assert.match(content, /Model\s+actual\/reported-model/);
+  assert.match(content, /- r1 · Independent reviewer · actual\/reported-model · clean · approve/);
+});
+
 test("panel tool updates and clears ambient footer status during execute", async () => {
   const statuses: Array<string | undefined> = [];
   let registered: { execute: (...args: any[]) => Promise<any> } | undefined;

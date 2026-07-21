@@ -176,7 +176,7 @@ Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication cal
 
 ### Machine output
 
-A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields.
+A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields. The panel-level `model` is each reviewer's effective model (configured, else the provider-reported `responseModel`) when they all agree, and the literal sentinel `"mixed"` when reviewers ran on different models — machine consumers parsing `model` must expect that value; per-reviewer entries keep their own `model`/`responseModel`.
 
 ### Live Pi progress and event replay
 

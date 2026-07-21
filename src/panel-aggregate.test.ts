@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { aggregatePanel, effectiveThreshold } from "./panel-aggregate.js";
+import { aggregatePanel, effectiveThreshold, resolvePanelEffectiveModel } from "./panel-aggregate.js";
 import { DeterministicMatcher, SemanticMatcher, type FindingMatcher } from "./matcher.js";
 import type {
   ConsensusPolicy,
@@ -52,12 +52,13 @@ function review(
 function submission(
   reviewerId: string,
   result: StructuredReviewResult,
-  opts: { role?: string; model?: string | null; durationMs?: number } = {},
+  opts: { role?: string; model?: string | null; responseModel?: string; durationMs?: number } = {},
 ): ReviewerSubmission {
   return {
     reviewerId,
     ...(opts.role ? { role: opts.role } : {}),
     model: opts.model ?? null,
+    ...(opts.responseModel ? { responseModel: opts.responseModel } : {}),
     durationMs: opts.durationMs ?? 100,
     result,
   };
@@ -516,4 +517,76 @@ test("F7: a matcher that assigns a source id to multiple groups is rejected as n
   });
   assert.equal(result.status, "needs_human");
   assert.ok(result.adjudicationErrors?.some((e) => /multiple groups/.test(e)));
+});
+
+test("reviewer outcome carries responseModel through aggregation; absent stays absent", async () => {
+  const reviewers = [
+    submission("r1", review("clean", []), { responseModel: "provider/model-a" }),
+    submission("r2", review("clean", []), { model: "explicit/model-b" }),
+  ];
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher: byPathSummary(),
+  });
+  const r1 = result.reviewers.find((r) => r.reviewerId === "r1")!;
+  const r2 = result.reviewers.find((r) => r.reviewerId === "r2")!;
+  assert.equal(r1.responseModel, "provider/model-a");
+  assert.equal(r1.model, null);
+  assert.equal(r2.model, "explicit/model-b");
+  assert.ok(!("responseModel" in r2));
+});
+
+test("resolvePanelEffectiveModel: one shared effective value wins across configured and reported", () => {
+  const model = resolvePanelEffectiveModel(
+    [
+      { model: "prov/model-x" },
+      { model: null, responseModel: "prov/model-x" },
+    ],
+    null,
+  );
+  assert.equal(model, "prov/model-x");
+});
+
+test("resolvePanelEffectiveModel: divergent effective models collapse to the mixed sentinel", () => {
+  const model = resolvePanelEffectiveModel(
+    [
+      { model: "prov/model-x" },
+      { model: null, responseModel: "prov/model-y" },
+    ],
+    null,
+  );
+  assert.equal(model, "mixed");
+});
+
+test("resolvePanelEffectiveModel: no models anywhere falls back to the caller value", () => {
+  assert.equal(resolvePanelEffectiveModel([{ model: null }, { model: null }], "shared/fallback"), "shared/fallback");
+  assert.equal(resolvePanelEffectiveModel([{ model: null }, { model: null }], null), null);
+});
+
+test("resolvePanelEffectiveModel: partially configured panel with divergent reported models stays mixed", () => {
+  const model = resolvePanelEffectiveModel(
+    [
+      { model: "prov/model-x" },
+      { model: null, responseModel: "prov/model-y" },
+      { model: null, responseModel: "prov/model-z" },
+    ],
+    null,
+  );
+  assert.equal(model, "mixed");
+});
+
+test("resolvePanelEffectiveModel: configured model outranks its own responseModel, unifying the panel", () => {
+  // If responseModel outranked the configured model, this panel would read as
+  // mixed; configured-first precedence collapses it to the single shared value.
+  const model = resolvePanelEffectiveModel(
+    [
+      { model: "prov/model-x", responseModel: "prov/underlying-y" },
+      { model: null, responseModel: "prov/model-x" },
+    ],
+    null,
+  );
+  assert.equal(model, "prov/model-x");
 });

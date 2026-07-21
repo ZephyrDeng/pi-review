@@ -122,6 +122,54 @@ test("panel review with two corroborating reviewers confirms one finding and exi
   assert.equal((meta!.advisories as unknown[]).length, 0);
   assert.equal((meta!.reviewers as unknown[]).length, 3);
   assert.equal((meta!.confirmedClusters as Array<{ supportCount: number }>)[0]!.supportCount, 2);
+
+  // No --model configured for any reviewer: each still surfaces the model pi
+  // actually ran on (via responseModel), and the panel Model line reflects it
+  // too since every reviewer converged on the same one.
+  const reviewerMetas = meta!.reviewers as Array<{ model: string | null; responseModel?: string }>;
+  for (const r of reviewerMetas) {
+    assert.equal(r.model, null);
+    assert.equal(r.responseModel, "fake/model");
+  }
+  assert.equal(meta!.model, "fake/model");
+  assert.match(result.stdout, /Model\s+fake\/model/);
+});
+
+test("panel review keeps an explicitly configured reviewer model even when the provider reports a different one", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  const result = runPanelCli(fakePi, "agree-bug", [
+    "--reviewers", "3",
+    "--consensus", "quorum", "--min-agree", "2",
+    "--reviewer-model", "r1=configured/explicit-model:low",
+  ]);
+  assert.equal(result.status, 1, result.stderr);
+  const meta = metaRecord(result);
+  assert.ok(meta, result.stderr);
+  const reviewerMetas = meta!.reviewers as Array<{ reviewerId: string; model: string | null; responseModel?: string; thinking?: string }>;
+
+  // Trailing :thinking still splits off and wins over any shared thinking.
+  const r1 = reviewerMetas.find((r) => r.reviewerId === "r1")!;
+  assert.equal(r1.model, "configured/explicit-model");
+  assert.equal(r1.thinking, "low");
+  // The provider-reported model is still recorded for machine consumption...
+  assert.equal(r1.responseModel, "fake/model");
+  // ...but display precedence keeps the configured model, never overridden.
+  const r1Line = result.stdout.split("\n").find((line) => line.includes("- r1 |"));
+  assert.ok(r1Line, result.stdout);
+  assert.match(r1Line!, /configured\/explicit-model/);
+  assert.doesNotMatch(r1Line!, /fake\/model/);
+
+  // Reviewers without an override still surface the actual provider model.
+  const r2 = reviewerMetas.find((r) => r.reviewerId === "r2")!;
+  assert.equal(r2.model, null);
+  assert.equal(r2.responseModel, "fake/model");
+
+  // Mixed configured + discovered models across the panel -> panel-level "mixed".
+  assert.equal(meta!.model, "mixed");
+  // The sentinel also reaches the human-readable ASCII footer Model line.
+  assert.match(result.stdout, /Model\s+mixed/);
 });
 
 test("panel review where all reviewers approve is clean and exits 0", () => {

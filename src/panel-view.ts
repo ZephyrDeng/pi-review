@@ -143,11 +143,17 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
       reviewer = appendTextDelta({ ...previous, status: "running", activityAt: event.at }, event.text);
       break;
     case "reviewer.usage":
-      reviewer = { ...previous, usage: event.usage, activityAt: event.at };
+      // Runtime model discovery: an unconfigured reviewer shows nothing until
+      // usage arrives with the provider-reported model. Never override an
+      // already-known configured model.
+      reviewer = { ...previous, usage: event.usage, activityAt: event.at, model: previous.model ?? event.responseModel ?? null };
       break;
-    case "reviewer.completed":
-      reviewer = addActivity({ ...previous, status: "completed", activeTool: undefined, activeToolSummary: undefined, completedAt: event.at, activityAt: event.at, usage: event.submission.usage ?? previous.usage, submission: event.submission }, "review completed");
+    case "reviewer.completed": {
+      const model = event.submission.model ?? event.submission.responseModel ?? previous.model;
+      const thinking = event.submission.thinking ?? previous.thinking;
+      reviewer = addActivity({ ...previous, status: "completed", activeTool: undefined, activeToolSummary: undefined, completedAt: event.at, activityAt: event.at, usage: event.submission.usage ?? previous.usage, submission: event.submission, model, thinking }, "review completed");
       break;
+    }
     case "reviewer.failed":
       reviewer = addActivity({ ...previous, status: "failed", activeTool: undefined, activeToolSummary: undefined, completedAt: event.at, activityAt: event.at, error: event.message }, event.message);
       break;

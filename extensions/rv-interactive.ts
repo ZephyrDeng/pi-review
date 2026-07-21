@@ -430,77 +430,60 @@ export async function runRvInteractiveWizard(
   const labels = rankedModelLabels(models, mode);
 
   if (ids.length > 0) {
-    const assignEach = await ui.confirm(
-      zh ? "为每位 reviewer 选择模型？" : "Pick a model for each reviewer?",
-      zh
-        ? `将依次为 ${ids.join(", ")} 弹出模型列表（方向键选择，回车确认）。选「同一模型」可共用。`
-        : `You will pick models for ${ids.join(", ")} from a list (arrows + enter). Choose "Same model for all" to share.`,
+    // Branch on stable keys, not display-label substrings, so copy edits in
+    // either language can never silently reroute the wizard.
+    const assignmentOptions: Array<{ key: "per-reviewer" | "shared" | "pi-default"; label: string }> = [
+      { key: "per-reviewer", label: zh ? "每位 reviewer 分别选择模型" : "Pick a model for each reviewer" },
+      { key: "shared", label: zh ? "所有 reviewer 使用同一模型" : "Same model for all reviewers" },
+      { key: "pi-default", label: zh ? "使用 Pi 默认模型（运行时解析实际模型）" : "Use Pi's default model (resolved at runtime)" },
+    ];
+    const assignmentChoice = await mustSelect(
+      ui,
+      zh ? "模型分配方式" : "Model assignment",
+      assignmentOptions.map((option) => option.label),
     );
+    if (assignmentChoice === CANCEL) return undefined;
+    const assignment = assignmentOptions.find((option) => option.label === assignmentChoice)?.key ?? "pi-default";
 
-    if (assignEach) {
-      const sameFirst = await mustSelect(
-        ui,
-        zh ? "模型分配方式" : "Model assignment",
-        [
-          zh ? "每位 reviewer 分别选择" : "Pick separately for each reviewer",
-          zh ? "所有 reviewer 使用同一模型" : "Same model for all reviewers",
-        ],
-      );
-      if (sameFirst === CANCEL) return undefined;
-
-      if (sameFirst.includes("Same") || sameFirst.includes("同一")) {
-        if (labels.length === 0) {
-          ui.notify(zh ? "当前没有可用模型目录，请先 /rv-models" : "No model catalog available; run /rv-models first", "warning");
-        } else {
-          const pick = await pickModelLabel(ui, models, mode, locale, zh ? "共用模型" : "Shared model", false);
-          if (pick === CANCEL) return undefined;
-          if (pick !== undefined) {
-            const m = modelByLabel(models, pick);
-            const thinkingPick = await mustSelect(
-              ui,
-              zh ? `思考强度（${pick}）` : `Thinking (${pick})`,
-              thinkingOptions(m, locale),
-            );
-            if (thinkingPick === CANCEL) return undefined;
-            const thinking = stripSkip(thinkingPick, locale);
-            const token = thinking ? `${pick}:${thinking}` : pick;
-            for (const id of ids) reviewerModels.push(`${id}=${token}`);
-          }
-        }
-      } else {
-        for (const id of ids) {
-          if (labels.length === 0) break;
-          const pick = await pickModelLabel(ui, models, mode, locale, zh ? `模型 · ${id}` : `Model · ${id}`, false);
-          if (pick === CANCEL) return undefined;
-          if (pick === undefined) continue; // defensive: allowSkip=false never returns undefined here
-          const m = modelByLabel(models, pick);
-          const thinkingPick = await mustSelect(
-            ui,
-            zh ? `思考强度 · ${id}` : `Thinking · ${id}`,
-            thinkingOptions(m, locale),
-          );
-          if (thinkingPick === CANCEL) return undefined;
-          const thinking = stripSkip(thinkingPick, locale);
-          reviewerModels.push(`${id}=${thinking ? `${pick}:${thinking}` : pick}`);
-        }
-      }
-    } else if (!seed.model && labels.length > 0) {
-      // Shared default model when not assigning per-reviewer
-      const pick = await pickModelLabel(ui, models, mode, locale, zh ? "默认模型（全体 reviewer）" : "Default model (all reviewers)", true);
-      if (pick === CANCEL) return undefined;
-      if (pick !== undefined) {
+    if (assignment === "per-reviewer") {
+      for (const id of ids) {
+        if (labels.length === 0) break;
+        const pick = await pickModelLabel(ui, models, mode, locale, zh ? `模型 · ${id}` : `Model · ${id}`, false);
+        if (pick === CANCEL) return undefined;
+        if (pick === undefined) continue; // defensive: allowSkip=false never returns undefined here
         const m = modelByLabel(models, pick);
         const thinkingPick = await mustSelect(
           ui,
-          zh ? "默认思考强度" : "Default thinking",
+          zh ? `思考强度 · ${id}` : `Thinking · ${id}`,
           thinkingOptions(m, locale),
         );
         if (thinkingPick === CANCEL) return undefined;
         const thinking = stripSkip(thinkingPick, locale);
-        seed.model = pick;
-        if (thinking) seed.thinking = thinking;
+        reviewerModels.push(`${id}=${thinking ? `${pick}:${thinking}` : pick}`);
+      }
+    } else if (assignment === "shared") {
+      if (labels.length === 0) {
+        ui.notify(zh ? "当前没有可用模型目录，请先 /rv-models" : "No model catalog available; run /rv-models first", "warning");
+      } else {
+        const pick = await pickModelLabel(ui, models, mode, locale, zh ? "共用模型" : "Shared model", false);
+        if (pick === CANCEL) return undefined;
+        if (pick !== undefined) {
+          const m = modelByLabel(models, pick);
+          const thinkingPick = await mustSelect(
+            ui,
+            zh ? `思考强度（${pick}）` : `Thinking (${pick})`,
+            thinkingOptions(m, locale),
+          );
+          if (thinkingPick === CANCEL) return undefined;
+          const thinking = stripSkip(thinkingPick, locale);
+          const token = thinking ? `${pick}:${thinking}` : pick;
+          for (const id of ids) reviewerModels.push(`${id}=${token}`);
+        }
       }
     }
+    // else: Pi default for every reviewer — no reviewerModels, no further prompt.
+    // The confirm summary below still shows each reviewer's resolved model
+    // (falling back to the shared --model flag, then a "Pi default" placeholder).
   } else if (!seed.model && labels.length > 0) {
     // Single-reviewer path
     const pick = await pickModelLabel(ui, models, mode, locale, zh ? "模型" : "Model", true);
@@ -543,6 +526,23 @@ export async function runRvInteractiveWizard(
   }
 
   // 7) Confirm summary
+  // Per-reviewer effective model for the confirm summary: explicit override →
+  // shared --model (if set) → "Pi default" placeholder. Mirrors what the CLI
+  // actually resolves at runtime (resolveReviewerModelThinking).
+  const piDefaultLabel = zh ? "Pi 默认" : "Pi default";
+  const reviewerModelOverrides = new Map(
+    reviewerModels.map((entry) => {
+      const eq = entry.indexOf("=");
+      return [entry.slice(0, eq), entry.slice(eq + 1)] as const;
+    }),
+  );
+  const reviewerModelSummary = ids.map((id) => {
+    const override = reviewerModelOverrides.get(id);
+    if (override) return `${id}=${override}`;
+    if (seed.model) return `${id}=${seed.model}${seed.thinking ? `:${seed.thinking}` : ""}`;
+    return `${id}=${piDefaultLabel}`;
+  });
+
   const summaryLines = [
     `${zh ? "策略" : "Strategy"}: ${strategy}`,
     `${zh ? "目标" : "Target"}: ${target}`,
@@ -559,8 +559,11 @@ export async function runRvInteractiveWizard(
         : zh
           ? "单 reviewer"
           : "single reviewer",
-    seed.model ? `model: ${seed.model}${seed.thinking ? `:${seed.thinking}` : ""}` : "",
-    reviewerModels.length ? `reviewer-models: ${reviewerModels.join(", ")}` : "",
+    // Multi-reviewer paths show one resolved model per reviewer id; single-reviewer
+    // and shared-model paths keep the existing single `model:` line.
+    ids.length > 0
+      ? `${zh ? "reviewer 模型" : "reviewer models"}: ${reviewerModelSummary.join(", ")}`
+      : `model: ${seed.model ? `${seed.model}${seed.thinking ? `:${seed.thinking}` : ""}` : piDefaultLabel}`,
     consensus ? `consensus: ${consensus}${minAgree ? ` min-agree=${minAgree}` : ""}` : "",
   ].filter(Boolean);
 

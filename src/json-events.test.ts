@@ -352,6 +352,32 @@ test("JsonEventStream counts repeated usage snapshots once per completed assista
   assert.equal(usageCosts.at(-1), 0.22);
 });
 
+test("JsonEventStream usage activity carries the response model once known, but omits it before then", () => {
+  const activities: Array<{ type: string; responseModel?: string }> = [];
+  const stream = new JsonEventStream({
+    onText: () => {},
+    onMilestone: () => {},
+    onActivity: (event) => {
+      if (event.type === "usage") activities.push(event);
+    },
+  });
+
+  stream.feed(lines(
+    // A live preview snapshot can arrive before the first message_end, when no
+    // response model has been captured yet — it must not guess one.
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: "partial", partial: { role: "assistant", usage: { input: 5, output: 0, totalTokens: 5 } } },
+    },
+    { type: "message_end", message: { role: "assistant", usage: { input: 10, output: 4, totalTokens: 14 }, model: "provider/model" } },
+  ));
+  stream.flush();
+
+  assert.equal(activities.length, 2);
+  assert.equal(activities[0]!.responseModel, undefined);
+  assert.equal(activities[1]!.responseModel, "provider/model");
+});
+
 test("JsonEventStream falls back to agent_end usage when message_end usage is absent", () => {
   assert.deepEqual(parseStreamUsage(fullAgentEndFallbackEvents()), {
     usage: { ...fallbackUsageExpected, costTotal: 0.03 },

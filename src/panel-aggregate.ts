@@ -43,6 +43,25 @@ export function effectiveThreshold(
   }
 }
 
+/**
+ * Panel-level effective model over reviewer submissions: the single value all
+ * reviewers effectively ran on (configured model, else provider-reported),
+ * the literal sentinel "mixed" when they diverge, or the caller's fallback
+ * when no reviewer surfaced a model at all.
+ */
+export function resolvePanelEffectiveModel(
+  submissions: Array<Pick<ReviewerSubmission, "model" | "responseModel">>,
+  fallback: string | null,
+): string | null {
+  const effectiveModels = submissions
+    .map((sub) => sub.model ?? sub.responseModel)
+    .filter((model): model is string => Boolean(model));
+  const uniqueModels = [...new Set(effectiveModels)];
+  if (uniqueModels.length === 1) return uniqueModels[0]!;
+  if (uniqueModels.length > 1) return "mixed";
+  return fallback;
+}
+
 type ReviewerKind = "ok" | "needs_human" | "blocked";
 
 function classifyReviewer(sub: ReviewerSubmission): {
@@ -50,11 +69,12 @@ function classifyReviewer(sub: ReviewerSubmission): {
   kind: ReviewerKind;
   contributed: boolean;
 } {
-  const { result, reviewerId, role, model, thinking, usage, durationMs } = sub;
+  const { result, reviewerId, role, model, responseModel, thinking, usage, durationMs } = sub;
   const outcome: ReviewerOutcome = {
     reviewerId,
     ...(role ? { role } : {}),
     model: model ?? null,
+    ...(responseModel ? { responseModel } : {}),
     ...(thinking ? { thinking } : {}),
     ...(usage ? { usage } : {}),
     durationMs,
