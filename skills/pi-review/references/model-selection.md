@@ -6,11 +6,11 @@ Use this after `pi-review models` (or `pi-review models <search>`). **Never inve
 
 1. Run `pi-review models` (narrow with search if the user named a vendor or model family).
 2. Infer **review profile** from the target (see table below).
-3. Walk the **priority list** for that profile; pick the **first** row whose `idContains` matches some listed model id (case-insensitive substring). If several ids match one row, prefer the **newest** id (higher version suffix, e.g. `2.7` over `2.5`, `4-8` over `4-6`).
+3. **Cross-model review**: identify the host session's own model — the model that wrote or will fix the code under review; its id is in your own session context. Walk the **priority list** for that profile skipping rows in the host's model family, and pick the **first** remaining row whose `idContains` matches some listed model id (case-insensitive substring). Same-family reviewers share the author model's blind spots; return to the host's own family only when no other family matches the catalog. On a panel, spread reviewer models so the host's family stays a minority. If several ids match one row, prefer the **newest** id (higher version suffix, e.g. `2.7` over `2.5`, `4-8` over `4-6`).
 4. Set `--model <exact-listed-provider/model>` from the catalog. Add `:thinking` only if that model supports it in Pi and the preset suggests it (see thinking column).
    - User “max / 最高档” maps to Pi thinking `xhigh` when supported; otherwise fall back to the highest available level.
    - User “low / off / medium / high” maps to that exact level when supported — **do not upgrade** a user-specified low/off to high/xhigh.
-5. If **no** priority row matches anything in the catalog, either omit `--model` (Pi default) or pick the best **reasoning** model with a large context window from the list—state the choice in one line to the user.
+5. When the user named no model, the walk above yields a **proposal, not a decision**: present 2–3 exact catalog ids (cross-model candidates first, one line of why each, plus “Pi default” as an explicit option) and ask the user to pick before running the review. A user-named model skips the ask and resolves per **User-named model** below. If **no** priority row matches anything in the catalog, propose the best **reasoning** models with a large context window from the list the same way.
 
 ## Profiles
 

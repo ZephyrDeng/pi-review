@@ -18,8 +18,8 @@ Native shell tools on these hosts **buffer stdout/stderr until the command exits
 
 `--reviewers <n>` or `--panel <name>` activates panel review. On Codex, Claude Code, or Cursor, default to the dashboard instead of a tailed log:
 
-1. Run `pi-review --reviewers <n> --ui web --ui-url-file <path> -- <target>` (or `--panel <name>`) in the **background**. The dashboard auto-opens in the user's default browser once the server is ready; pass `--no-ui-open` only when the user asked not to open a browser (CI, remote shells).
-2. Read `<path>` shortly after launch — it is written atomically as soon as the dashboard server is ready, well before reviewers finish (poll a few times a second for a couple of seconds if the file is not there yet). Share that URL with the user as a fallback: *"Dashboard opened in your browser (URL: `<url>`). I'll report back when the review completes."*
+1. Run `pi-review --reviewers <n> --ui web --ui-url-file <path> -- <target>` (or `--panel <name>`) in the **background**. Pass `--no-ui-open` only when the user asked not to open a browser (CI, remote shells).
+2. Read `<path>` shortly after launch — it is written atomically as soon as the dashboard server is ready, well before reviewers finish (poll a few times a second for a couple of seconds if the file is not there yet). Then get the dashboard in front of the user: on **Claude Code** the CLI auto-open already lands in the system default browser; on **Codex** the CLI cannot reach a GUI browser, so open the URL from `<path>` in the host's built-in browser yourself. Share the URL either way as a fallback: *"Dashboard opened in your browser (URL: `<url>`). I'll report back when the review completes."*
 3. Wait for the background job. On exit, show the Markdown review body and ASCII `── pi-review` footer as usual (skill step 4) — the dashboard is a presentation layer only; findings, gate status, and exit code always come from `PI_REVIEW_META_JSON`.
 4. `--ui web` requires an active panel and rejects `loop` — for a single review or a panel `loop`, fall back to the progress-log workflow below.
 

@@ -27,12 +27,12 @@ node ../../bin/pi-review.js --help
 |------|-------------------------|
 | **Pi** (`/rv`) | New panel reviews call the native `pi_review` API tool, shown to users as **Pi Review Panel**, which launches the packaged CLI in event mode and renders live reviewer state. Continuations, kept sessions, `/rv-loop`, and explicit `--no-stream` use the shell CLI. |
 | **Pi terminal** | Foreground `pi-review`; text deltas stream live by default. |
-| **Claude Code / Codex / Cursor** and similar agent hosts | These hosts buffer a shell tool's output until the command exits, so a foreground run looks like a silent wait. **Panel review (`--reviewers`/`--panel`) default: `--ui web --ui-url-file <path>` + background run** — hand the user the printed dashboard URL so they watch live progress in a browser instead of the chat. **Single review / `loop` default: `--progress-log <path>` + background run + tail the log** (`--ui web` requires an active panel and rejects `loop`). See [references/codex-tools.md](./references/codex-tools.md). Map skill mentions of `Bash` to your host shell tool. |
+| **Claude Code / Codex / Cursor** and similar agent hosts | These hosts buffer a shell tool's output until the command exits, so a foreground run looks like a silent wait. **Panel review (`--reviewers`/`--panel`) default: `--ui web --ui-url-file <path>` + background run** — get the dashboard in front of the user: on Claude Code the CLI auto-open lands in the system default browser; on Codex open the `--ui-url-file` URL in the host's built-in browser (the CLI cannot reach a GUI there); hand over the URL as fallback either way. **Single review / `loop` default: `--progress-log <path>` + background run + tail the log** (`--ui web` requires an active panel and rejects `loop`). See [references/codex-tools.md](./references/codex-tools.md). Map skill mentions of `Bash` to your host shell tool. |
 | Scripts / CI | Foreground is fine; add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`). |
 
 `--progress-log <path>` tees the raw `--mode json` event stream to a file for outside observation and debugging; it is never a prerequisite for metrics. Token usage accumulates by default, and `pi-review` writes milestone notices (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`) to stderr.
 
-`--ui web` starts a loopback-only browser dashboard for panel review and auto-opens it in the default browser (`--no-ui-open` disables the auto-open); `--ui-url-file <path>` writes its URL atomically so a buffered-output host can read it without parsing stderr. After completion the page counts down 60s, then closes itself and stops the dashboard server (any interaction cancels the countdown). It never substitutes for panel semantics — findings, gate status, and exit code come from the same `PI_REVIEW_META_JSON` as always.
+`--ui web` starts a loopback-only browser dashboard for panel review and auto-opens it in the default browser (`--no-ui-open` disables the auto-open); `--ui-url-file <path>` writes its URL atomically so a buffered-output host can read it without parsing stderr. Open the dashboard as wide as the host allows: Claude Code rides the auto-open (system default browser), Codex opens the url-file URL in its built-in browser, and Pi renders panels natively so `/rv` needs no `--ui web`. After completion the page counts down 60s, then closes itself and stops the dashboard server (any interaction cancels the countdown). It never substitutes for panel semantics — findings, gate status, and exit code come from the same `PI_REVIEW_META_JSON` as always.
 
 ## Run metrics
 
@@ -185,11 +185,12 @@ pi-review --reviewers 3 --ui web --ui-url-file /tmp/pi-review-ui-url.txt -- @src
    ```
    Rules:
    - Run this before building the review command. **Never invent a `provider/model` id** — only ids from the catalog output.
-   - Follow **[references/model-selection.md](./references/model-selection.md)** for everything else: profile inference (code / frontend / plan), priority lists, user-named-model resolution, and thinking aliases (`max`/`最高` → `xhigh`, with fallback to the nearest supported level).
+   - **Cross-model review**: identify the model this host session itself runs on (its id is in your session context), then prefer reviewer models from a different model family — same-family reviewers share the author model's blind spots. On a panel, keep the host's family to a minority of reviewers.
+   - Follow **[references/model-selection.md](./references/model-selection.md)** for everything else: profile inference (code / frontend / plan), priority lists, cross-model resolution, user-named-model resolution, and thinking aliases (`max`/`最高` → `xhigh`, with fallback to the nearest supported level).
    - Ambiguous match across model families: show the top candidates and ask; do not guess.
-   - No priority match: omit `--model` (Pi default) or pick a listed reasoning model with a large context window — say which and why.
+   - User named no model: propose 2–3 exact catalog ids (cross-model first, one line of why each, "Pi default" as an explicit option) and ask the user to pick before running.
    - On **Claude Code / Codex / Cursor**, state the chosen model in one line (match the user's language) before running the review command.
-   Completion criterion: exact listed `provider/model[:thinking]` or an explicit default; never invented ids.
+   Completion criterion: an exact listed `provider/model[:thinking]` (or Pi default) that the user named or picked from your proposal; never invented ids.
 
 2. Choose one mode:
    - default `code` — code, diff, MR, file, or repository review.
