@@ -24,6 +24,7 @@ export type {
   Verdict,
   ReviewStatus,
   ReviewFinding,
+  FindingLocation,
   ParsedArgs,
   ReviewPreset,
   VerdictInfo,
@@ -51,6 +52,7 @@ export {
   MAX_REVIEWERS,
   PANEL_READ_ONLY_TOOLS,
   DEFAULT_PANEL_MIN_AGREE,
+  REVIEW_META_VERSION,
 } from "./types.js";
 export { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 export { parseVerdict } from "./verdict.js";

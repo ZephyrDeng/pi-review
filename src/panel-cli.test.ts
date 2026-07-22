@@ -46,7 +46,7 @@ const prompt = process.argv[process.argv.length - 1] || "";
 const scenario = process.env.FAKE_PANEL_SCENARIO || "agree-bug";
 const idMatch = prompt.match(/Reviewer ID:\\s*(\\S+)/);
 const reviewerId = idMatch ? idMatch[1] : "r1";
-const bug = "### F1: Off-by-one in loop\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
+const bug = "### F1: Off-by-one in loop\\n- Severity: high\\n- Path: src/cli.ts\\n- Lines: 12-40\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
 const longBug = "### F1: " + "x".repeat(700) + "\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
 function emit(text) {
   function line(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
@@ -133,6 +133,47 @@ test("panel review with two corroborating reviewers confirms one finding and exi
   }
   assert.equal(meta!.model, "fake/model");
   assert.match(result.stdout, /Model\s+fake\/model/);
+
+  // Issue #6: metaVersion discriminator, and sourceFindings resolves every id
+  // referenced by the confirmed cluster to its full enriched source finding
+  // (reviewerId#findingId, reviewerId, and the complete finding shape,
+  // including the location the fake reviewer fixture supplied via `Lines`).
+  assert.equal(meta!.metaVersion, 1);
+  interface FullSourceFinding {
+    id: string;
+    reviewerId: string;
+    finding: {
+      id?: string;
+      severity?: string;
+      path?: string;
+      summary: string;
+      actionable: boolean;
+      details?: string;
+      recommendation?: string;
+      location?: { startLine: number; endLine?: number; side?: string };
+    };
+  }
+  const sourceFindings = meta!.sourceFindings as FullSourceFinding[];
+  assert.ok(Array.isArray(sourceFindings) && sourceFindings.length >= 2);
+  const confirmedIds = (meta!.confirmedClusters as Array<{ sourceFindingIds: string[] }>)[0]!.sourceFindingIds;
+  assert.deepEqual([...confirmedIds].sort(), ["r1#F1", "r2#F1"]);
+  for (const reviewerId of ["r1", "r2"]) {
+    const sourceId = `${reviewerId}#F1`;
+    assert.ok(confirmedIds.includes(sourceId), `expected confirmed cluster to reference ${sourceId}`);
+    const resolved = sourceFindings.find((sf) => sf.id === sourceId);
+    assert.ok(resolved, `expected sourceFindings to resolve ${sourceId}`);
+    assert.equal(resolved!.reviewerId, reviewerId);
+    assert.deepEqual(resolved!.finding, {
+      id: "F1",
+      severity: "high",
+      path: "src/cli.ts",
+      summary: "Off-by-one in loop",
+      actionable: true,
+      details: "Evidence: x\n\nImpact: y",
+      recommendation: "z",
+      location: { startLine: 12, endLine: 40 },
+    });
+  }
 });
 
 test("panel review keeps an explicitly configured reviewer model even when the provider reports a different one", () => {

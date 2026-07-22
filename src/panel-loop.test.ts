@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
+import { REVIEW_META_VERSION } from "./types.js";
 import type { FindingCluster, PanelReviewMeta, ReviewStatus, Verdict } from "./types.js";
 
 function cluster(summary: string, opts: { confirmed?: boolean; support?: number; actionableSupport?: number; reviewers?: string[] } = {}): FindingCluster {
@@ -34,6 +35,7 @@ function panelMeta(
   const verdict: Verdict =
     status === "clean" ? "approve" : status === "has_findings" ? "request_changes" : status === "needs_human" ? "needs_clarification" : "blocked";
   return {
+    metaVersion: REVIEW_META_VERSION,
     strategy: "panel",
     reviewMode: "code",
     verdict,

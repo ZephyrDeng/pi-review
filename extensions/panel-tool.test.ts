@@ -152,6 +152,7 @@ test("Pi panel renderer expands final findings and reviewer provenance", () => {
     at: now,
     type: "panel.completed",
     meta: {
+      metaVersion: 1,
       strategy: "panel",
       reviewMode: "code",
       status: "has_findings",
@@ -191,6 +192,7 @@ test("Pi panel renderer expands final findings and reviewer provenance", () => {
     at: now,
     type: "panel.completed",
     meta: {
+      metaVersion: 1,
       strategy: "panel",
       reviewMode: "code",
       status: "clean",
@@ -227,6 +229,7 @@ test("Pi panel result content includes duration, token, and cost metrics", () =>
     at: Date.now(),
     type: "panel.completed",
     meta: {
+      metaVersion: 1,
       strategy: "panel",
       reviewMode: "code",
       status: "clean",
@@ -279,6 +282,7 @@ test("panel tool reviewer summary falls back to the response model when a review
   const content = buildPanelResultContent({
     ...createPanelViewState(),
     meta: {
+      metaVersion: 1,
       strategy: "panel",
       reviewMode: "code",
       status: "clean",
@@ -388,6 +392,7 @@ test("panel tool content carries full conclusion for the parent LLM", () => {
     at: now,
     type: "panel.completed",
     meta: {
+      metaVersion: 1,
       strategy: "panel",
       reviewMode: "code",
       status: "has_findings",

@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
-import { PANEL_READ_ONLY_TOOLS } from "./types.js";
+import { PANEL_READ_ONLY_TOOLS, REVIEW_META_VERSION } from "./types.js";
 import type {
   ParsedArgs,
   PanelReviewMeta,
@@ -468,6 +468,7 @@ export async function runPanelReviewOnce(
 
   const panelMeta: PanelReviewMeta = {
     ...aggregate,
+    metaVersion: REVIEW_META_VERSION,
     reviewMode: parsed.mode,
     durationMs: Date.now() - startedAt,
     model: panelModel,

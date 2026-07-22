@@ -69,7 +69,7 @@ test("single-review CLI maps structured status to gate exit codes", () => {
   fs.writeFileSync(fakePi, `#!/usr/bin/env node
 const verdict = process.env.FAKE_REVIEW_VERDICT;
 const findings = verdict === "request_changes"
-  ? "### F1: Fix the gate\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes"
+  ? "### F1: Fix the gate\\n- Severity: high\\n- Path: src/cli.ts\\n- Lines: 10-20\\n- Side: base\\n- Actionable: yes\\n- Evidence: The gate returns 0 on a dirty verdict.\\n- Impact: CI reports success despite findings.\\n- Recommendation: Map status to a non-zero exit code."
   : "No material findings.";
 const text = "## Verdict\\n" + verdict + "\\n\\n## Summary\\n- Fixture.\\n\\n## Findings\\n" + findings + "\\n\\n## Risks and Blind Spots\\nNone.\\n\\n## Open Questions\\nNone.\\n";
 function line(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
@@ -103,5 +103,23 @@ process.exit(Number(process.env.FAKE_REVIEW_EXIT ?? "0"));
     assert.ok(metaLine, result.stderr);
     const meta = JSON.parse(metaLine.slice("PI_REVIEW_META_JSON: ".length));
     assert.equal(meta.status, scenario.expectedStatus);
+    // Issue #6: every emission carries the metaVersion discriminator, and the
+    // request_changes scenario's finding carries the enriched fields end to
+    // end (Markdown -> parser -> PI_REVIEW_META_JSON on stderr).
+    assert.equal(meta.metaVersion, 1);
+    if (scenario.verdict === "request_changes") {
+      assert.deepEqual(meta.findings, [
+        {
+          id: "F1",
+          severity: "high",
+          path: "src/cli.ts",
+          summary: "Fix the gate",
+          actionable: true,
+          details: "Evidence: The gate returns 0 on a dirty verdict.\n\nImpact: CI reports success despite findings.",
+          recommendation: "Map status to a non-zero exit code.",
+          location: { startLine: 10, endLine: 20, side: "base" },
+        },
+      ]);
+    }
   }
 });

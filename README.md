@@ -18,7 +18,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 - **Isolated review sessions** — each review runs in a clean child process with no shared state
 - **Multiple review modes** — code review, multi-lens plan review, adversarial challenge review
-- **Structured output** — explicit `status`, structured findings, and a human-readable ASCII footer; one-line `PI_REVIEW_META_JSON` on stderr for automation
+- **Structured output** — explicit `status`, structured findings (with optional per-finding `details`/`recommendation`/`location`), and a human-readable ASCII footer; one versioned, one-line `PI_REVIEW_META_JSON` on stderr for automation
 - **Loop review gate** — bounded, isolated review rounds with `pi-review loop --max-rounds <n>`; the host remains the only editor
 - **Model-agnostic** — use any model available in your Pi installation
 - **Live streaming** — child review output is forwarded as it arrives (use `--no-stream` to buffer)
@@ -138,6 +138,8 @@ pi-review loop --mode challenge --max-rounds 2 -- @docs/design.md
 
 Each round is review-only. The process never edits, patches, waits for filesystem changes, or asks the child session to fix findings. It stops immediately on `clean`, `needs_human`, or `blocked`; otherwise it stops when the round budget is exhausted. Every round emits one `PI_REVIEW_META_JSON` line in order, and the final human summary lists each round's status, verdict, duration, and finding counts.
 
+Each round's `PI_REVIEW_META_JSON` line is the same enriched schema documented under [Machine finding schema](#machine-finding-schema) — `metaVersion`, per-finding `details`/`recommendation`/`location`, and (for panel rounds) `sourceFindings`. A consumer that wants enriched findings for a given round reads that round's stderr line directly, in emission order; no Markdown scraping and no change to `LoopRoundSummary` are needed.
+
 This is a **host-driven gate**: if findings remain, the host or human fixes only accepted in-scope findings and invokes `loop` again. For patch-by-patch agent closeout, `--max-rounds 1` gives the host a fix point after each review. For an explicit clean goal with a hard ceiling, use `--until clean` (default budget 10 when `--max-rounds` is omitted; never unlimited). Clean means no gate-blocking findings (single: no actionable findings; panel: no confirmed actionable clusters; advisories may remain). `loop` accepts normal review target/model/progress options but rejects `--keep-session`, `--continue`, and `--name` in v1.
 
 ## Panel Review
@@ -177,6 +179,8 @@ Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication cal
 ### Machine output
 
 A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields. The panel-level `model` is each reviewer's effective model (configured, else the provider-reported `responseModel`) when they all agree, and the literal sentinel `"mixed"` when reviewers ran on different models — machine consumers parsing `model` must expect that value; per-reviewer entries keep their own `model`/`responseModel`.
+
+Panel machine metadata additionally carries `sourceFindings`: every contributing reviewer's raw findings, each tagged with its globally unique `id` (e.g. `"r1#F1"`) and `reviewerId`. This resolves every id referenced by `confirmedClusters[].sourceFindingIds` and `advisories[].sourceFindingIds` to its full enriched finding — including `details`/`recommendation`/`location` when the reviewer's Markdown supplied them (see [Machine finding schema](#machine-finding-schema)). Cluster-level summaries stay as they are today: `summary`/`severity`/`path` only, no enrichment fields.
 
 ### Live Pi progress and event replay
 
@@ -225,6 +229,8 @@ approve | request_changes | needs_clarification | blocked
 ### F1: <summary>
 - Severity: critical | high | medium | low
 - Path: <path or none>
+- Lines: <line or line-range in Path, or none>
+- Side: base | working (optional; defaults to working)
 - Actionable: yes | no
 - Evidence: <concrete evidence>
 - Impact: <why it matters>
@@ -255,10 +261,30 @@ The CLI appends a readable ASCII footer on **stdout**:
 For scripts, parse **`PI_REVIEW_META_JSON:`** from **stderr**. Existing keys remain, with additive fields:
 
 ```json
-{"reviewMode":"code","verdict":"request_changes","verdictSource":"parsed","status":"has_findings","findings":[{"id":"F1","severity":"high","path":"src/cli.ts","summary":"Dirty reviews exit zero","actionable":true}],"actionableCount":1,"durationMs":42300,"model":"provider/model","thinking":"xhigh","usage":{"input":18031,"output":512,"cacheRead":2048,"cacheWrite":0,"reasoning":0,"totalTokens":18591,"costTotal":0.05}}
+{"metaVersion":1,"reviewMode":"code","verdict":"request_changes","verdictSource":"parsed","status":"has_findings","findings":[{"id":"F1","severity":"high","path":"src/cli.ts","summary":"Dirty reviews exit zero","actionable":true}],"actionableCount":1,"durationMs":42300,"model":"provider/model","thinking":"xhigh","usage":{"input":18031,"output":512,"cacheRead":2048,"cacheWrite":0,"reasoning":0,"totalTokens":18591,"costTotal":0.05}}
 ```
 
 `status` is one of `clean`, `has_findings`, `needs_human`, or `blocked`: `approve` with no actionable findings is `clean`; `request_changes` or actionable findings are `has_findings`; `needs_clarification` is `needs_human`; runtime/fatal failures are `blocked`. Each finding always has `summary` and `actionable`; `id`, `severity`, and `path` are present when parsed. `thinking` and `usage` are additive and present when reported by the child; `usage` includes token totals and may include `costTotal`. The line remains a single additive JSON record, so older consumers can ignore unknown keys. Set `PI_REVIEW_META_STDOUT=1` to emit it on stdout instead.
+
+### Machine finding schema
+
+`PI_REVIEW_META_JSON` carries a top-level `metaVersion` schema discriminator (currently `1`). JSON emitted by pi-review versions before this field existed has no `metaVersion` key at all — treat that absence as the original, pre-enrichment contract. Every field below is additive under `metaVersion: 1`; a future breaking change to this shape would bump it.
+
+Each finding gains three optional fields alongside the existing `{ id?, severity?, path?, summary, actionable }` shape:
+
+| Field | Type | Present when |
+|-------|------|--------------|
+| `details` | `string` | At least one of the reviewer's Evidence/Impact fields parsed. Joins them as `"Evidence: <...>"` and/or `"Impact: <...>"` paragraphs separated by a blank line (`\n\n`); a finding with only one of the two carries only that labeled paragraph. Never fabricated. |
+| `recommendation` | `string` | The reviewer's Recommendation field parsed, verbatim and kept separate from `details`. |
+| `location` | `{ startLine: number; endLine?: number; side?: "base" \| "working" }` | The reviewer's `Lines` field held one positive integer (`42`) or a non-inverted positive range (`42-58`). Non-numeric, zero/negative, or inverted (`endLine < startLine`) values are dropped rather than guessed, so `location` is simply absent. `side` is only ever `"base"` (before the change); every other case — absent, unrecognized, or explicitly `"working"` — omits `side`, which means `"working"` (after the change). |
+
+Example with all three populated:
+
+```json
+{"metaVersion":1,"reviewMode":"code","verdict":"request_changes","verdictSource":"parsed","status":"has_findings","findings":[{"id":"F1","severity":"high","path":"src/cli.ts","summary":"Dirty reviews exit zero","actionable":true,"details":"Evidence: runReview forwards the child exit code.\n\nImpact: A review gate passes with actionable findings.","recommendation":"Map structured status to a stable exit code.","location":{"startLine":42,"endLine":58}}],"actionableCount":1,"durationMs":42300,"model":"provider/model"}
+```
+
+All three finding-level fields and `metaVersion` are additive: existing consumers reading only `{ id?, severity?, path?, summary, actionable }` are unaffected, and a file-level finding with no reliable line data simply omits `location` while `details`/`recommendation` still populate when Evidence/Impact/Recommendation parsed. This machine schema — including the panel `sourceFindings` fields documented under [Panel Review § Machine output](#machine-output) and the per-round stream documented under [Loop Review](#loop-review) — is a **supported integration surface**: renderers should read `PI_REVIEW_META_JSON` directly and never need to scrape review Markdown for Evidence/Impact/Recommendation/line data.
 
 The parser prefers the exact `### F1` shape above but also accepts legacy `###` headings and top-level finding lists. When `Actionable` is missing, findings under `request_changes` default to actionable and other verdicts default to non-actionable. A missing/unrecognized verdict falls back to `needs_clarification` / `needs_human` and includes `parseError`; runtime failures always remain `blocked`.
 

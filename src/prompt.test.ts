@@ -17,6 +17,8 @@ test("review prompt requests the parseable finding contract", () => {
   assert.match(prompt, /### F1: <summary>/);
   assert.match(prompt, /Severity: critical \| high \| medium \| low/);
   assert.match(prompt, /Path: <path or none>/);
+  assert.match(prompt, /Lines: <line or line-range in Path, or none>/);
+  assert.match(prompt, /Side: base \| working \(optional; defaults to working\)/);
   assert.match(prompt, /Actionable: yes \| no/);
   assert.match(prompt, /No material findings\./);
 });

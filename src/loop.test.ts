@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
+import { REVIEW_META_VERSION } from "./types.js";
 import type { ReviewMeta, ReviewStatus, Verdict } from "./types.js";
 
 function meta(status: ReviewStatus, verdict: Verdict, durationMs = 100): ReviewMeta {
   return {
+    metaVersion: REVIEW_META_VERSION,
     reviewMode: "code",
     verdict,
     verdictSource: "parsed",
