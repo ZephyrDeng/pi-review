@@ -14,7 +14,15 @@ import type {
 
 function finding(
   summary: string,
-  opts: { id?: string; actionable?: boolean; path?: string; severity?: string } = {},
+  opts: {
+    id?: string;
+    actionable?: boolean;
+    path?: string;
+    severity?: string;
+    details?: string;
+    recommendation?: string;
+    location?: ReviewFinding["location"];
+  } = {},
 ): ReviewFinding {
   return {
     ...(opts.id ? { id: opts.id } : {}),
@@ -22,6 +30,9 @@ function finding(
     ...(opts.path ? { path: opts.path } : {}),
     summary,
     actionable: opts.actionable ?? true,
+    ...(opts.details ? { details: opts.details } : {}),
+    ...(opts.recommendation ? { recommendation: opts.recommendation } : {}),
+    ...(opts.location ? { location: opts.location } : {}),
   };
 }
 
@@ -419,6 +430,62 @@ test("top-level findings contain confirmed clusters only; advisories are separat
   assert.equal(result.actionableCount, result.confirmedClusters.length);
   for (const f of result.findings) assert.equal(f.actionable, true);
   assert.equal(result.advisories.every((c) => !c.confirmed), true);
+});
+
+test("sourceFindings resolves every id referenced by confirmedClusters and advisories (issue #6)", async () => {
+  const result = await aggregatePanel({
+    reviewers: matrixFixture(),
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 3,
+    matcher: byPathSummary(),
+  });
+
+  const referencedIds = [...result.confirmedClusters, ...result.advisories].flatMap((c) => c.sourceFindingIds);
+  const byId = new Map(result.sourceFindings!.map((sf) => [sf.id, sf]));
+  assert.equal(result.sourceFindings!.length, referencedIds.length);
+  for (const id of referencedIds) {
+    const resolved = byId.get(id);
+    assert.ok(resolved, `expected sourceFindings to resolve ${id}`);
+    assert.equal(resolved!.id, id);
+    assert.ok(resolved!.reviewerId);
+    assert.ok(resolved!.finding.summary);
+  }
+});
+
+test("sourceFindings preserves per-source details/recommendation/location while cluster-level shape stays summary-only", async () => {
+  const reviewers = [
+    submission("r1", review("has_findings", [
+      finding("Off-by-one in loop", {
+        id: "F1",
+        path: "src/cli.ts",
+        severity: "high",
+        details: "Evidence: e.\n\nImpact: i.",
+        recommendation: "Clamp the bound.",
+        location: { startLine: 10, endLine: 20 },
+      }),
+    ])),
+    submission("r2", review("has_findings", [finding("Off-by-one in loop", { id: "F1", path: "src/cli.ts" })])),
+  ];
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher: byPathSummary(),
+  });
+
+  assert.equal(result.confirmedClusters.length, 1);
+  const cluster = result.confirmedClusters[0]!;
+  // Cluster-level summaries stay as they are today: enrichment never leaks onto the cluster itself.
+  assert.ok(!("details" in cluster) && !("recommendation" in cluster) && !("location" in cluster));
+
+  const r1Source = result.sourceFindings!.find((sf) => sf.id === "r1#F1")!;
+  const r2Source = result.sourceFindings!.find((sf) => sf.id === "r2#F1")!;
+  assert.equal(r1Source.finding.details, "Evidence: e.\n\nImpact: i.");
+  assert.equal(r1Source.finding.recommendation, "Clamp the bound.");
+  assert.deepEqual(r1Source.finding.location, { startLine: 10, endLine: 20 });
+  assert.equal(r2Source.finding.details, undefined);
 });
 
 test("semantic matcher integration confirms a different-wording cluster through an injected adjudicator", async () => {

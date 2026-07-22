@@ -39,12 +39,14 @@ Prioritized findings. For every material finding, use this exact shape (incremen
 ### F1: <summary>
 - Severity: critical | high | medium | low
 - Path: <path or none>
+- Lines: <line or line-range in Path, or none>
+- Side: base | working (optional; defaults to working)
 - Actionable: yes | no
 - Evidence: <concrete evidence>
 - Impact: <why it matters>
 - Recommendation: <specific next step>
 
-Set Actionable to yes when the host must fix or consciously reject the finding before clean closeout. Use no for informational or explicitly out-of-scope follow-up findings. If there are no material findings, write "No material findings."
+Set Actionable to yes when the host must fix or consciously reject the finding before clean closeout. Use no for informational or explicitly out-of-scope follow-up findings. Include Lines only when you have reliable line numbers for Path: a single line (`42`) or an inclusive range (`42-58`). Omit Lines or write "none" for file-level or non-line-specific findings — never guess a line number. Side marks which half of a diff Lines refers to (`base` = before the change, `working` = after); omit it to default to `working`. If there are no material findings, write "No material findings."
 
 ## Risks and Blind Spots
 What could still be wrong, missing, or unverified.

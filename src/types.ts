@@ -10,6 +10,37 @@ export interface ReviewFinding {
   path?: string;
   summary: string;
   actionable: boolean;
+  /**
+   * Explanatory content behind the finding. At minimum, joins the reviewer
+   * output contract's required Evidence and Impact fields as
+   * `"Evidence: <...>"` and/or `"Impact: <...>"` paragraphs separated by a
+   * blank line (see `parseStructuredFindings` in review-result.ts and the
+   * README "Machine finding schema" section). Present only when at least
+   * one of Evidence/Impact was parseable; never fabricated.
+   */
+  details?: string;
+  /** The reviewer's proposed remediation (the Recommendation field), kept separate from `details`. */
+  recommendation?: string;
+  /**
+   * Line/range this finding refers to within `path`. Present only when the
+   * reviewer supplied one positive line number or a non-inverted positive
+   * range; malformed values (non-numeric, zero/negative, or endLine <
+   * startLine) are dropped rather than guessed.
+   */
+  location?: FindingLocation;
+}
+
+/** A line or inclusive line range a `ReviewFinding` refers to within its `path`. */
+export interface FindingLocation {
+  startLine: number;
+  endLine?: number;
+  /**
+   * Which half of a diff the lines refer to: "base" (before the change) or
+   * "working" (after). Omitted when the reviewer's Side was absent,
+   * unrecognized, or explicitly "working" — treat a missing `side` as
+   * "working".
+   */
+  side?: "base" | "working";
 }
 
 export interface StructuredReviewResult extends VerdictInfo {
@@ -94,7 +125,19 @@ export interface VerdictInfo {
   parseError?: string;
 }
 
+/**
+ * Schema version for `PI_REVIEW_META_JSON` (issue #6). JSON emitted by
+ * pi-review versions before this constant existed has no `metaVersion` key
+ * at all — treat that absence as the original, pre-enrichment contract.
+ * `ReviewFinding.details`/`recommendation`/`location` and panel
+ * `PanelFields.sourceFindings` are additive within version 1 and never
+ * require a bump on their own; bump only for a breaking shape change.
+ */
+export const REVIEW_META_VERSION = 1 as const;
+
 export interface ReviewMeta extends StructuredReviewResult {
+  /** Schema discriminator for `PI_REVIEW_META_JSON`; see `REVIEW_META_VERSION`. */
+  metaVersion: typeof REVIEW_META_VERSION;
   reviewMode: string;
   durationMs: number;
   model: string | null;
@@ -213,6 +256,15 @@ export interface PanelFields {
   reviewers: ReviewerOutcome[];
   adjudicationUsed: boolean;
   adjudicationErrors?: string[];
+  /**
+   * Every source finding a contributing reviewer produced during this
+   * evaluation, keyed by `SourceFinding.id` (e.g. "r1#F1"). Resolves every id
+   * referenced by `FindingCluster.sourceFindingIds` across both
+   * `confirmedClusters` and `advisories` to its full reviewer identity and
+   * enriched finding. Optional for backward compatibility; `aggregatePanel`
+   * always populates it (possibly `[]`).
+   */
+  sourceFindings?: SourceFinding[];
 }
 
 /** Pure aggregate panel result (no Pi, no I/O). */

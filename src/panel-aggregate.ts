@@ -315,5 +315,8 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
     reviewers: reviewerOutcomes,
     adjudicationUsed,
     ...(matcherErrors.length > 0 ? { adjudicationErrors: matcherErrors } : {}),
+    // Resolves every FindingCluster.sourceFindingIds entry (confirmed and
+    // advisory alike) to its full reviewer identity + enriched finding.
+    sourceFindings,
   };
 }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { createPanelViewState, reducePanelEvent } from "./panel-view.js";
 import type { ReviewEvent } from "./review-events.js";
+import { REVIEW_META_VERSION } from "./types.js";
 import {
   findingDetailLine,
   formatDuration,
@@ -140,6 +141,7 @@ test("statusHeadline tracks phase while running and gate status once completed",
     state,
     event("panel.completed", 3, {
       meta: {
+        metaVersion: REVIEW_META_VERSION,
         status: "clean", verdict: "approve", verdictSource: "parsed", findings: [], actionableCount: 0,
         reviewMode: "code", durationMs: 10, model: null,
         confirmedClusters: [], advisories: [], panelHealth: "healthy",

@@ -77,6 +77,8 @@ pi-review loop --until clean --max-rounds 10 -- @src
 
 `loop` 复用普通审查的 mode/model/progress/target 参数；v1 明确不支持 `--keep-session`、`--continue`、`--name`。
 
+每轮审查各自在 stderr 输出一条 `PI_REVIEW_META_JSON`，即[输出格式](#输出格式)里的富化 finding schema（`metaVersion`、每条 finding 的 `details`/`recommendation`/`location`、panel 轮次的 `sourceFindings`）；消费者按输出顺序逐轮读取该行即可拿到完整 finding 数据，无需刮取 Markdown，逐轮摘要（`LoopRoundSummary`）保持只含计数。
+
 ## Panel Review（面板审查）
 
 面板审查让多个**独立**审查者在隔离子会话中并行评审，再聚合为同一个门禁结论。审查者看不到彼此的发现，因此一致代表独立发现。
@@ -114,6 +116,8 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 ### 机器输出
 
 一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。面板级 `model` 取各审查者的有效模型（显式配置优先，否则取 provider 上报的 `responseModel`）：全员一致时为该值，不一致时为字面量 `"mixed"` —— 解析 `model` 字段的机器消费方需要识别这个哨兵值；每个 reviewer 条目仍各自携带 `model`/`responseModel`。
+
+面板机器元数据另携带 `sourceFindings`：每位贡献 reviewer 的原始 finding，各自带全局唯一 `id`（如 `"r1#F1"`）与 `reviewerId`，可把 `confirmedClusters[].sourceFindingIds` / `advisories[].sourceFindingIds` 引用的每个 id 解析回完整富化 finding（含 `details`/`recommendation`/`location`，见[输出格式](#输出格式)）；簇级摘要保持现状，只含 `summary`/`severity`/`path`，不携带富化字段。
 
 ### Pi 实时进度与事件回放
 
@@ -164,16 +168,17 @@ CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/
 
 ## 输出格式
 
-审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节。每条 finding 使用 `F1 + Severity + Path + Actionable + Evidence + Impact + Recommendation` 结构。ASCII 页脚会显示 Verdict、`Status`、finding 数量、Mode、总 token、cost、Duration/Session；Pi 面板展开结果也会包含同一组运行指标。
+审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节。每条 finding 使用 `F1 + Severity + Path + Lines + Side + Actionable + Evidence + Impact + Recommendation` 结构；`Lines`/`Side` 可选，只在有可靠行号时给出（单行 `42` 或闭区间 `42-58`），`Side` 标注行号属于 diff 的哪一侧（`base` 改动前 / `working` 改动后，省略即 `working`）。ASCII 页脚会显示 Verdict、`Status`、finding 数量、Mode、总 token、cost、Duration/Session；Pi 面板展开结果也会包含同一组运行指标。
 
 机器可读 JSON 仍在 **stderr** 的单行 `PI_REVIEW_META_JSON:` 中，并以新增字段提供：
 
+- `metaVersion`: schema 版本判别字段（当前为 `1`）；更早版本的输出没有此键，缺失即视为富化前的原始契约
 - `status`: `clean | has_findings | needs_human | blocked`
-- `findings`: `{ id?, severity?, path?, summary, actionable }[]`
+- `findings`: `{ id?, severity?, path?, summary, actionable, details?, recommendation?, location? }[]` — `details` 把 reviewer 的 Evidence/Impact 以 `Evidence: ...`、`Impact: ...` 段落（空行分隔）原样保留，只有其一时仅含该段；`recommendation` 单独保留修复建议；`location` 为 `{ startLine, endLine?, side? }`，仅在行号可解析时出现，畸形值（非数字、零/负数、倒置区间）一律省略而非编造，`side` 缺省即 `working`
 - `actionableCount`: 可操作问题数量
 - `usage.totalTokens`: token 总量；`usage.costTotal`: provider 报告的 cost（若有）
 
-旧字段不删除；需改为写入 stdout 时设 `PI_REVIEW_META_STDOUT=1`。解析器优先识别上述 `### F1` 格式，也兼容旧的三级标题和顶层列表；缺少 `Actionable` 时，`request_changes` 下默认可操作，其它 verdict 默认不可操作。无法识别 verdict 时会回退到 `needs_human` 并附带 `parseError`，运行时失败始终保持 `blocked`。
+该机器 finding schema（连同 panel 的 `sourceFindings` 与 loop 每轮的 meta 行）是**受支持的集成面**：渲染器直接读 `PI_REVIEW_META_JSON` 即可，无需刮取审查 Markdown；完整字段表见英文 README 的 "Machine finding schema" 一节。旧字段不删除；需改为写入 stdout 时设 `PI_REVIEW_META_STDOUT=1`。解析器优先识别上述 `### F1` 格式，也兼容旧的三级标题和顶层列表；缺少 `Actionable` 时，`request_changes` 下默认可操作，其它 verdict 默认不可操作。无法识别 verdict 时会回退到 `needs_human` 并附带 `parseError`，运行时失败始终保持 `blocked`。
 
 退出码：`0` clean、`1` 最终状态为 `has_findings` / loop 预算耗尽、`2` 参数错误、`3` needs human、`4` blocked / 运行时失败。
 

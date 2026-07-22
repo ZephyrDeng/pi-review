@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { formatCost, formatDurationMs, formatPanelMetaAscii, formatReviewMetaAscii, formatReviewMetaJsonLine, formatTokens, formatUsage } from "./meta-footer.js";
+import { REVIEW_META_VERSION } from "./types.js";
 import type { PanelReviewMeta, ReviewMeta } from "./types.js";
 
 const sample: ReviewMeta = {
+  metaVersion: REVIEW_META_VERSION,
   reviewMode: "code",
   verdict: "request_changes",
   verdictSource: "parsed",
@@ -15,6 +17,9 @@ const sample: ReviewMeta = {
       path: "src/cli.ts",
       summary: "Dirty reviews exit zero",
       actionable: true,
+      details: "Evidence: runReview forwards the child exit code.\n\nImpact: A review gate passes with actionable findings.",
+      recommendation: "Map structured status to a stable exit code.",
+      location: { startLine: 42, endLine: 58 },
     },
   ],
   actionableCount: 1,
@@ -43,6 +48,7 @@ test("formatReviewMetaJsonLine is one JSON line", () => {
   const line = formatReviewMetaJsonLine(sample);
   assert.ok(line.startsWith("PI_REVIEW_META_JSON: "));
   const json = JSON.parse(line.slice("PI_REVIEW_META_JSON: ".length).trim());
+  assert.equal(json.metaVersion, REVIEW_META_VERSION);
   assert.equal(json.reviewMode, "code");
   assert.equal(json.verdict, "request_changes");
   assert.equal(json.verdictSource, "parsed");
@@ -52,6 +58,12 @@ test("formatReviewMetaJsonLine is one JSON line", () => {
   assert.equal(json.status, "has_findings");
   assert.equal(json.actionableCount, 1);
   assert.deepEqual(json.findings, sample.findings);
+  // Issue #6 regression guard: enriched finding fields must round-trip through
+  // JSON.stringify/JSON.parse unchanged, so a future serialization path can't
+  // silently drop them.
+  assert.equal(json.findings[0].details, sample.findings[0]!.details);
+  assert.equal(json.findings[0].recommendation, sample.findings[0]!.recommendation);
+  assert.deepEqual(json.findings[0].location, sample.findings[0]!.location);
 });
 
 test("formatTokens scales with K/M/B units", () => {
@@ -87,6 +99,7 @@ test("ASCII footer shows thinking, tokens, cost, and duration when present", () 
 });
 
 const panelSample: PanelReviewMeta = {
+  metaVersion: REVIEW_META_VERSION,
   strategy: "panel",
   reviewMode: "code",
   status: "has_findings",
@@ -108,7 +121,38 @@ const panelSample: PanelReviewMeta = {
     { reviewerId: "r2", role: "two", model: null, responseModel: "provider/model-a", durationMs: 100, status: "clean", verdict: "approve", verdictSource: "parsed", contributed: true },
   ],
   adjudicationUsed: false,
+  sourceFindings: [
+    {
+      id: "r1#F1",
+      reviewerId: "r1",
+      finding: {
+        id: "F1",
+        severity: "high",
+        path: "src/cli.ts",
+        summary: "Off-by-one in loop",
+        actionable: true,
+        details: "Evidence: The loop reads one element past the end.\n\nImpact: The last page silently returns stale data.",
+        recommendation: "Clamp the upper bound to the page count.",
+        location: { startLine: 10, endLine: 20, side: "base" },
+      },
+    },
+  ],
 };
+
+test("formatReviewMetaJsonLine round-trips panel sourceFindings intact (issue #6)", () => {
+  const line = formatReviewMetaJsonLine(panelSample);
+  const json = JSON.parse(line.slice("PI_REVIEW_META_JSON: ".length).trim());
+  assert.equal(json.strategy, "panel");
+  assert.deepEqual(json.sourceFindings, panelSample.sourceFindings);
+  // Spelled out too, so a future change to the enrichment fields specifically
+  // (not just sourceFindings as a whole) cannot silently regress unnoticed.
+  const resolved = json.sourceFindings[0];
+  assert.equal(resolved.id, "r1#F1");
+  assert.equal(resolved.reviewerId, "r1");
+  assert.equal(resolved.finding.details, panelSample.sourceFindings![0]!.finding.details);
+  assert.equal(resolved.finding.recommendation, panelSample.sourceFindings![0]!.finding.recommendation);
+  assert.deepEqual(resolved.finding.location, panelSample.sourceFindings![0]!.finding.location);
+});
 
 test("panel ASCII footer shows a top-level Model line when every reviewer's effective model agrees", () => {
   const ascii = formatPanelMetaAscii(panelSample);

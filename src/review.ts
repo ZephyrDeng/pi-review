@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
 import { spawnSync } from "node:child_process";
+import { REVIEW_META_VERSION } from "./types.js";
 import type { ParsedArgs, ReviewMeta, ReviewRunResult } from "./types.js";
 import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./child-process.js";
 import { loadPresets, loadSystemPrompt } from "./presets.js";
@@ -238,6 +239,7 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
   const structuredResult = parseReviewResult(stdout, verdictInfo);
   const thinking = parsed.thinking || preset.thinking;
   const meta: ReviewMeta = {
+    metaVersion: REVIEW_META_VERSION,
     reviewMode: parsed.mode,
     ...structuredResult,
     durationMs,
