@@ -176,6 +176,10 @@ Two-phase matching: deterministic matching on stable anchors (path + normalized 
 
 Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication call may run per round when `--consensus-model` is set. Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean. Panel review rejects `--keep-session`, `--continue`, and `--name` (reviewers run `--no-session`); the host agent remains the only editor.
 
+When the panel finishes, the CLI appends a panel ASCII footer on **stdout** with gate status, health, consensus, confirmed/advisory counts, mixed model/thinking when reviewers differ, aggregate tokens/cost, adjudicator use, and a per-reviewer line:
+
+![CLI panel footer: NEEDS HUMAN gate with 2/3 successful reviewers, quorum consensus, confirmed findings, advisories, mixed models, and per-reviewer status](docs/assets/panel-cli-footer.jpg)
+
 ### Machine output
 
 A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields. The panel-level `model` is each reviewer's effective model (configured, else the provider-reported `responseModel`) when they all agree, and the literal sentinel `"mixed"` when reviewers ran on different models — machine consumers parsing `model` must expect that value; per-reviewer entries keep their own `model`/`responseModel`.

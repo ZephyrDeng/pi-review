@@ -113,6 +113,10 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 审查者运行数 = `--reviewers <n>` × `--max-rounds`（loop）；启用 `--consensus-model` 时每轮最多再跑一次仲裁。用 `--concurrency <n>` 限制并发（默认等于审查者数，不超过）。审查者运行时失败 → `blocked`；无法解析的脏输出或未决澄清 → `needs_human`；绝不悄悄 clean。面板审查 v1 不支持 `--keep-session`、`--continue`、`--name`（审查者用 `--no-session`）；宿主 Agent 仍是唯一可编辑者。
 
+面板结束后，CLI 会在 **stdout** 追加 panel ASCII footer：门禁 Status / Health、共识、确认与 advisory 计数、模型/thinking 不一致时的 `mixed`、聚合 token/cost、是否使用 adjudicator，以及每位 reviewer 一行摘要：
+
+![CLI panel footer：NEEDS HUMAN 门禁、2/3 reviewer 成功、quorum 共识、confirmed/advisory、mixed 模型与逐 reviewer 状态](docs/assets/panel-cli-footer.jpg)
+
 ### 机器输出
 
 一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。面板级 `model` 取各审查者的有效模型（显式配置优先，否则取 provider 上报的 `responseModel`）：全员一致时为该值，不一致时为字面量 `"mixed"` —— 解析 `model` 字段的机器消费方需要识别这个哨兵值；每个 reviewer 条目仍各自携带 `model`/`responseModel`。
