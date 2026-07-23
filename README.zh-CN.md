@@ -123,6 +123,14 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 Pi 中执行 `/rv @target` 会调用原生 **Pi Review Panel** 工具（API 标识仍为 `pi_review`，界面不再直接展示下划线名称）。每位 reviewer 都有独立实时行，明确展示 `queued/running/completed/failed/cancelled` 状态、当前工具、耗时和 token 用量；按 `Ctrl+O` 可展开查看有界活动记录、最终发现、溯源、总耗时、token 总量和 cost。
 
+![Pi Review Panel 实时进度：code-experts 面板下 correctness / security / testing 三位 reviewer 的状态、模型、thinking、token 与 cost](docs/assets/panel-live-pi.jpg)
+
+对应命令示例：`pi-review --panel code-experts -- @src`（Pi 内 `/rv` 走同一 panel 策略）。
+
+一轮结束后，宿主侧常见汇总如下（多模型一致 `request_changes`、总耗时 / token / 成本）：
+
+![pi-review 第一轮面板结论：三位 reviewer 全部 request_changes，含模型、耗时与聚合成本](docs/assets/panel-round-summary.png)
+
 渲染器可直接消费版本化事件流：
 
 ```bash

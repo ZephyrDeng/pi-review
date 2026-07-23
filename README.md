@@ -192,6 +192,10 @@ In Pi, slash commands select strategy only:
 
 Targets stay natural language as given. Path mentions like `@src` remain text; the CLI keeps directories as tool path targets and only attaches real files. Remaining strategy matching lives in the skill/CLI. In Pi, the user-facing tool name is **Pi Review Panel** (the API identifier remains `pi_review`); each reviewer renders as an independent live row with explicit `queued/running/completed/failed/cancelled` state, active tool, elapsed time, and token usage. Expand the tool result with `Ctrl+O` for bounded activity, final findings/provenance, duration, token totals, and cost.
 
+![Pi Review Panel live progress: code-experts panel with correctness, security, and testing reviewers, each showing status, model, thinking level, tokens, and cost](docs/assets/panel-live-pi.jpg)
+
+Example: `pi-review --panel code-experts -- @src` (or `/rv` in Pi with the same panel strategy).
+
 Renderer adapters can consume the stable, versioned event stream directly:
 
 ```bash
