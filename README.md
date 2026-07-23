@@ -218,6 +218,8 @@ Panel reviewers use the hard allowlist `read,grep,find,ls`. Shell and mutation-c
 pi-review --reviewers 3 --consensus quorum --ui web -- @src
 ```
 
+![Web dashboard while reviewing: aggregate reviewer/elapsed/token/tool counters and per-reviewer cards with RUNNING status, model, thinking level, and live activity](docs/assets/panel-web-dashboard.jpg)
+
 The CLI prints `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/<token>` to stderr and opens it in the default browser before reviewers start (`--no-ui-open` disables the auto-open). The dashboard shows live per-reviewer status, streaming activity, animated token/tool-call counters, and — once the run completes — the gate result, confirmed findings/advisories, and each reviewer's full report rendered from markdown. `--ui-url-file <path>` additionally writes the URL atomically for hosts that buffer stdout/stderr. The review process still exits with the normal panel exit code as soon as the run completes.
 
 After completion the page shows a 60-second countdown, then closes itself and stops the dashboard server; any interaction (scroll, click, keypress, or the "Keep open" button) cancels the countdown, and closing the tab afterwards also stops the server. As a backstop, the server self-terminates after a bounded idle TTL (default 900s; override with `--ui-ttl <seconds>`) so a browser can reconnect after a refresh.
