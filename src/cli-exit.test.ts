@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test, afterEach } from "vitest";
+import { extractFinalText, extractUsage } from "./json-events.js";
 
 let tempDir = "";
 afterEach(() => {
@@ -29,11 +30,11 @@ function tsxLoaderArgs(): string[] {
   return args.length ? args : ["--import", "tsx"];
 }
 
-function runCli(fakePi: string, verdict: string, childExit = "0") {
+function runCli(fakePi: string, verdict: string, childExit = "0", extraArgs: string[] = ["--no-stream"]) {
   const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url));
   return spawnSync(
     process.execPath,
-    [...tsxLoaderArgs(), cliPath, "--no-stream", "--", "@src"],
+    [...tsxLoaderArgs(), cliPath, ...extraArgs, "--", "@src"],
     {
       cwd: path.dirname(fileURLToPath(new URL("../package.json", import.meta.url))),
       env: {
@@ -63,9 +64,8 @@ test("invalid loop arguments print usage and exit 2", () => {
   assert.match(result.stderr, /pi-review loop/);
 });
 
-test("single-review CLI maps structured status to gate exit codes", () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-cli-exit-"));
-  const fakePi = path.join(tempDir, "fake-pi");
+function writeFakePi(dir: string): string {
+  const fakePi = path.join(dir, "fake-pi");
   fs.writeFileSync(fakePi, `#!/usr/bin/env node
 const verdict = process.env.FAKE_REVIEW_VERDICT;
 const findings = verdict === "request_changes"
@@ -79,14 +79,20 @@ line({ type: "turn_start" });
 line({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "review" }] } });
 line({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "review" }] } });
 line({ type: "message_start", message: { role: "assistant", content: [], model: "fake/model", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 } } });
-line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: text, partial: { role: "assistant" } } });
-line({ type: "message_update", assistantMessageEvent: { type: "text_end", content: text, partial: { role: "assistant" } } });
+line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: text, partial: { role: "assistant", content: [{ type: "text", text }] } }, message: { role: "assistant", content: [{ type: "text", text }], usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 } } });
+line({ type: "message_update", assistantMessageEvent: { type: "text_end", content: text, partial: { role: "assistant", content: [{ type: "text", text }] } } });
 line({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], model: "fake/model", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 }, stopReason: "stop" } });
 line({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text }], usage: { input: 100, output: 50, totalTokens: 150 } } });
 line({ type: "agent_end", messages: [{ role: "user", content: [{ type: "text", text: "review" }] }, { role: "assistant", content: [{ type: "text", text }], responseModel: "fake/model" }] });
 process.exit(Number(process.env.FAKE_REVIEW_EXIT ?? "0"));
 `);
   fs.chmodSync(fakePi, 0o755);
+  return fakePi;
+}
+
+test("single-review CLI maps structured status to gate exit codes", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-cli-exit-"));
+  const fakePi = writeFakePi(tempDir);
 
   const scenarios = [
     { verdict: "approve", childExit: "0", expectedStatus: "clean", expectedExit: 0 },
@@ -122,4 +128,52 @@ process.exit(Number(process.env.FAKE_REVIEW_EXIT ?? "0"));
       ]);
     }
   }
+});
+
+test("--progress-log writes slimmed events by default and verbatim with --progress-log-raw", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-cli-exit-"));
+  const fakePi = writeFakePi(tempDir);
+
+  const slimLog = path.join(tempDir, "progress.jsonl");
+  const slimRun = runCli(fakePi, "approve", "0", ["--progress-log", slimLog]);
+  assert.equal(slimRun.error, undefined);
+  assert.equal(slimRun.status, 0, slimRun.stderr);
+  const slimEvents = fs.readFileSync(slimLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const slimUpdates = slimEvents.filter((event) => event.type === "message_update");
+  assert.ok(slimUpdates.length >= 2, `expected message_update events, got ${slimUpdates.length}`);
+  for (const event of slimUpdates) {
+    // fixture partials carry role+content but no usage, so the snapshot goes entirely
+    assert.equal(event.assistantMessageEvent?.partial, undefined, JSON.stringify(event).slice(0, 200));
+    // the duplicate top-level message snapshot reduces to its usage
+    if (event.message !== undefined) {
+      assert.deepEqual(event.message, { usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 } });
+    }
+  }
+  const textDelta = slimUpdates.find((event) => event.assistantMessageEvent?.type === "text_delta");
+  assert.ok(typeof textDelta?.assistantMessageEvent?.delta === "string" && textDelta.assistantMessageEvent.delta.includes("## Verdict"));
+  // Positive contract: the slimmed log still replays through pi-review's own
+  // event parser — full review text and authoritative usage survive slimming.
+  const slimReplayText = fs.readFileSync(slimLog, "utf8");
+  const replay = extractFinalText(slimReplayText);
+  assert.equal(replay.error, undefined);
+  assert.ok(replay.text.includes("## Verdict"));
+  assert.equal(extractUsage(slimReplayText).usage?.totalTokens, 150);
+  // Message boundaries keep the authoritative record, so the slimmed log still
+  // reconstructs the review; block-level text_end content is not cumulative
+  // and stays too.
+  const slimEnd = slimEvents.find((event) => event.type === "message_end" && event.message?.role === "assistant");
+  assert.ok(slimEnd?.message?.content?.[0]?.text?.includes("## Verdict"));
+  const textEnd = slimUpdates.find((event) => event.assistantMessageEvent?.type === "text_end");
+  assert.equal(typeof textEnd?.assistantMessageEvent?.content, "string");
+
+  const rawLog = path.join(tempDir, "progress-raw.jsonl");
+  const rawRun = runCli(fakePi, "approve", "0", ["--progress-log", rawLog, "--progress-log-raw"]);
+  assert.equal(rawRun.error, undefined);
+  assert.equal(rawRun.status, 0, rawRun.stderr);
+  const rawUpdates = fs.readFileSync(rawLog, "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((event) => event.type === "message_update");
+  assert.ok(rawUpdates.some((event) => Array.isArray(event.assistantMessageEvent?.partial?.content)));
+  assert.ok(rawUpdates.some((event) => Array.isArray(event.message?.content)));
+  assert.ok(fs.statSync(rawLog).size > fs.statSync(slimLog).size);
 });

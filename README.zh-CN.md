@@ -178,7 +178,7 @@ CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/
 
 斜杠命令只选策略：`/rv` panel、`/rv-loop` loop closeout、`/rv-models` 模型目录；后面一律是自然语言 target。模式/模型/panel/路径处理等其余策略匹配放在 skill 与 CLI。普通 `/rv @src`、`/rv review the auth changes`、`/rv-loop fix until clean @src` 无需额外参数；`--continue`、`--keep-session`、loop 与显式 `--no-stream` 走 shell CLI 路径。
 
-**Claude Code / Codex 等 Agent 宿主**：`pi-review` 默认把可读文本增量流到 stdout，把**语义化里程碑**写到 stderr（`pi-review: review started` / `pi-review: tool <name> started/finished` / `pi-review: review finished`）；token 用量默认就能拿到，无需 `--progress-log`。`--progress-log` 退化为可选的调试用全量事件日志。详见 `skills/pi-review/SKILL.md`、`skills/pi-review/references/codex-tools.md` 与英文 README。
+**Claude Code / Codex 等 Agent 宿主**：`pi-review` 默认把可读文本增量流到 stdout，把**语义化里程碑**写到 stderr（`pi-review: review started` / `pi-review: tool <name> started/finished` / `pi-review: review finished`）；token 用量默认就能拿到，无需 `--progress-log`。`--progress-log` 退化为可选的调试用事件日志，默认写入**瘦身**后的事件流：每条 `message_update` 会把随增量重复携带的累积消息快照（`assistantMessageEvent.partial` 与顶层 `message` 两份）缩减为其中的 `usage` 字段——原始流每个增量都重复整条消息内容与 provider 元数据，文件随消息长度平方级增长，实测约 1600 倍字节放大；增量本身与 `message_end`/`turn_end`/`agent_end` 仍保留完整记录，瘦身日志可用 pi-review 自身解析器无损回放。需要逐字节原始流时加 `--progress-log-raw`。详见 `skills/pi-review/SKILL.md`、`skills/pi-review/references/codex-tools.md` 与英文 README。
 
 ## 输出格式
 

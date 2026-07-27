@@ -22,7 +22,7 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 - **Loop review gate** — bounded, isolated review rounds with `pi-review loop --max-rounds <n>`; the host remains the only editor
 - **Model-agnostic** — use any model available in your Pi installation
 - **Live streaming** — child review output is forwarded as it arrives (use `--no-stream` to buffer)
-- **Progress logging for AI hosts** — `--progress-log <path>` writes a live JSON event log so agent hosts that buffer tool stdout (Claude Code, Codex, ...) can still show real-time progress
+- **Progress logging for AI hosts** — `--progress-log <path>` writes a live, compact JSON event log so agent hosts that buffer tool stdout (Claude Code, Codex, ...) can still show real-time progress (`--progress-log-raw` keeps the verbatim stream)
 - **Session continuity** — keep sessions alive for follow-up questions with `--keep-session`
 - **Customizable presets** — extend or override review modes via JSON configuration
 - **Pi package integration** — `/rv` slash command and agent skill included
@@ -324,10 +324,10 @@ pi-review --continue <sessionHandle> --mode challenge --model provider/model -- 
 
 Agent hosts like Claude Code, Cursor, and Codex typically buffer a Bash tool's stdout until the command exits. The stderr milestone notices give you progress signals without tailing a file. The final Markdown review + ASCII footer arrive on stdout when the process exits.
 
-`--progress-log <path>` is now an **optional** convenience for fine-grained debugging: it tees the raw `--mode json` event stream to a file. It no longer gates token visibility. Details: [`skills/pi-review/SKILL.md`](skills/pi-review/SKILL.md) and [`skills/pi-review/references/codex-tools.md`](skills/pi-review/references/codex-tools.md).
+`--progress-log <path>` is now an **optional** convenience for fine-grained debugging: it tees the `--mode json` event stream to a file. By default the tee is **slimmed** — each `message_update` line reduces its cumulative message snapshots (`assistantMessageEvent.partial` and the duplicate top-level `message`) to their `usage` field. A verbatim tee repeats the entire message-so-far plus provider metadata on every delta, growing the file quadratically with message length (real reviews measured a ~1600x byte amplification). Deltas and message boundaries (`message_end`, `turn_end`, `agent_end`) keep the complete record, so the slimmed log still reconstructs the review and replays through pi-review's own event parser with no feature loss. Add `--progress-log-raw` when you need the verbatim stream. `--progress-log` no longer gates token visibility. Details: [`skills/pi-review/SKILL.md`](skills/pi-review/SKILL.md) and [`skills/pi-review/references/codex-tools.md`](skills/pi-review/references/codex-tools.md).
 
 ```bash
-# Optional: capture the full event log for debugging
+# Optional: capture the event log for debugging (slimmed by default; add --progress-log-raw for verbatim)
 pi-review --progress-log /tmp/pi-review.jsonl -- @src/foo.ts &
 tail -f -n +1 /tmp/pi-review.jsonl | jq -c --unbuffered '
   select(.type != "message_update" and .type != "tool_execution_update")
@@ -356,7 +356,8 @@ pi-review models [search]
 | `--continue <handle>` | Continue an existing session |
 | `--name <name>` | Session name (with `--keep-session`) |
 | `--no-stream` | Buffer child output until exit (default: stream live) |
-| `--progress-log <path>` | Stream child `--mode json` events to this file (cannot combine with `--no-stream`) |
+| `--progress-log <path>` | Stream compact child `--mode json` events to this file (cannot combine with `--no-stream`) |
+| `--progress-log-raw` | With `--progress-log`: tee the verbatim event stream (full message snapshots; much larger files) |
 | `--max-rounds <n>` | Positive loop hard budget (default: `3`; with `--until clean` default: `10`; `loop` only) |
 | `--until clean` | Loop goal: keep going until the clean gate (still hard-capped by `--max-rounds`; never unlimited) |
 | `--reviewers <n>` | Panel: number of independent reviewers (2-8; activates panel mode) |

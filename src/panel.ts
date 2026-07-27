@@ -3,8 +3,6 @@
 // result, and emit a single aggregate footer + metadata record. Reviewers and
 // the consensus adjudicator remain review-only (no write tools, --no-session).
 
-import fs from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import { PANEL_READ_ONLY_TOOLS, REVIEW_META_VERSION } from "./types.js";
@@ -23,6 +21,7 @@ import { splitPayload, normalizePayloadRefs, buildReviewerPrompt, buildAdjudicat
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
 import { extractFinalText, JsonEventStream } from "./json-events.js";
+import { ProgressLogWriter } from "./progress-log.js";
 import type { TokenUsage } from "./types.js";
 import { fail, expandMaybeHome } from "./utils.js";
 import { resolveConfig, type Config } from "./config.js";
@@ -123,16 +122,24 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   const { config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt, signal, emit, quietProgress } = input;
   const args = buildReviewerArgs(config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt);
 
-  let progressStream: fs.WriteStream | undefined;
+  let progressWriter: ProgressLogWriter | undefined;
   if (progressLog) {
-    fs.mkdirSync(path.dirname(progressLog), { recursive: true });
-    progressStream = fs.createWriteStream(progressLog, { flags: "a" });
+    try {
+      progressWriter = new ProgressLogWriter(progressLog, { raw: parsed.progressLogRaw });
+    } catch (error) {
+      // The progress log is an observability convenience; never kill a
+      // reviewer run because its directory cannot be created.
+      if (!quietProgress) {
+        process.stderr.write(`  [${reviewer.id}] pi-review: warning: --progress-log unavailable: ${(error as Error).message}\n`);
+      }
+    }
   }
 
   // Reviewers always run in --mode json. A JsonEventStream accumulates token
   // usage and emits reviewer-prefixed milestones to stderr; reviewer prose is
   // NOT forwarded to stdout so concurrent reviewers never interleave (issue #2
-  // progress isolation). The raw json lines tee into the progress-log file.
+  // progress isolation). The json lines tee into the progress-log file
+  // (slimmed unless --progress-log-raw).
   const streamParser = new JsonEventStream({
     onText: () => { /* reviewer prose is captured, not displayed */ },
     onMilestone: (line) => { if (!quietProgress) process.stderr.write(`  [${reviewer.id}] ${line}`); },
@@ -160,7 +167,7 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   const stdoutSink = new Writable({
     write(chunk, _enc, cb) {
       const text = String(chunk);
-      if (progressStream) progressStream.write(text);
+      if (progressWriter) progressWriter.write(text);
       streamParser.feed(text);
       cb();
     },
@@ -178,8 +185,11 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
     processGroup: true,
   });
   streamParser.flush();
-  if (progressStream) {
-    await new Promise<void>((resolve) => progressStream!.end(() => resolve()));
+  if (progressWriter) {
+    const progressLogError = await progressWriter.end();
+    if (progressLogError && !quietProgress) {
+      process.stderr.write(`  [${reviewer.id}] pi-review: warning: --progress-log write failed: ${progressLogError.message}\n`);
+    }
   }
 
   let stdout = child.stdout || "";

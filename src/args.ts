@@ -22,7 +22,8 @@ Options:
   --skill <path>                              Load an extra pi skill (repeatable)
   --tools <csv>                               Override allowed tools
   --no-stream                                 Buffer child output until exit (default: stream live)
-  --progress-log <path>                       Stream child --mode json events to this file (cannot combine with --no-stream)
+  --progress-log <path>                       Stream compact child --mode json events to this file (cannot combine with --no-stream)
+  --progress-log-raw                          With --progress-log: tee the verbatim event stream (full snapshots; much larger)
   --max-rounds <n>                            Loop hard budget (default: 3; with --until clean default: 10; loop only)
   --until clean                               Loop goal: keep going until clean gate (still hard-capped by --max-rounds)
   --reviewers <n>                             Panel: number of independent reviewers (2-8; activates panel mode)
@@ -168,6 +169,9 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
       case "--progress-log":
         options.progressLog = requireValue(arg, argv);
         break;
+      case "--progress-log-raw":
+        options.progressLogRaw = true;
+        break;
       case "--max-rounds":
         options.maxRounds = parsePositiveInteger(arg, requireValue(arg, argv));
         options.maxRoundsExplicit = true;
@@ -242,6 +246,9 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
   }
   if (options.progressLog && !options.stream) {
     throw new ArgsParseError("--progress-log cannot be used with --no-stream");
+  }
+  if (options.progressLogRaw && !options.progressLog) {
+    throw new ArgsParseError("--progress-log-raw requires --progress-log");
   }
   if (command !== "loop" && options.maxRounds !== undefined) {
     throw new ArgsParseError("--max-rounds can only be used with loop");

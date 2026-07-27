@@ -62,8 +62,15 @@ export interface ParsedArgs {
   keepSession: boolean;
   /** When false, buffer child output and print after exit (legacy / scripting). Default: stream. */
   stream: boolean;
-  /** When set, run the child in --mode json and stream its event log to this file path. */
+  /**
+   * When set, stream the child's --mode json event log to this file path.
+   * Slimmed by default: message_update lines reduce their cumulative message
+   * snapshots to `usage`, since a verbatim tee grows O(n^2) with message
+   * length. See progressLogRaw.
+   */
   progressLog?: string;
+  /** With progressLog: tee the verbatim event stream instead of the slimmed one. */
+  progressLogRaw?: boolean;
   /** Review budget for the loop command (hard ceiling). */
   maxRounds?: number;
   /** True when the user explicitly passed --max-rounds (vs default). */

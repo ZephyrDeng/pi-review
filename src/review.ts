@@ -11,6 +11,7 @@ import { splitPayload, normalizePayloadRefs, buildPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
 import { parseReviewResult, reviewExitCode } from "./review-result.js";
 import { extractFinalText, extractUsage, JsonEventStream } from "./json-events.js";
+import { ProgressLogWriter } from "./progress-log.js";
 import type { TokenUsage } from "./types.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
@@ -50,7 +51,7 @@ export function metaLinePrefix(childStdout: string, streamMode: boolean): string
 
 /** True when the final text must be printed after exit instead of having streamed live.
  * With --mode json streaming, text deltas are forwarded live in streaming mode;
- * --progress-log no longer forces buffering (it only tees the raw event stream). */
+ * --progress-log no longer forces buffering (it only tees the event stream). */
 export function progressLogBuffersOutput(streamMode: boolean, _hasProgressLog: boolean): boolean {
   return !streamMode;
 }
@@ -116,33 +117,28 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
 
   args.push(...(payload.attachableFileRefs ?? payload.fileRefs), prompt);
 
-  let progressStream: fs.WriteStream | undefined;
-  let progressStreamError: Error | undefined;
+  let progressWriter: ProgressLogWriter | undefined;
   if (parsed.progressLog) {
     try {
-      fs.mkdirSync(path.dirname(parsed.progressLog), { recursive: true });
+      progressWriter = new ProgressLogWriter(parsed.progressLog, { raw: parsed.progressLogRaw });
     } catch (error) {
       fail(`failed to prepare --progress-log directory: ${(error as Error).message}`);
     }
-    progressStream = fs.createWriteStream(parsed.progressLog, { flags: "a" });
-    progressStream.on("error", (error) => {
-      progressStreamError = error;
-    });
   }
 
   const startedAt = Date.now();
 
   // In streaming mode the child always emits --mode json. A JsonEventStream
   // forwards readable text deltas to stdout and semantic milestones to stderr
-  // while accumulating token usage; the same raw json lines also tee into the
-  // progress-log file when --progress-log is set.
+  // while accumulating token usage; the same json lines also tee into the
+  // progress-log file when --progress-log is set (slimmed unless --progress-log-raw).
   let streamParser: JsonEventStream | undefined;
   let streamUsage: TokenUsage | undefined;
   const stdoutSink = parsed.stream
     ? new Writable({
         write(chunk, _enc, cb) {
           const text = String(chunk);
-          if (progressStream) progressStream.write(text);
+          if (progressWriter) progressWriter.write(text);
           if (!streamParser) {
             streamParser = new JsonEventStream({
               onText: (c) => process.stdout.write(c),
@@ -173,10 +169,10 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     // ensure newline separation after streamed text before the ASCII footer
     if (child.stdout && !child.stdout.endsWith("\n")) process.stdout.write("\n");
   }
-  if (progressStream) {
-    await new Promise<void>((resolve) => progressStream!.end(() => resolve()));
-    if (progressStreamError) {
-      process.stderr.write(`pi-review: warning: --progress-log write failed: ${progressStreamError.message}\n`);
+  if (progressWriter) {
+    const progressLogError = await progressWriter.end();
+    if (progressLogError) {
+      process.stderr.write(`pi-review: warning: --progress-log write failed: ${progressLogError.message}\n`);
     }
   }
 

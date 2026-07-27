@@ -78,6 +78,22 @@ test("value-taking CLI flags reject a following flag instead of consuming it as 
   }
 });
 
+test("--progress-log-raw modifies --progress-log and cannot stand alone", () => {
+  const parsed = parseReviewCommand([
+    "--progress-log", "/tmp/progress.jsonl", "--progress-log-raw", "--", "@src",
+  ]);
+  assert.equal(parsed.progressLog, "/tmp/progress.jsonl");
+  assert.equal(parsed.progressLogRaw, true);
+
+  const slimParsed = parseReviewCommand(["--progress-log", "/tmp/progress.jsonl", "--", "@src"]);
+  assert.equal(slimParsed.progressLogRaw, undefined);
+
+  assert.throws(
+    () => parseReviewCommand(["--progress-log-raw", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /--progress-log-raw requires --progress-log/.test(error.message),
+  );
+});
+
 test("loop rejects invalid max-rounds values as usage errors", () => {
   for (const value of ["0", "-1", "1.5", "many", "9007199254740992"]) {
     assert.throws(

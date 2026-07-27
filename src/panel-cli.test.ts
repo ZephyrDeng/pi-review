@@ -56,7 +56,7 @@ function emit(text) {
   line({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "review" }] } });
   line({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "review" }] } });
   line({ type: "message_start", message: { role: "assistant", content: [], model: "fake/model", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 } } });
-  line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: text, partial: { role: "assistant" } } });
+  line({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: text, partial: { role: "assistant", content: [{ type: "text", text }] } } });
   line({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], model: "fake/model", usage: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 150 }, stopReason: "stop" } });
   line({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text }], usage: { input: 100, output: 50, totalTokens: 150 } } });
   line({ type: "agent_end", messages: [{ role: "user", content: [{ type: "text", text: "review" }] }, { role: "assistant", content: [{ type: "text", text }], responseModel: "fake/model" }] });
@@ -224,6 +224,70 @@ test("panel review where all reviewers approve is clean and exits 0", () => {
   assert.equal(meta!.status, "clean");
   assert.equal((meta!.confirmedClusters as unknown[]).length, 0);
   assert.equal((meta!.advisories as unknown[]).length, 0);
+});
+
+test("panel reviewer progress logs are slimmed per reviewer by default", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  const base = path.join(tempDir, "panel-progress.jsonl");
+  const result = runPanelCli(fakePi, "all-clean", ["--reviewers", "2", "--progress-log", base]);
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+
+  const logNames = fs.readdirSync(tempDir)
+    .filter((name) => name.startsWith("panel-progress.r") && name.endsWith(".jsonl"));
+  assert.equal(logNames.length, 2, logNames.join(","));
+  for (const name of logNames) {
+    const events = fs.readFileSync(path.join(tempDir, name), "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line));
+    const updates = events.filter((event) => event.type === "message_update");
+    assert.ok(updates.length >= 1, name);
+    for (const event of updates) {
+      // fixture partials carry role+content but no usage, so the snapshot goes entirely
+      assert.equal(event.assistantMessageEvent?.partial, undefined, name);
+    }
+    const end = events.find((event) => event.type === "message_end" && event.message?.role === "assistant");
+    assert.ok(Array.isArray(end?.message?.content), name);
+  }
+});
+
+test("panel review continues with a warning when the progress log cannot be created", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  // Parent of the log path is a regular file, so mkdirSync must fail.
+  const blocker = path.join(tempDir, "blocker");
+  fs.writeFileSync(blocker, "not a directory");
+  const base = path.join(blocker, "nested", "panel.jsonl");
+
+  const result = runPanelCli(fakePi, "all-clean", ["--reviewers", "2", "--progress-log", base]);
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /--progress-log unavailable/);
+  const meta = metaRecord(result);
+  assert.ok(meta, result.stderr);
+  assert.equal(meta!.status, "clean");
+});
+
+test("panel reviewer progress logs keep verbatim snapshots with --progress-log-raw", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  const base = path.join(tempDir, "panel-raw.jsonl");
+  const result = runPanelCli(fakePi, "all-clean", ["--reviewers", "2", "--progress-log", base, "--progress-log-raw"]);
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+
+  const logNames = fs.readdirSync(tempDir)
+    .filter((name) => name.startsWith("panel-raw.r") && name.endsWith(".jsonl"));
+  assert.equal(logNames.length, 2, logNames.join(","));
+  for (const name of logNames) {
+    const updates = fs.readFileSync(path.join(tempDir, name), "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((event) => event.type === "message_update");
+    assert.ok(updates.some((event) => Array.isArray(event.assistantMessageEvent?.partial?.content)), name);
+  }
 });
 
 test("panel review with a singleton finding keeps it advisory and stays clean under quorum", () => {

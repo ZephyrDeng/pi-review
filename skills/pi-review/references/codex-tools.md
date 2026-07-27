@@ -26,7 +26,7 @@ Native shell tools on these hosts **buffer stdout/stderr until the command exits
 ### Single review / `loop`: progress log + tail
 
 1. **Default:** run `pi-review ... --progress-log <path> -- <target>` in the **background** and **tail the log** for user-visible progress (see the tail example below). Stdout still delivers the review Markdown + ASCII footer on exit.
-2. `--progress-log` tees the raw `--mode json` event stream to the chosen file for observation and debugging. It is **not** a prerequisite for metrics: the ASCII footer and `PI_REVIEW_META_JSON` always include `thinking` + token usage (`input`/`output`/`cache`/`reasoning`) when the child session reports them.
+2. `--progress-log` tees a compact `--mode json` event stream to the chosen file for observation and debugging — each `message_update` reduces its cumulative message snapshots to `usage` so the file stays small; add `--progress-log-raw` when you need the verbatim stream. It is **not** a prerequisite for metrics: the ASCII footer and `PI_REVIEW_META_JSON` always include `thinking` + token usage (`input`/`output`/`cache`/`reasoning`) when the child session reports them.
 3. `pi-review` also writes semantic milestone notices to stderr (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`); they surface once the host flushes output.
 4. After exit, show the Markdown review body and ASCII `── pi-review` footer (skill step 4).
 
