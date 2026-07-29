@@ -162,6 +162,17 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
       formatDurationMs(r.durationMs),
     ];
     lines.push(`    - ${bits.join(" | ")}`);
+    // Issue #8: surface the full runtime/parse diagnostic under the reviewer row
+    // so a child crash stack is visible without scraping machine JSON.
+    const diagnostic = r.runtimeError || r.parseError;
+    if (diagnostic) {
+      for (const line of diagnostic.split("\n")) {
+        lines.push(`      ${line}`);
+      }
+    }
+  }
+  if (meta.parseError) {
+    lines.push(`  ${padLabel("Note", labelW)}  ${meta.parseError}`);
   }
   lines.push("─".repeat(42));
   return lines.join("\n");

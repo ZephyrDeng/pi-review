@@ -206,6 +206,8 @@ CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/
 
 - 每次审查在隔离子进程中运行
 - 默认不保留子会话；`--keep-session` 仅用于显式跟进
+- 默认还会传 `--no-extensions`，避免宿主 usage HUD / reload bridge 在 dispose 后触 stale extension ctx 搞崩 reviewer（见 issue #8）。仅当自定义 provider 必须在子进程内注册时，才用 `PI_REVIEW_CHILD_EXTENSIONS=1` 退出隔离
+- reviewer 运行时失败时，panel footer 与 `reviewers[].runtimeError` 会保留子进程 stderr/stack 尾部便于诊断
 - 审查会话只读，不编辑、不部署
 
 ## 许可

@@ -315,6 +315,48 @@ test("panel review with a reviewer runtime failure is blocked and exits 4", () =
   assert.equal(meta!.status, "blocked");
   assert.equal(meta!.panelHealth, "blocked");
   assert.equal((meta!.confirmedClusters as unknown[]).length, 0);
+  // Issue #8: child stderr/stack must survive into reviewer diagnostics and the ASCII footer.
+  const failed = (meta!.reviewers as Array<{ reviewerId: string; runtimeError?: string }>).find((r) => r.reviewerId === "r2");
+  assert.ok(failed?.runtimeError, JSON.stringify(meta!.reviewers));
+  assert.match(failed!.runtimeError!, /child pi exited with status 9/);
+  assert.match(failed!.runtimeError!, /child crashed/);
+  assert.match(result.stdout + result.stderr, /child crashed/);
+});
+
+test("panel reviewer children receive --no-extensions isolation by default (issue #8)", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = path.join(tempDir, "fake-pi-args");
+  fs.writeFileSync(
+    fakePi,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const out = process.env.FAKE_PI_ARGV_FILE;
+if (out) fs.appendFileSync(out, JSON.stringify(process.argv.slice(1)) + "\\n");
+process.stdout.write(JSON.stringify({ type: "agent_end", messages: [] }) + "\\n");
+process.exit(0);
+`,
+  );
+  fs.chmodSync(fakePi, 0o755);
+  const argvFile = path.join(tempDir, "argv.jsonl");
+  const result = spawnSync(
+    process.execPath,
+    [...tsxLoaderArgs(), cliPath(), "--reviewers", "2", "--", "@src"],
+    {
+      cwd: repoRoot(),
+      env: { ...process.env, PI_BIN: fakePi, FAKE_PI_ARGV_FILE: argvFile },
+      encoding: "utf8",
+      timeout: 30_000,
+    },
+  );
+  assert.equal(result.error, undefined, result.stderr);
+  assert.ok(fs.existsSync(argvFile), result.stderr + result.stdout);
+  const lines = fs.readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean);
+  assert.ok(lines.length >= 2, `expected reviewer argv captures, got ${lines.length}`);
+  for (const line of lines) {
+    const argv = JSON.parse(line) as string[];
+    assert.ok(argv.includes("--no-extensions"), argv.join(" "));
+    assert.ok(argv.includes("--no-session"), argv.join(" "));
+  }
 });
 
 test("panel review emits exactly one aggregate metadata record", () => {

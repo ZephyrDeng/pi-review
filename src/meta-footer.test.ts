@@ -175,3 +175,35 @@ test("panel ASCII footer reviewer rows fall back to the response model when unco
   assert.match(ascii, /r1 \| CLEAN \| approve \| role:one \| provider\/model-a/);
   assert.match(ascii, /r2 \| CLEAN \| approve \| role:two \| provider\/model-a/);
 });
+
+test("panel ASCII footer preserves multi-line child runtime diagnostics (issue #8)", () => {
+  const ascii = formatPanelMetaAscii({
+    ...panelSample,
+    status: "blocked",
+    panelHealth: "blocked",
+    successfulReviewers: 1,
+    reviewers: [
+      {
+        reviewerId: "r1",
+        role: "Independent reviewer",
+        model: "openai-codex/gpt-5.6-sol",
+        thinking: "xhigh",
+        durationMs: 1200,
+        status: "blocked",
+        verdict: "blocked",
+        verdictSource: "runtime_error",
+        contributed: false,
+        runtimeError: [
+          "child pi exited with status 1",
+          "--- child stderr ---",
+          "Error: This extension ctx is stale after session replacement or reload.",
+        ].join("\n"),
+      },
+      panelSample.reviewers[1]!,
+    ],
+  });
+  assert.match(ascii, /r1 \| BLOCKED \| blocked/);
+  assert.match(ascii, /child pi exited with status 1/);
+  assert.match(ascii, /--- child stderr ---/);
+  assert.match(ascii, /extension ctx is stale/);
+});

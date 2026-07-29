@@ -317,8 +317,10 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       const stdoutSink = new Writable({ write(chunk, _encoding, callback) { consume(String(chunk)); callback(); } });
       const stderrSink = new Writable({
         write(chunk, _encoding, callback) {
+          // Keep a larger tail so child crash stacks (issue #8) survive when the
+          // panel CLI itself fails before emitting a final event.
           const next = stderr + String(chunk);
-          stderr = next.length > 2000 ? next.slice(-2000) : next;
+          stderr = next.length > 12_000 ? next.slice(-12_000) : next;
           callback();
         },
       });

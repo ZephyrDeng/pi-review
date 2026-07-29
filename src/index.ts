@@ -3,8 +3,25 @@ export { resolveConfig } from "./config.js";
 export type { Config } from "./config.js";
 export { loadPresets, loadPanelPresets, loadSystemPrompt } from "./presets.js";
 export { splitPayload, normalizePayloadRefs, buildPrompt, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
-export { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.js";
-export { runPanelReview, runPanelReviewOnce, emitPanelFooter, shouldPreserveSubmissionOnAbort } from "./panel.js";
+export {
+  childEnv,
+  childIsolationArgs,
+  childRuntimeError,
+  formatChildRuntimeDetail,
+  readReviewStdin,
+  runModels,
+  runReview,
+  runReviewOnce,
+  CHILD_STDERR_DIAGNOSTIC_LIMIT,
+} from "./review.js";
+export {
+  buildReviewerArgs,
+  runPanelReview,
+  runPanelReviewOnce,
+  emitPanelFooter,
+  shouldPreserveSubmissionOnAbort,
+  resolvePanelReviewerTools,
+} from "./panel.js";
 export { spawnStreamingChild } from "./child-process.js";
 export { createPanelViewState, reducePanelEvent } from "./panel-view.js";
 export type { PanelViewState, PanelReviewerView, PanelPhase, ReviewerViewStatus } from "./panel-view.js";

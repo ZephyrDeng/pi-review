@@ -15,7 +15,7 @@ import type {
 } from "./types.js";
 export { PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { spawnStreamingChild } from "./child-process.js";
-import { childEnv, childRuntimeError, readReviewStdin } from "./review.js";
+import { childEnv, childIsolationArgs, childRuntimeError, formatChildRuntimeDetail, readReviewStdin } from "./review.js";
 import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, normalizePayloadRefs, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
@@ -70,7 +70,8 @@ export function resolvePanelReviewerTools(tools: string | string[] | undefined):
   return [...new Set(requested.length > 0 ? requested : PANEL_READ_ONLY_TOOLS)].join(",");
 }
 
-function buildReviewerArgs(
+/** Build argv for one isolated reviewer child. Exported for issue #8 isolation tests. */
+export function buildReviewerArgs(
   config: Config,
   parsed: ParsedArgs,
   preset: { tools?: string[] | string; thinking?: string; provider?: string; model?: string; skillPaths?: string[] },
@@ -79,6 +80,7 @@ function buildReviewerArgs(
   reviewer: { provider?: string; model?: string; thinking?: string },
   progressLog: string | undefined,
   systemPrompt: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): string[] {
   const args: string[] = ["-p", "--mode", "json"];
   if (systemPrompt) args.push("--append-system-prompt", systemPrompt);
@@ -99,6 +101,9 @@ function buildReviewerArgs(
     args.push("--skill", expandMaybeHome(skill)!);
   }
 
+  // Host extensions can crash the child via stale extension ctx after dispose
+  // (issue #8). Keep reviewers isolated unless the operator opts out.
+  args.push(...childIsolationArgs(env));
   args.push("--no-session");
   args.push(...fileRefs, prompt);
   return args;
@@ -194,9 +199,9 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
 
   let stdout = child.stdout || "";
   const runtimeError = childRuntimeError(child);
-  // Surface a captured reviewer stderr tail only when the child failed, so
-  // concurrent reviewer diagnostics never interleave on the shared terminal.
-  const reviewerStderr = stderrChunks.join("");
+  // Prefer the spawn helper's own capture, then the sink buffer. Keep enough of
+  // the tail for full Node uncaught stacks (issue #8 diagnostics).
+  const reviewerStderr = child.stderr || stderrChunks.join("");
 
   let extractedError: string | undefined;
   let extractedFatal = false;
@@ -211,11 +216,17 @@ async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmis
   let verdictInfo: VerdictInfo = parseVerdict(stdout);
 
   if (runtimeError) {
-    const detail = [runtimeError, reviewerStderr.slice(-2000)].filter(Boolean).join("; ");
-    verdictInfo = { verdict: "blocked", verdictSource: "runtime_error", parseError: detail };
+    verdictInfo = {
+      verdict: "blocked",
+      verdictSource: "runtime_error",
+      parseError: formatChildRuntimeDetail(runtimeError, reviewerStderr),
+    };
   } else if (extractedFatal) {
-    const detail = [extractedError, reviewerStderr.slice(-2000)].filter(Boolean).join("; ");
-    verdictInfo = { verdict: "blocked", verdictSource: "runtime_error", parseError: detail };
+    verdictInfo = {
+      verdict: "blocked",
+      verdictSource: "runtime_error",
+      parseError: formatChildRuntimeDetail(extractedError || "child reported a fatal error", reviewerStderr),
+    };
   } else if (extractedError) {
     verdictInfo = { ...verdictInfo, parseError: [verdictInfo.parseError, extractedError].filter(Boolean).join("; ") };
   }
@@ -278,8 +289,16 @@ function createAdjudicator(
       // The adjudicator is aggregation-only: it must not inspect the repository
       // as an additional reviewer and has no write capability. Disable all tools
       // and run with no session — it returns JSON purely from the structured
-      // findings embedded in the prompt.
-      const args: string[] = ["-p", "--no-session", "--no-tools", "--append-system-prompt", adjudicatorSystemPrompt];
+      // findings embedded in the prompt. Also isolate from host extensions
+      // (issue #8) so a usage HUD / reload bridge cannot crash adjudication.
+      const args: string[] = [
+        "-p",
+        ...childIsolationArgs(),
+        "--no-session",
+        "--no-tools",
+        "--append-system-prompt",
+        adjudicatorSystemPrompt,
+      ];
       if (consensusModel) args.push("--model", consensusModel);
       args.push(prompt);
 

@@ -43,6 +43,32 @@ export function childEnv(piBin: string): NodeJS.ProcessEnv {
   };
 }
 
+/**
+ * Isolate review children from host Pi extension side effects.
+ *
+ * Host extensions (usage HUDs, auto-reload bridges, etc.) may capture extension
+ * ctx and touch it after session dispose/reload. That throws Pi's stale-context
+ * error and can crash an otherwise successful reviewer child (issue #8).
+ *
+ * Opt out with PI_REVIEW_CHILD_EXTENSIONS=1 when a custom provider truly requires
+ * host extension registration inside the child.
+ */
+export function childIsolationArgs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env.PI_REVIEW_CHILD_EXTENSIONS?.trim().toLowerCase();
+  if (raw === "1" || raw === "true" || raw === "keep") return [];
+  return ["--no-extensions"];
+}
+
+/** Prefer the larger of two captured stderr buffers; keep a readable stack tail. */
+export const CHILD_STDERR_DIAGNOSTIC_LIMIT = 12_000;
+
+export function formatChildRuntimeDetail(runtimeError: string, stderr: string, limit = CHILD_STDERR_DIAGNOSTIC_LIMIT): string {
+  const tail = stderr.trim();
+  if (!tail) return runtimeError;
+  const clipped = tail.length > limit ? tail.slice(tail.length - limit) : tail;
+  return `${runtimeError}\n--- child stderr ---\n${clipped}`;
+}
+
 /** Ensures the ASCII meta footer starts on its own line after streamed child stdout. */
 export function metaLinePrefix(childStdout: string, streamMode: boolean): string {
   if (!streamMode || !childStdout) return "";
@@ -115,6 +141,8 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     args.push("--no-session");
   }
 
+  // Isolate single-review children from host extension side effects (issue #8).
+  args.push(...childIsolationArgs());
   args.push(...(payload.attachableFileRefs ?? payload.fileRefs), prompt);
 
   let progressWriter: ProgressLogWriter | undefined;
@@ -181,6 +209,8 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
   let extractedError: string | undefined;
   let extractedFatal = false;
   let extractedUsage: TokenUsage | undefined;
+  // stderr is always captured on the child result; streaming mode may already
+  // have forwarded milestones, but crash stacks still land here for diagnostics.
   if (parsed.stream) {
     // Text was already forwarded live by the stream parser; derive final text
     // and usage from the captured json stream.
@@ -217,13 +247,13 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     verdictInfo = {
       verdict: "blocked",
       verdictSource: "runtime_error",
-      parseError: runtimeError,
+      parseError: formatChildRuntimeDetail(runtimeError, stderr),
     };
   } else if (extractedFatal) {
     verdictInfo = {
       verdict: "blocked",
       verdictSource: "runtime_error",
-      parseError: extractedError,
+      parseError: formatChildRuntimeDetail(extractedError || "child reported a fatal error", stderr),
     };
   } else if (extractedError) {
     verdictInfo = {
