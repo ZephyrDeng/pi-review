@@ -4,6 +4,7 @@ import { createPanelViewState, reducePanelEvent } from "@zephyrdeng/pi-review";
 import {
   buildPanelResultContent,
   expandHint,
+  normalizePanelToolParams,
   panelToolParamError,
   PanelResultView,
   registerPanelReviewTool,
@@ -18,9 +19,22 @@ const theme = {
 test("panel tool boundary rejects single-reviewer and out-of-range widths", () => {
   assert.match(panelToolParamError({ target: "@src", reviewers: 1 }) ?? "", /between 2 and 8/);
   assert.match(panelToolParamError({ target: "@src", reviewers: 9 }) ?? "", /between 2 and 8/);
-  assert.match(panelToolParamError({ target: "@src", panel: "code-experts", reviewers: 2 }) ?? "", /cannot be combined/);
+  assert.equal(panelToolParamError({ target: "@src", panel: "code-experts", reviewers: 2 }), undefined);
   assert.equal(panelToolParamError({ target: "@src", reviewers: 2 }), undefined);
   assert.equal(panelToolParamError({ target: "@src", panel: "code-experts" }), undefined);
+});
+
+test("panel + reviewers prefers panel instead of hard-failing", () => {
+  const normalized = normalizePanelToolParams({
+    target: "@src",
+    panel: "code-experts",
+    reviewers: 3,
+  });
+  assert.ok(!("error" in normalized));
+  assert.equal(normalized.panel, "code-experts");
+  assert.equal(normalized.reviewers, undefined);
+  assert.match(normalized.note ?? "", /ignored reviewers=3/);
+  assert.match(normalized.note ?? "", /code-experts/);
 });
 
 test("registered pi_review rejects reviewers=1 before spawning the panel CLI", async () => {

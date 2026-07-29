@@ -268,12 +268,11 @@ test("min-agree is only meaningful with quorum consensus", () => {
   );
 });
 
-test("reviewers and panel cannot be combined (any reviewer count)", () => {
+test("reviewers + panel prefers panel and drops reviewers (agent-friendly)", () => {
   for (const count of ["3", "1"]) {
-    assert.throws(
-      () => parseReviewCommand(["--reviewers", count, "--panel", "code-experts", "--", "@src"]),
-      (error: unknown) => error instanceof ArgsParseError && /cannot be used with --panel/.test(error.message),
-    );
+    const parsed = parseReviewCommand(["--reviewers", count, "--panel", "code-experts", "--", "@src"]);
+    assert.equal(parsed.panel, "code-experts");
+    assert.equal(parsed.reviewers, undefined);
   }
 });
 

@@ -27,7 +27,7 @@ Options:
   --max-rounds <n>                            Loop hard budget (default: 3; with --until clean default: 10; loop only)
   --until clean                               Loop goal: keep going until clean gate (still hard-capped by --max-rounds)
   --reviewers <n>                             Panel: number of independent reviewers (2-8; activates panel mode)
-  --panel <name>                              Panel: named expert-panel preset (cannot combine with --reviewers)
+  --panel <name>                              Panel: named expert-panel preset (if both set with --reviewers, --panel wins)
   --reviewer-model <id=model>                 Panel: per-reviewer model (repeatable; r1=... or security=...)
   --consensus <policy>                        Panel: any | quorum | majority | unanimous (default: quorum)
   --min-agree <n>                             Panel: minimum reviewers for quorum (default: 2; quorum only)
@@ -270,7 +270,29 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
   return options;
 }
 
+/**
+ * Named presets own reviewer ids/roles/width. Agents often pass both `panel` and
+ * `reviewers`; prefer the preset and surface the dropped width for a warning.
+ */
+export function resolveExclusivePanelShape(input: {
+  panel?: string;
+  reviewers?: number;
+}): { panel?: string; reviewers?: number; ignoredReviewers?: number } {
+  if (input.panel !== undefined && input.reviewers !== undefined) {
+    return { panel: input.panel, ignoredReviewers: input.reviewers };
+  }
+  return { panel: input.panel, reviewers: input.reviewers };
+}
+
 function validatePanelOptions(options: ParsedArgs): void {
+  const shape = resolveExclusivePanelShape(options);
+  if (shape.ignoredReviewers !== undefined) {
+    process.stderr.write(
+      `pi-review: ignoring --reviewers ${shape.ignoredReviewers}; --panel ${shape.panel} defines the reviewer set\n`,
+    );
+    options.reviewers = undefined;
+  }
+
   const hasReviewers = options.reviewers !== undefined;
   const reviewerCount = options.reviewers ?? 1;
   const panelActive = reviewerCount > 1 || options.panel !== undefined;
@@ -283,9 +305,6 @@ function validatePanelOptions(options: ParsedArgs): void {
 
   if (hasReviewers && options.reviewers! > MAX_REVIEWERS) {
     throw new ArgsParseError(`--reviewers must be between 1 and ${MAX_REVIEWERS}`);
-  }
-  if (hasReviewers && options.panel) {
-    throw new ArgsParseError("--reviewers cannot be used with --panel");
   }
   if (!panelActive && anyPanelOption) {
     throw new ArgsParseError("panel options require --reviewers > 1 or --panel");

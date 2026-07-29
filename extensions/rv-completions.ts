@@ -77,7 +77,7 @@ export const FLAG_HINTS: Record<string, string> = {
   "--max-rounds": "Loop hard budget: how many review gates (not reviewer count)",
   "--until": "Loop stop goal: clean",
   "--reviewers": "Panel width: independent reviewers per gate (1-8)",
-  "--panel": "Named expert panel preset (cannot combine with --reviewers)",
+  "--panel": "Named expert panel preset (if both set with --reviewers, --panel wins)",
   "--reviewer-model": "Per-reviewer model: pick rK= then model (repeatable)",
   "--consensus": "any | quorum | majority | unanimous",
   "--min-agree": "Quorum threshold (quorum only)",

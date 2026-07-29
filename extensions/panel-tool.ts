@@ -13,6 +13,7 @@ import {
   formatTokens,
   formatUsage,
   reducePanelEvent,
+  resolveExclusivePanelShape,
   spawnStreamingChild,
   type PanelReviewMeta,
   type PanelViewState,
@@ -147,15 +148,21 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
  * Full panel conclusion for the parent LLM and expanded TUI.
  * Pure plain text / ASCII only — Pi does not render markdown in tool results.
  */
-export function buildPanelResultContent(state: PanelViewState, error?: string): string {
+export function buildPanelResultContent(state: PanelViewState, error?: string, note?: string): string {
   const meta = state.meta;
-  if (!meta && !error) return "Panel completed: unknown";
-  if (!meta) return error ?? "Panel completed: unknown";
+  if (!meta && !error) {
+    return note ? `${PANEL_TOOL_DISPLAY_NAME}: ${note}\n\nPanel completed: unknown` : "Panel completed: unknown";
+  }
+  if (!meta) {
+    const body = error ?? "Panel completed: unknown";
+    return note ? `${PANEL_TOOL_DISPLAY_NAME}: ${note}\n\n${body}` : body;
+  }
 
   const findings = formatFindingsPlain(meta);
   const ascii = formatPanelMetaAscii(meta);
   const summaries = reviewerSummaryLines(state);
   const parts = [
+    note ? `${PANEL_TOOL_DISPLAY_NAME}: ${note}` : "",
     findings,
     ascii,
     summaries.length ? `Reviewer summaries:\n${summaries.join("\n")}` : "",
@@ -259,15 +266,35 @@ export type PanelToolParams = {
   reviewers?: number;
 };
 
-/** Runtime guard for direct tool calls; schema validation is not the only boundary. */
-export function panelToolParamError(params: PanelToolParams): string | undefined {
+export type NormalizedPanelToolParams = {
+  panel?: string;
+  reviewers?: number;
+  /** Set when both panel and reviewers were provided and reviewers was dropped. */
+  note?: string;
+};
+
+/**
+ * Normalize agent tool args. Named presets own width/roles; if both `panel` and
+ * `reviewers` are set, prefer panel (common host habit) instead of hard-failing.
+ */
+export function normalizePanelToolParams(params: PanelToolParams): NormalizedPanelToolParams | { error: string } {
   if (params.reviewers !== undefined) {
     if (!Number.isSafeInteger(params.reviewers) || params.reviewers < 2 || params.reviewers > 8) {
-      return "reviewers must be an integer between 2 and 8; use the shell CLI for a single reviewer";
+      return { error: "reviewers must be an integer between 2 and 8; use the shell CLI for a single reviewer" };
     }
-    if (params.panel) return "panel cannot be combined with reviewers";
   }
-  return undefined;
+  const shape = resolveExclusivePanelShape(params);
+  const note =
+    shape.ignoredReviewers !== undefined
+      ? `ignored reviewers=${shape.ignoredReviewers}; panel "${shape.panel}" defines the reviewer set`
+      : undefined;
+  return { panel: shape.panel, reviewers: shape.reviewers, ...(note ? { note } : {}) };
+}
+
+/** Runtime guard for direct tool calls; schema validation is not the only boundary. */
+export function panelToolParamError(params: PanelToolParams): string | undefined {
+  const normalized = normalizePanelToolParams(params);
+  return "error" in normalized ? normalized.error : undefined;
 }
 
 export function registerPanelReviewTool(pi: ExtensionAPI): void {
@@ -279,8 +306,8 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
     parameters: Type.Object({
       target: Type.String({ description: "Review target as given by the user, such as @src, @src/foo.ts, or a free-text brief. Directories stay tool path targets; only real files are attached." }),
       mode: Type.Optional(Type.String({ description: "Review mode; defaults to code." })),
-      panel: Type.Optional(Type.String({ description: "Named panel preset; defaults to code-experts when reviewers is omitted." })),
-      reviewers: Type.Optional(Type.Number({ minimum: 2, maximum: 8, description: "Independent reviewer count (2-8). Cannot combine with panel; single review uses the shell CLI." })),
+      panel: Type.Optional(Type.String({ description: "Named panel preset; defaults to code-experts when reviewers is omitted. If both panel and reviewers are set, panel wins." })),
+      reviewers: Type.Optional(Type.Number({ minimum: 2, maximum: 8, description: "Independent reviewer count (2-8). Omit when panel is set (panel wins if both appear). Single review uses the shell CLI." })),
       reviewerModels: Type.Optional(Type.Array(Type.String(), { description: "Per-reviewer models as id=provider/model[:thinking] (e.g. r1=openai/gpt-5.6-sol:low). Trailing :thinking wins over shared thinking." })),
       consensus: Type.Optional(Type.String({ description: "any | quorum | majority | unanimous" })),
       minAgree: Type.Optional(Type.Number({ description: "Quorum threshold when consensus=quorum" })),
@@ -325,20 +352,21 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
         },
       });
       // Preserve the full panel configuration and enforce the panel-only tool boundary.
-      const paramError = panelToolParamError(params);
-      if (paramError) {
+      const normalized = normalizePanelToolParams(params);
+      if ("error" in normalized) {
         setAmbientStatus(toolCtx, undefined);
         return {
-          content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${paramError}` }],
-          details: { state, error: paramError },
+          content: [{ type: "text", text: `${PANEL_TOOL_DISPLAY_NAME}: ${normalized.error}` }],
+          details: { state, error: normalized.error },
           isError: true,
         };
       }
+      const shapeNote = normalized.note;
       const args = [cliPath, "--mode", params.mode ?? "code", "--output-format", "events-jsonl"];
-      if (params.reviewers !== undefined) {
-        args.push("--reviewers", String(params.reviewers));
+      if (normalized.reviewers !== undefined) {
+        args.push("--reviewers", String(normalized.reviewers));
       } else {
-        args.push("--panel", params.panel ?? "code-experts");
+        args.push("--panel", normalized.panel ?? "code-experts");
       }
       for (const mapping of params.reviewerModels ?? []) args.push("--reviewer-model", mapping);
       if (params.consensus) args.push("--consensus", params.consensus);
@@ -376,14 +404,16 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       const details: PanelToolDetails = { state, ...(error ? { error } : {}) };
       return {
         // Parent LLM must receive the full conclusion; details remain the TUI rendering source.
-        content: [{ type: "text", text: buildPanelResultContent(state, error) }],
+        content: [{ type: "text", text: buildPanelResultContent(state, error, shapeNote) }],
         details,
         ...(error ? { isError: true } : {}),
       };
     },
     renderCall(args, theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-      const width = args.reviewers !== undefined ? `reviewers=${args.reviewers}` : (args.panel ?? "code-experts");
+      const shape = resolveExclusivePanelShape(args);
+      const width =
+        shape.reviewers !== undefined ? `reviewers=${shape.reviewers}` : (shape.panel ?? "code-experts");
       text.setText(theme.fg("toolTitle", theme.bold(`${PANEL_TOOL_DISPLAY_NAME} `)) + theme.fg("muted", `${width} · ${args.mode ?? "code"} · ${args.target}`));
       return text;
     },

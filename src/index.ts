@@ -1,4 +1,4 @@
-export { ArgsParseError, DEFAULT_MAX_ROUNDS, isPanelActive, parseArgs, parseReviewCommand } from "./args.js";
+export { ArgsParseError, DEFAULT_MAX_ROUNDS, isPanelActive, parseArgs, parseReviewCommand, resolveExclusivePanelShape } from "./args.js";
 export { resolveConfig } from "./config.js";
 export type { Config } from "./config.js";
 export { loadPresets, loadPanelPresets, loadSystemPrompt } from "./presets.js";

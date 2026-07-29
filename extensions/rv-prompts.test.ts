@@ -84,7 +84,8 @@ describe("parseRvArgs / validateRvParsed", () => {
     assert.match(prompt, /natural-language review request/);
     assert.match(prompt, /Do not expand directory targets into multi-file lists/);
     assert.match(prompt, /panel="code-experts"/);
-    assert.match(prompt, /Do not drop panel\/reviewers\/reviewerModels\/consensus fields/);
+    assert.match(prompt, /Pass only one of panel or reviewers/);
+    assert.match(prompt, /panel wins/);
     assert.match(prompt, /Slash commands select strategy only/);
     assert.doesNotMatch(prompt, /@src\/panel\.ts|@src\/json-events\.ts/);
   });
@@ -235,10 +236,19 @@ describe("parseRvArgs / validateRvParsed", () => {
     ]);
   });
 
-  it("rejects incompatible panel strategy combinations", () => {
+  it("panel + reviewers is accepted and builders prefer panel", () => {
     const both = parseRvArgs("--reviewers 3 --panel code-experts @src", "loop");
-    assert.equal(validateRvParsed(both).ok, false);
+    assert.equal(validateRvParsed(both).ok, true);
+    const argv = buildPiReviewArgv(both, "@src");
+    assert.ok(argv.includes("--panel"));
+    assert.ok(argv.includes("code-experts"));
+    assert.ok(!argv.includes("--reviewers"));
+    const instruction = buildPiReviewToolCallInstruction(both, "@src");
+    assert.match(instruction, /panel="code-experts"/);
+    assert.doesNotMatch(instruction, /reviewers=3/);
+  });
 
+  it("rejects incompatible panel strategy combinations", () => {
     const badConsensus = parseRvArgs("--reviewers 3 --consensus nope @src", "loop");
     assert.equal(validateRvParsed(badConsensus).ok, false);
 

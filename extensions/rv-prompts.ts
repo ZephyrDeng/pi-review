@@ -52,7 +52,7 @@ export type RvParsed = {
   /** Panel width: independent reviewers for one gate (and each loop round). */
   reviewers?: number;
   reviewersError?: string;
-  /** Named panel preset (e.g. code-experts). Cannot combine with --reviewers. */
+  /** Named panel preset (e.g. code-experts). If both panel and reviewers are set, panel wins. */
   panel?: string;
   /** Per-reviewer model overrides: id=provider/model (repeatable). */
   reviewerModels?: string[];
@@ -403,31 +403,31 @@ export function validateRvParsed(parsed: RvParsed): RvValidation {
   if (parsed.until !== undefined && parsed.strategy !== "loop") {
     return { ok: false, message: "--until is only valid with /rv-loop." };
   }
-  if (parsed.reviewers !== undefined && parsed.panel) {
-    return { ok: false, message: "--reviewers cannot be used with --panel" };
-  }
+  // panel + reviewers is allowed at parse time; builders prefer panel (see preferPanelShape).
   if (parsed.reviewers !== undefined && (parsed.reviewers < 1 || parsed.reviewers > RV_MAX_REVIEWERS)) {
     return { ok: false, message: `--reviewers must be between 1 and ${RV_MAX_REVIEWERS}` };
   }
+  const shape = preferPanelShape(parsed);
   const hasPanelOnlyOptions =
     parsed.consensus !== undefined ||
     parsed.minAgree !== undefined ||
     parsed.consensusModel !== undefined ||
     parsed.concurrency !== undefined ||
     (parsed.reviewerModels?.length ?? 0) > 0;
-  if (parsed.reviewers === 1 && hasPanelOnlyOptions) {
+  if (shape.reviewers === 1 && !shape.panel && hasPanelOnlyOptions) {
     return { ok: false, message: "panel options require --reviewers > 1 or --panel" };
   }
   if (parsed.minAgree !== undefined) {
     if (parsed.consensus && parsed.consensus !== "quorum") {
       return { ok: false, message: "--min-agree is only valid with --consensus quorum" };
     }
-    if (parsed.reviewers !== undefined && parsed.minAgree > parsed.reviewers) {
-      return { ok: false, message: `--min-agree ${parsed.minAgree} cannot exceed reviewers ${parsed.reviewers}` };
+    // Named panels resolve width later; only compare against explicit numeric width.
+    if (shape.reviewers !== undefined && parsed.minAgree > shape.reviewers) {
+      return { ok: false, message: `--min-agree ${parsed.minAgree} cannot exceed reviewers ${shape.reviewers}` };
     }
   }
-  if (parsed.concurrency !== undefined && parsed.reviewers !== undefined && parsed.concurrency > parsed.reviewers) {
-    return { ok: false, message: `--concurrency ${parsed.concurrency} cannot exceed reviewers ${parsed.reviewers}` };
+  if (parsed.concurrency !== undefined && shape.reviewers !== undefined && parsed.concurrency > shape.reviewers) {
+    return { ok: false, message: `--concurrency ${parsed.concurrency} cannot exceed reviewers ${shape.reviewers}` };
   }
   for (const flag of FLAGS_REQUIRING_VALUE) {
     if (parsed.target === flag) {
@@ -443,6 +443,17 @@ export function shellQuote(value: string): string {
   // Prefer single quotes; only escape embedded single quotes.
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
   return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/** Prefer named panel over numeric width when both appear (matches CLI/tool soft-resolve). */
+export function preferPanelShape(parsed: Pick<RvParsed, "panel" | "reviewers">): {
+  panel?: string;
+  reviewers?: number;
+} {
+  if (parsed.panel !== undefined && parsed.reviewers !== undefined) {
+    return { panel: parsed.panel };
+  }
+  return { panel: parsed.panel, reviewers: parsed.reviewers };
 }
 
 /** Same optional flags for initial review and --continue follow-up (all optional). */
@@ -470,8 +481,9 @@ export function buildPiReviewArgv(parsed: RvParsed, target: string): string[] {
   if (parsed.model) parts.push("--model", parsed.model);
   if (parsed.thinking) parts.push("--thinking", parsed.thinking);
   if (parsed.noStream) parts.push("--no-stream");
-  if (parsed.panel) parts.push("--panel", parsed.panel);
-  if (parsed.reviewers !== undefined) parts.push("--reviewers", String(parsed.reviewers));
+  const shape = preferPanelShape(parsed);
+  if (shape.panel) parts.push("--panel", shape.panel);
+  if (shape.reviewers !== undefined) parts.push("--reviewers", String(shape.reviewers));
   for (const mapping of parsed.reviewerModels ?? []) parts.push("--reviewer-model", mapping);
   if (parsed.consensus) parts.push("--consensus", parsed.consensus);
   if (parsed.minAgree !== undefined) parts.push("--min-agree", String(parsed.minAgree));
@@ -488,12 +500,13 @@ export function formatPiReviewCommandLine(parsed: RvParsed, target: string): str
 
 /** Build the native pi_review tool call instruction without dropping panel config. */
 export function buildPiReviewToolCallInstruction(parsed: RvParsed, target: string): string {
+  const shape = preferPanelShape(parsed);
   const fields: string[] = [
     `target=${JSON.stringify(target)}`,
     `mode=${JSON.stringify(parsed.mode)}`,
   ];
-  if (parsed.panel) fields.push(`panel=${JSON.stringify(parsed.panel)}`);
-  if (parsed.reviewers !== undefined) fields.push(`reviewers=${parsed.reviewers}`);
+  if (shape.panel) fields.push(`panel=${JSON.stringify(shape.panel)}`);
+  if (shape.reviewers !== undefined) fields.push(`reviewers=${shape.reviewers}`);
   if (parsed.reviewerModels?.length) fields.push(`reviewerModels=${JSON.stringify(parsed.reviewerModels)}`);
   if (parsed.consensus) fields.push(`consensus=${JSON.stringify(parsed.consensus)}`);
   if (parsed.minAgree !== undefined) fields.push(`minAgree=${parsed.minAgree}`);
@@ -502,10 +515,10 @@ export function buildPiReviewToolCallInstruction(parsed: RvParsed, target: strin
   if (parsed.model) fields.push(`model=${JSON.stringify(parsed.model)}`);
   if (parsed.thinking) fields.push(`thinking=${JSON.stringify(parsed.thinking)}`);
   // Default panel when /rv has no explicit width/preset: keep code-experts.
-  if (parsed.strategy === "panel" && !parsed.panel && parsed.reviewers === undefined) {
+  if (parsed.strategy === "panel" && !shape.panel && shape.reviewers === undefined) {
     fields.push(`panel=${JSON.stringify("code-experts")}`);
   }
-  return `Call pi_review with ${fields.join(", ")}. Treat target as a natural-language review request. Do not expand directory targets into multi-file lists. Do not drop panel/reviewers/reviewerModels/consensus fields.`;
+  return `Call pi_review with ${fields.join(", ")}. Treat target as a natural-language review request. Do not expand directory targets into multi-file lists. Pass only one of panel or reviewers (if both appear, panel wins). Keep reviewerModels/consensus/minAgree when provided.`;
 }
 
 export function orchestrationLocaleNote(locale: RvLocale = "en"): string {
