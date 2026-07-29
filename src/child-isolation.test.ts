@@ -36,6 +36,11 @@ test("formatChildRuntimeDetail preserves a multi-line child stack tail", () => {
   assert.match(detail, /runner\.js:358/);
 });
 
+test("formatChildRuntimeDetail keeps runtime error alone when stderr is empty or blank", () => {
+  assert.equal(formatChildRuntimeDetail("child pi exited with status 1", ""), "child pi exited with status 1");
+  assert.equal(formatChildRuntimeDetail("child pi exited with status 1", "   \n\t  "), "child pi exited with status 1");
+});
+
 test("formatChildRuntimeDetail clips oversized stderr from the tail", () => {
   const marker = "UNIQUE_HEAD_MARKER";
   const huge = `${marker}${"a".repeat(CHILD_STDERR_DIAGNOSTIC_LIMIT + 50)}TAIL`;

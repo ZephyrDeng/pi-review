@@ -49,6 +49,46 @@ function runCli(fakePi: string, verdict: string, childExit = "0", extraArgs: str
   );
 }
 
+test("single-review children receive --no-extensions and keep crash stderr (issue #8)", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-cli-isolation-"));
+  const argvFile = path.join(tempDir, "argv.json");
+  const fakePi = path.join(tempDir, "fake-pi");
+  fs.writeFileSync(
+    fakePi,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(process.env.FAKE_PI_ARGV_FILE, JSON.stringify(process.argv.slice(1)));
+process.stderr.write("Error: This extension ctx is stale after session replacement or reload.\\n");
+process.exit(1);
+`,
+  );
+  fs.chmodSync(fakePi, 0o755);
+
+  const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [...tsxLoaderArgs(), cliPath, "--no-stream", "--", "@src"],
+    {
+      cwd: path.dirname(fileURLToPath(new URL("../package.json", import.meta.url))),
+      env: { ...process.env, PI_BIN: fakePi, FAKE_PI_ARGV_FILE: argvFile },
+      encoding: "utf8",
+      timeout: 30_000,
+    },
+  );
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 4, result.stderr);
+  const argv = JSON.parse(fs.readFileSync(argvFile, "utf8")) as string[];
+  assert.ok(argv.includes("--no-extensions"), argv.join(" "));
+  assert.ok(argv.includes("--no-session"), argv.join(" "));
+  const metaLine = result.stderr.split("\n").find((line) => line.startsWith("PI_REVIEW_META_JSON: "));
+  assert.ok(metaLine, result.stderr);
+  const meta = JSON.parse(metaLine.slice("PI_REVIEW_META_JSON: ".length));
+  assert.equal(meta.status, "blocked");
+  assert.match(String(meta.parseError ?? ""), /child pi exited with status 1/);
+  assert.match(String(meta.parseError ?? ""), /extension ctx is stale/);
+  assert.match(result.stdout + result.stderr, /extension ctx is stale/);
+});
+
 test("invalid loop arguments print usage and exit 2", () => {
   const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url));
   const result = spawnSync(
