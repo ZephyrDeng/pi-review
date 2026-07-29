@@ -2,7 +2,7 @@
 
 Use this after `pi-review models` (or `pi-review models <search>`). **Never invent** `provider/model` IDs—only IDs that appear in that output.
 
-## Workflow (Claude Code, Codex, Cursor, Pi parent agent)
+## Workflow (Claude Code, Codex, Cursor, agy, Pi parent agent)
 
 1. Run `pi-review models` (narrow with search if the user named a vendor or model family).
 2. Infer **review profile** from the target (see table below).

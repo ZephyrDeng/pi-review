@@ -53,7 +53,7 @@ export interface ParsedArgs {
   command: "review" | "loop" | "models" | "install" | "install-skill" | "uninstall-skill" | "update";
   /** For `install`: run `pi install npm:@zephyrdeng/pi-review` */
   installPi?: boolean;
-  /** For `install`: run agent skill install (skills CLI / Claude fallback) */
+  /** For `install`: run agent skill install (skills CLI / Claude + agy direct fallback) */
   installAgents?: boolean;
   extraArgs?: string[];
   mode: string;

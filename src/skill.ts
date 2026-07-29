@@ -11,8 +11,23 @@ const BUNDLED_SKILL = path.join(BUNDLED_SKILL_DIR, "SKILL.md");
 const REPO = "ZephyrDeng/pi-review";
 const SKILL_NAME = "pi-review";
 
+/** skills CLI agent ids used by default install / update. */
+export const DEFAULT_SKILL_AGENTS = [
+  "claude-code",
+  "codex",
+  "cursor",
+  // Google Antigravity (agy): product + CLI flavors in the skills CLI registry.
+  "antigravity",
+  "antigravity-cli",
+] as const;
+
 /** Non-interactive defaults used by install / update when agents are not specified. */
-export const DEFAULT_AGENT_SKILL_ARGS = ["-y", "--agent", "claude-code", "codex", "cursor"];
+export const DEFAULT_AGENT_SKILL_ARGS = ["-y", "--agent", ...DEFAULT_SKILL_AGENTS];
+
+/** User-facing `agy` alias expands to the skills CLI agent ids. */
+const AGY_ALIAS = "agy";
+const AGY_SKILLS_AGENTS = ["antigravity", "antigravity-cli"] as const;
+const AGY_SKILLS_AGENT_SET = new Set<string>(AGY_SKILLS_AGENTS);
 
 export type SkillMethod = "skills-cli" | "direct";
 
@@ -21,6 +36,94 @@ export interface SkillOpResult {
   method: SkillMethod;
   /** Human-readable summary for CLI boxes / logs. */
   message: string;
+}
+
+export interface DirectSkillInstallTarget {
+  /** Stable id for tests / logs (`claude-code`, `agy`). */
+  id: string;
+  /** Human label written to stdout. */
+  label: string;
+  /** Absolute skill directory (contains SKILL.md). */
+  dir: string;
+}
+
+/**
+ * Direct-copy destinations when the skills CLI is unavailable.
+ * Claude Code keeps `~/.claude/skills`; agy uses the universal path that
+ * AGY / AGY CLI / AGY IDE all discover (`~/.gemini/config/skills`).
+ */
+export function listDirectSkillInstallTargets(home = os.homedir()): DirectSkillInstallTarget[] {
+  return [
+    {
+      id: "claude-code",
+      label: "Claude Code",
+      dir: path.join(home, ".claude", "skills", SKILL_NAME),
+    },
+    {
+      id: "agy",
+      label: "agy (Antigravity)",
+      dir: path.join(home, ".gemini", "config", "skills", SKILL_NAME),
+    },
+  ];
+}
+
+/**
+ * Expand user-facing agent aliases before forwarding to the skills CLI.
+ * `agy` → `antigravity` + `antigravity-cli` (deduped, order-preserving).
+ */
+export function expandSkillAgentArgs(args: string[]): string[] {
+  const expanded = args.flatMap((arg) =>
+    arg === AGY_ALIAS ? [...AGY_SKILLS_AGENTS] : [arg],
+  );
+  const seenAgents = new Set<string>();
+  const out: string[] = [];
+  for (const arg of expanded) {
+    if (AGY_SKILLS_AGENT_SET.has(arg)) {
+      if (seenAgents.has(arg)) continue;
+      seenAgents.add(arg);
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
+/**
+ * Parse `--agent` / `-a` values (and honor `--all`) after alias expansion.
+ * Returns `"all"` when no agent filter is present.
+ */
+export function selectedSkillAgents(args: string[]): string[] | "all" {
+  const normalized = expandSkillAgentArgs(args);
+  if (hasFlag(normalized, "--all")) return "all";
+
+  const agents: string[] = [];
+  for (let i = 0; i < normalized.length; i++) {
+    const token = normalized[i]!;
+    if (token !== "--agent" && token !== "-a") continue;
+    i += 1;
+    while (i < normalized.length && !normalized[i]!.startsWith("-")) {
+      agents.push(normalized[i]!);
+      i += 1;
+    }
+    i -= 1;
+  }
+  return agents.length === 0 ? "all" : agents;
+}
+
+/** Map skills-CLI / user agent ids onto direct-copy targets. */
+export function resolveDirectSkillInstallTargets(
+  args: string[] = [],
+  home = os.homedir(),
+): DirectSkillInstallTarget[] {
+  const all = listDirectSkillInstallTargets(home);
+  const selected = selectedSkillAgents(args);
+  if (selected === "all") return all;
+
+  const want = new Set<string>();
+  for (const agent of selected) {
+    if (agent === "claude-code") want.add("claude-code");
+    if (agent === AGY_ALIAS || AGY_SKILLS_AGENT_SET.has(agent)) want.add("agy");
+  }
+  return all.filter((target) => want.has(target.id));
 }
 
 function hasSkillsCli(): boolean {
@@ -37,10 +140,11 @@ function hasFlag(args: string[], ...flags: string[]): boolean {
 }
 
 function installViaSkillsCli(args: string[]): boolean {
-  const global = hasFlag(args, "-g", "--global") ? [] : ["-g"];
+  const normalized = expandSkillAgentArgs(args);
+  const global = hasFlag(normalized, "-g", "--global") ? [] : ["-g"];
   const result = spawnSync(
     "npx",
-    ["skills", "add", REPO, ...global, "--skill", SKILL_NAME, ...args],
+    ["skills", "add", REPO, ...global, "--skill", SKILL_NAME, ...normalized],
     {
       stdio: "inherit",
       encoding: "utf8",
@@ -50,11 +154,12 @@ function installViaSkillsCli(args: string[]): boolean {
 }
 
 function updateViaSkillsCli(args: string[] = []): boolean {
-  const global = hasFlag(args, "-g", "--global") ? [] : ["-g"];
-  const yes = hasFlag(args, "-y", "--yes") ? [] : ["-y"];
+  const normalized = expandSkillAgentArgs(args);
+  const global = hasFlag(normalized, "-g", "--global") ? [] : ["-g"];
+  const yes = hasFlag(normalized, "-y", "--yes") ? [] : ["-y"];
   const result = spawnSync(
     "npx",
-    ["skills", "update", SKILL_NAME, ...global, ...yes, ...args],
+    ["skills", "update", SKILL_NAME, ...global, ...yes, ...normalized],
     {
       stdio: "inherit",
       encoding: "utf8",
@@ -64,10 +169,11 @@ function updateViaSkillsCli(args: string[] = []): boolean {
 }
 
 function uninstallViaSkillsCli(args: string[]): boolean {
-  const global = hasFlag(args, "-g", "--global") ? [] : ["-g"];
+  const normalized = expandSkillAgentArgs(args);
+  const global = hasFlag(normalized, "-g", "--global") ? [] : ["-g"];
   const result = spawnSync(
     "npx",
-    ["skills", "remove", SKILL_NAME, ...global, ...args],
+    ["skills", "remove", SKILL_NAME, ...global, ...normalized],
     {
       stdio: "inherit",
       encoding: "utf8",
@@ -89,7 +195,14 @@ function copySkillTree(srcDir: string, destDir: string): void {
   }
 }
 
-function installDirect(): SkillOpResult {
+function readPackageVersion(): string {
+  const pkg = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as {
+    version: string;
+  };
+  return pkg.version;
+}
+
+function installDirect(extraArgs: string[] = []): SkillOpResult {
   if (!fs.existsSync(BUNDLED_SKILL)) {
     return {
       ok: false,
@@ -98,31 +211,66 @@ function installDirect(): SkillOpResult {
     };
   }
 
-  const targetDir = path.join(os.homedir(), ".claude", "skills", "pi-review");
-  // Replace tree so references/ and other assets stay in sync with the package.
-  fs.rmSync(targetDir, { recursive: true, force: true });
-  copySkillTree(BUNDLED_SKILL_DIR, targetDir);
+  const targets = resolveDirectSkillInstallTargets(extraArgs);
+  if (targets.length === 0) {
+    const message =
+      "direct install only supports claude-code and agy (antigravity / antigravity-cli); no matching targets";
+    process.stderr.write(`${message}\n`);
+    return { ok: false, method: "direct", message };
+  }
 
-  const pkg = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, "package.json"), "utf8")) as {
-    version: string;
+  const version = readPackageVersion();
+  const installed: string[] = [];
+  for (const target of targets) {
+    // Replace tree so references/ and other assets stay in sync with the package.
+    fs.rmSync(target.dir, { recursive: true, force: true });
+    copySkillTree(BUNDLED_SKILL_DIR, target.dir);
+    const targetFile = path.join(target.dir, "SKILL.md");
+    const line = `Installed pi-review skill v${version} to ${target.label}: ${targetFile}`;
+    process.stdout.write(`${line}\n`);
+    installed.push(line);
+  }
+
+  return {
+    ok: true,
+    method: "direct",
+    message: installed.join("; "),
   };
-  const targetFile = path.join(targetDir, "SKILL.md");
-  const message = `Installed pi-review skill v${pkg.version} to ${targetFile}`;
-  process.stdout.write(`${message}\n`);
-  return { ok: true, method: "direct", message };
 }
 
-function uninstallDirect(): SkillOpResult {
-  const targetDir = path.join(os.homedir(), ".claude", "skills", "pi-review");
-  if (!fs.existsSync(targetDir)) {
+function uninstallDirect(extraArgs: string[] = []): SkillOpResult {
+  const targets = resolveDirectSkillInstallTargets(extraArgs);
+  if (targets.length === 0) {
+    const message =
+      "direct uninstall only supports claude-code and agy (antigravity / antigravity-cli); no matching targets";
+    process.stderr.write(`${message}\n`);
+    return { ok: false, method: "direct", message };
+  }
+
+  const removed: string[] = [];
+  const missing: string[] = [];
+  for (const target of targets) {
+    if (!fs.existsSync(target.dir)) {
+      missing.push(target.label);
+      continue;
+    }
+    fs.rmSync(target.dir, { recursive: true });
+    const line = `Removed pi-review skill from ${target.label}: ${target.dir}`;
+    process.stdout.write(`${line}\n`);
+    removed.push(line);
+  }
+
+  if (removed.length === 0) {
     const message = "pi-review skill not found";
     process.stdout.write(`${message}\n`);
     return { ok: true, method: "direct", message };
   }
-  fs.rmSync(targetDir, { recursive: true });
-  const message = `Removed pi-review skill from ${targetDir}`;
-  process.stdout.write(`${message}\n`);
-  return { ok: true, method: "direct", message };
+
+  if (missing.length > 0) {
+    process.stdout.write(`Not installed for: ${missing.join(", ")}\n`);
+  }
+
+  return { ok: true, method: "direct", message: removed.join("; ") };
 }
 
 /**
@@ -138,8 +286,10 @@ export function runInstallSkill(extraArgs: string[] = []): SkillOpResult {
     };
   }
 
-  process.stdout.write("skills CLI not found, installing to Claude Code directly...\n");
-  return installDirect();
+  process.stdout.write(
+    "skills CLI not found, installing directly to Claude Code and/or agy (Antigravity)...\n",
+  );
+  return installDirect(extraArgs);
 }
 
 /**
@@ -170,8 +320,10 @@ export function runUpdateSkill(extraArgs: string[] = []): SkillOpResult {
     };
   }
 
-  process.stdout.write("skills CLI not found, refreshing Claude Code skill from package...\n");
-  return installDirect();
+  process.stdout.write(
+    "skills CLI not found, refreshing Claude Code and/or agy skills from package...\n",
+  );
+  return installDirect(extraArgs);
 }
 
 /**
@@ -187,7 +339,7 @@ export function runUninstallSkill(extraArgs: string[] = []): SkillOpResult {
     };
   }
 
-  return uninstallDirect();
+  return uninstallDirect(extraArgs);
 }
 
 export function installSkill(extraArgs: string[] = []): never {

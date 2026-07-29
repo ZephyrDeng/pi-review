@@ -49,7 +49,7 @@ npm install -g @zephyrdeng/pi-review
 npx @zephyrdeng/pi-review install
 ```
 
-Runs `pi install npm:@zephyrdeng/pi-review` when the Pi CLI is on PATH, then installs the agent skill for Claude Code, Codex, and Cursor (via the [skills CLI](https://www.npmjs.com/package/skills), non-interactive `-y`). Forward extra flags to the skill step, e.g. `npx @zephyrdeng/pi-review install --agent claude-code codex -y` or `npx @zephyrdeng/pi-review install --agents-only --all`.
+Runs `pi install npm:@zephyrdeng/pi-review` when the Pi CLI is on PATH, then installs the agent skill for Claude Code, Codex, Cursor, and agy / Antigravity (via the [skills CLI](https://www.npmjs.com/package/skills), non-interactive `-y`). Forward extra flags to the skill step, e.g. `npx @zephyrdeng/pi-review install --agent claude-code codex agy -y` or `npx @zephyrdeng/pi-review install --agents-only --all`.
 
 Use `--pi-only` or `--agents-only` to run one side. For Pi-only use, **do not** also run `install-skill` — the npm Pi package already exposes the skill via `pi.skills`.
 
@@ -59,18 +59,20 @@ Use `--pi-only` or `--agents-only` to run one side. For Pi-only use, **do not** 
 pi install npm:@zephyrdeng/pi-review
 ```
 
-### Agent skill only (Claude Code, Codex, Cursor, ...)
+### Agent skill only (Claude Code, Codex, Cursor, agy, ...)
 
 ```bash
 npx @zephyrdeng/pi-review install-skill
 ```
 
-This uses the [skills CLI](https://www.npmjs.com/package/skills) when available — it will prompt you to choose which agents to install to. Falls back to Claude Code direct install if `skills` is not found.
+This uses the [skills CLI](https://www.npmjs.com/package/skills) when available — it will prompt you to choose which agents to install to. Falls back to a direct copy into Claude Code (`~/.claude/skills`) and agy / Antigravity (`~/.gemini/config/skills`, discovered by AGY / AGY CLI / AGY IDE) if `skills` is not found.
 
-You can also specify agents directly:
+You can also specify agents directly. `agy` is accepted as a shorthand for the skills CLI ids `antigravity` + `antigravity-cli`:
 
 ```bash
-pi-review install-skill --agent claude-code codex cursor
+pi-review install-skill --agent claude-code codex cursor agy
+# or only Antigravity:
+pi-review install-skill --agent agy
 ```
 
 To remove:
@@ -85,7 +87,7 @@ pi-review uninstall-skill
 pi-review update
 ```
 
-Updates the global npm package when a newer version is available, then refreshes the installed agent skill content (via `skills update pi-review`, with a reinstall / Claude direct-copy fallback).
+Updates the global npm package when a newer version is available, then refreshes the installed agent skill content (via `skills update pi-review`, with a reinstall / Claude + agy direct-copy fallback).
 
 ### From source
 
@@ -116,6 +118,12 @@ pi-review loop --max-rounds 3 -- @src
 
 # List available models
 pi-review models
+```
+
+From an agent host (Claude Code, Codex, Cursor, or **agy / Antigravity**), install the skill once, then ask the host to run a review — e.g. `/pi-review -- @src/foo.ts` or natural language that triggers the skill:
+
+```bash
+npx @zephyrdeng/pi-review install-skill --agent agy
 ```
 
 ## Review Modes
@@ -322,7 +330,7 @@ pi-review --continue <sessionHandle> --mode challenge --model provider/model -- 
 
 `pi-review` always runs the child in `--mode json` internally. In streaming mode it forwards **readable text deltas** to stdout live and writes **semantic milestone notices** to stderr — `pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`. Token usage (`input`/`output`/`cache`/`reasoning`) is accumulated by default and shown in the ASCII footer and `PI_REVIEW_META_JSON` — **no `--progress-log` required**.
 
-Agent hosts like Claude Code, Cursor, and Codex typically buffer a Bash tool's stdout until the command exits. The stderr milestone notices give you progress signals without tailing a file. The final Markdown review + ASCII footer arrive on stdout when the process exits.
+Agent hosts like Claude Code, Cursor, Codex, and agy typically buffer a Bash tool's stdout until the command exits. The stderr milestone notices give you progress signals without tailing a file. The final Markdown review + ASCII footer arrive on stdout when the process exits.
 
 `--progress-log <path>` is now an **optional** convenience for fine-grained debugging: it tees the `--mode json` event stream to a file. By default the tee is **slimmed** — each `message_update` line reduces its cumulative message snapshots (`assistantMessageEvent.partial` and the duplicate top-level `message`) to their `usage` field. A verbatim tee repeats the entire message-so-far plus provider metadata on every delta, growing the file quadratically with message length (real reviews measured a ~1600x byte amplification). Deltas and message boundaries (`message_end`, `turn_end`, `agent_end`) keep the complete record, so the slimmed log still reconstructs the review and replays through pi-review's own event parser with no feature loss. Add `--progress-log-raw` when you need the verbatim stream. `--progress-log` no longer gates token visibility. Details: [`skills/pi-review/SKILL.md`](skills/pi-review/SKILL.md) and [`skills/pi-review/references/codex-tools.md`](skills/pi-review/references/codex-tools.md).
 
@@ -410,7 +418,7 @@ Argument completions are context-aware. After the host session starts, `/rv` rea
 - **Semantic phrases** (e.g. `code review` / 代码审核, `查看模型列表`) in addition to flags; orchestration prompts follow **session locale** (zh/en) for summaries.
 - **Scene templates** at the top level (code / frontend / plan presets).
 
-**Claude Code / Codex:** the bundled skill includes **[skills/pi-review/references/model-selection.md](skills/pi-review/references/model-selection.md)** — same presets as `/rv` for choosing `--model` after `pi-review models`.
+**Claude Code / Codex / Cursor / agy:** the bundled skill includes **[skills/pi-review/references/model-selection.md](skills/pi-review/references/model-selection.md)** — same presets as `/rv` for choosing `--model` after `pi-review models`.
 
 Completions are a hint layer only; execution remains skill-driven. When the model registry is unavailable (e.g. non-TUI mode), `/rv` falls back to the static hint list.
 

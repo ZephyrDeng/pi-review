@@ -6,7 +6,7 @@ product
 
 ## Users
 
-开发者在 Claude Code / Codex / Cursor 或终端里发起 pi-review 面板评审后，打开本地 loopback dashboard，在编辑器旁边的浏览器窗口里监控评审进度。典型会话 2–10 分钟：多数时间是余光扫视（哪个评委在跑、跑到哪了），评审完成时转为专注阅读（confirmed findings 与 advisories）。环境光偏暗，编辑器多为深色主题。
+开发者在 Claude Code / Codex / Cursor / agy（Antigravity）或终端里发起 pi-review 面板评审后，打开本地 loopback dashboard，在编辑器旁边的浏览器窗口里监控评审进度。典型会话 2–10 分钟：多数时间是余光扫视（哪个评委在跑、跑到哪了），评审完成时转为专注阅读（confirmed findings 与 advisories）。环境光偏暗，编辑器多为深色主题。
 
 ## Product Purpose
 

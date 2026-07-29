@@ -77,10 +77,15 @@ export { parseReviewResult, reviewExitCode } from "./review-result.js";
 export { formatCost, formatDurationMs, formatTokens, formatUsage, formatReviewMetaAscii, formatReviewMetaJsonLine, formatPanelMetaAscii, formatPanelFindingsMarkdown } from "./meta-footer.js";
 export {
   DEFAULT_AGENT_SKILL_ARGS,
+  DEFAULT_SKILL_AGENTS,
+  expandSkillAgentArgs,
   installSkill,
+  listDirectSkillInstallTargets,
+  resolveDirectSkillInstallTargets,
   runInstallSkill,
   runUninstallSkill,
   runUpdateSkill,
+  selectedSkillAgents,
   uninstallSkill,
 } from "./skill.js";
-export type { SkillMethod, SkillOpResult } from "./skill.js";
+export type { DirectSkillInstallTarget, SkillMethod, SkillOpResult } from "./skill.js";

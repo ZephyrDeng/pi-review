@@ -63,8 +63,9 @@ Examples:
   pi-review loop --max-rounds 3 -- @src
   pi-review loop --until clean --max-rounds 10 -- @src
   pi-review install
-  pi-review install --agent claude-code codex -y
+  pi-review install --agent claude-code codex cursor agy -y
   pi-review install-skill
+  pi-review install-skill --agent agy
 `;
   (exitCode === 0 ? process.stdout : process.stderr).write(out);
   process.exit(exitCode);

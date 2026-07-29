@@ -25,15 +25,17 @@
 
 ```bash
 npm install -g @zephyrdeng/pi-review
-# 一键：Pi 包 + Claude Code / Codex / Cursor 等 skill（推荐首次安装）
+# 一键：Pi 包 + Claude Code / Codex / Cursor / agy 等 skill（推荐首次安装）
 npx @zephyrdeng/pi-review install
 # 仅 Pi 包
 pi install npm:@zephyrdeng/pi-review
 # 仅各 Agent skill
 npx @zephyrdeng/pi-review install-skill
+# 仅 agy（Google Antigravity）
+npx @zephyrdeng/pi-review install-skill --agent agy
 ```
 
-`install` 会在有 Pi CLI 时执行 `pi install npm:@zephyrdeng/pi-review`，再通过 [skills CLI](https://www.npmjs.com/package/skills) 非交互安装 agent skill。只用 Pi 时**不要**再跑 `install-skill`，避免与 `pi.skills` 重复冲突。可用 `--pi-only` / `--agents-only` 拆分。
+`install` 会在有 Pi CLI 时执行 `pi install npm:@zephyrdeng/pi-review`，再通过 [skills CLI](https://www.npmjs.com/package/skills) 非交互安装 agent skill（默认含 Claude Code、Codex、Cursor、agy/`antigravity`+`antigravity-cli`）。`agy` 是 skills CLI 中 `antigravity` 与 `antigravity-cli` 的别名。只用 Pi 时**不要**再跑 `install-skill`，避免与 `pi.skills` 重复冲突。可用 `--pi-only` / `--agents-only` 拆分。
 
 升级全局包并同步 agent skill 内容：
 
@@ -41,7 +43,7 @@ npx @zephyrdeng/pi-review install-skill
 pi-review update
 ```
 
-即使包已是最新，也会刷新 skill（`skills update pi-review`；无 skills CLI 时回退到包内 skill 直拷）。
+即使包已是最新，也会刷新 skill（`skills update pi-review`；无 skills CLI 时回退到 Claude Code + agy 通用路径的包内 skill 直拷）。
 
 ## 快速开始
 
@@ -52,6 +54,12 @@ pi-review --mode plan -- @docs/architecture.md
 pi-review --mode challenge -- @docs/design.md
 pi-review loop --max-rounds 3 -- @src
 pi-review models
+```
+
+在 Claude Code / Codex / Cursor / **agy（Antigravity）** 等 Agent 宿主中，先安装 skill，再让宿主发起审查（例如 `/pi-review -- @src/foo.ts`，或触发 skill 的自然语言）：
+
+```bash
+npx @zephyrdeng/pi-review install-skill --agent agy
 ```
 
 ## 审查模式

@@ -1,6 +1,6 @@
-# Agent host tool notes (Codex / Claude Code)
+# Agent host tool notes (Codex / Claude Code / Cursor / agy)
 
-Skills may use Claude Code tool names. On **Codex** or **Claude Code**, map them to your native tools:
+Skills may use Claude Code tool names. On **Codex**, **Claude Code**, **Cursor**, or **agy (Antigravity)**, map them to your native tools:
 
 | Skill references | Typical host equivalent |
 |-----------------|-------------------------|
@@ -10,13 +10,13 @@ Skills may use Claude Code tool names. On **Codex** or **Claude Code**, map them
 
 This file is **pi-review–specific** and ships with the pi-review package.
 
-## Long-running `pi-review` (default on Codex / Claude Code)
+## Long-running `pi-review` (default on Codex / Claude Code / Cursor / agy)
 
 Native shell tools on these hosts **buffer stdout/stderr until the command exits**. A multi-minute foreground `pi-review` run looks like a silent wait, then one large dump — never promise live foreground streaming. Which side channel to use depends on the run type: panel review gets the browser dashboard; single review and `loop` get the tailed progress log.
 
 ### Panel review: browser dashboard (default)
 
-`--reviewers <n>` or `--panel <name>` activates panel review. On Codex, Claude Code, or Cursor, default to the dashboard instead of a tailed log:
+`--reviewers <n>` or `--panel <name>` activates panel review. On Codex, Claude Code, Cursor, or agy, default to the dashboard instead of a tailed log:
 
 1. Run `pi-review --reviewers <n> --ui web --ui-url-file <path> -- <target>` (or `--panel <name>`) in the **background**. Pass `--no-ui-open` only when the user asked not to open a browser (CI, remote shells).
 2. Read `<path>` shortly after launch — it is written atomically as soon as the dashboard server is ready, well before reviewers finish (poll a few times a second for a couple of seconds if the file is not there yet). Then get the dashboard in front of the user: on **Claude Code** the CLI auto-open already lands in the system default browser; on **Codex** the CLI cannot reach a GUI browser, so open the URL from `<path>` in the host's built-in browser yourself. Share the URL either way as a fallback: *"Dashboard opened in your browser (URL: `<url>`). I'll report back when the review completes."*
@@ -32,7 +32,7 @@ Native shell tools on these hosts **buffer stdout/stderr until the command exits
 
 **Pi interactive (`/rv`)**: foreground `pi-review`, default streaming. Text deltas appear live on the terminal; no `--progress-log`/`--ui web` unless the user asked — Pi already renders panel progress natively.
 
-See the parent skill: sections *Default workflow by host* and *Streaming vs agent hosts (Claude Code / Codex)*.
+See the parent skill section *Default workflow by host* (Claude Code / Codex / Cursor / agy row).
 
 ### Loop closeout
 
