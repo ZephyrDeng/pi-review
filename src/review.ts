@@ -4,7 +4,7 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import { spawnSync } from "node:child_process";
 import { REVIEW_META_VERSION } from "./types.js";
-import type { ParsedArgs, ReviewMeta, ReviewRunResult } from "./types.js";
+import type { ParsedArgs, ReviewMeta, ReviewRunResult, StructuredReviewResult } from "./types.js";
 import { spawnBufferedChild, spawnStreamingChild, type ChildRunResult } from "./child-process.js";
 import { loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, normalizePayloadRefs, buildPrompt } from "./prompt.js";
@@ -16,6 +16,7 @@ import type { TokenUsage } from "./types.js";
 import { makeRunSessionDir, newestJsonl } from "./session.js";
 import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
 import { resolveConfig } from "./config.js";
+import { splitModelProvider } from "./panel-config.js";
 import { formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
 
 export function readReviewStdin(): string {
@@ -44,7 +45,141 @@ export function childEnv(piBin: string): NodeJS.ProcessEnv {
 }
 
 /**
- * Isolate review children from host Pi extension side effects.
+ * Parse `pi --list-models` table output into distinct provider names.
+ * Columns are space-padded; offsets are derived from the header row so
+ * provider names are stable even if they contain spaces.
+ */
+export function parseModelCatalog(stdout: string): string[] {
+  const lines = stdout.split("\n");
+  const headerIdx = lines.findIndex((l) => l.includes("provider") && l.includes("model"));
+  if (headerIdx === -1) return [];
+  const header = lines[headerIdx]!;
+  const providerStart = header.indexOf("provider");
+  const modelStart = header.indexOf("model");
+  const providers = new Set<string>();
+  for (const line of lines.slice(headerIdx + 1)) {
+    if (!line.trim()) continue;
+    const provider = line.slice(providerStart, modelStart).trim();
+    if (provider) providers.add(provider);
+  }
+  return [...providers];
+}
+
+interface CatalogQuery {
+  providers: Set<string>;
+  /** False when `pi --list-models` itself failed; the query must not be cached or trusted. */
+  ok: boolean;
+}
+
+const MODEL_CATALOG_CACHE = new Map<string, CatalogQuery>();
+
+function catalogCacheKey(piBin: string, isolated: boolean): string {
+  return `${piBin}|${isolated ? "no-ext" : "with-ext"}`;
+}
+
+function listProviders(piBin: string, isolated: boolean): CatalogQuery {
+  const key = catalogCacheKey(piBin, isolated);
+  const cached = MODEL_CATALOG_CACHE.get(key);
+  if (cached) return cached;
+  const args = ["--list-models", ...(isolated ? ["--no-extensions"] : [])];
+  const result = spawnSync(piBin, args, {
+    env: childEnv(piBin),
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  const query: CatalogQuery =
+    result.status === 0 && result.stdout
+      ? { providers: new Set(parseModelCatalog(result.stdout)), ok: true }
+      : { providers: new Set<string>(), ok: false };
+  // Only cache successful queries: a transient spawn failure (slow startup,
+  // config read hiccup) must not poison the probe for the rest of the run.
+  if (query.ok) MODEL_CATALOG_CACHE.set(key, query);
+  return query;
+}
+
+export type ProviderProbe =
+  | { kind: "available" }
+  | { kind: "extension_only"; provider: string }
+  | { kind: "unknown"; provider: string }
+  | { kind: "indeterminate"; provider: string };
+
+/**
+ * Decide whether `provider` is usable by an isolated review child
+ * (--no-extensions, issue #8). Missing from the isolated catalog but present
+ * with host extensions loaded means the provider is registered by an
+ * extension; the caller should surface a fix hint instead of a confusing
+ * unknown-provider failure. A failed catalog query is `indeterminate`: the
+ * caller must not block a possibly-valid provider on probe trouble.
+ */
+export function probeProviderAvailability(piBin: string, provider: string): ProviderProbe {
+  const isolated = listProviders(piBin, true);
+  if (!isolated.ok) return { kind: "indeterminate", provider };
+  if (isolated.providers.has(provider)) return { kind: "available" };
+  const withExtensions = listProviders(piBin, false);
+  if (!withExtensions.ok) return { kind: "indeterminate", provider };
+  if (withExtensions.providers.has(provider)) return { kind: "extension_only", provider };
+  return { kind: "unknown", provider };
+}
+
+/** Human-readable fix hint for a provider that only exists via host extensions. */
+export function extensionOnlyHintText(provider: string): string {
+  return [
+    `provider "${provider}" is registered by a Pi extension, but review children`,
+    `run isolated with --no-extensions (issue #8).`,
+    "",
+    "Re-run with host extensions enabled:",
+    `    PI_REVIEW_CHILD_EXTENSIONS=1 pi-review ...`,
+    "(accepts 1 / true / keep; see README PI_REVIEW_CHILD_EXTENSIONS)",
+  ].join("\n");
+}
+
+/** Human-readable message for a provider missing from the catalog entirely. */
+export function unknownProviderHintText(provider: string): string {
+  return [
+    `provider "${provider}" was not found in the Pi model catalog (with or`,
+    `without host extensions loaded). Check --provider / preset provider spelling.`,
+  ].join("\n");
+}
+
+/**
+ * When isolation is active and a provider is requested, block before spawning
+ * the child if that provider only exists via host extensions (or is unknown),
+ * and return a blocked review with an actionable hint. Returns undefined when
+ * the review should proceed.
+ */
+export interface ProviderConfigBlock {
+  structured: StructuredReviewResult;
+  provider: string;
+  extensionOnly: boolean;
+}
+
+export function configBlockForProvider(
+  piBin: string,
+  provider: string | undefined,
+  model?: string,
+): ProviderConfigBlock | undefined {
+  const probeProvider = provider ?? (model ? splitModelProvider(model) : undefined);
+  if (!probeProvider || childIsolationArgs().length === 0) return undefined;
+  const probe = probeProviderAvailability(piBin, probeProvider);
+  // available → proceed; indeterminate (catalog query failed) → proceed and
+  // let the child surface its own accurate error rather than block on probe trouble.
+  if (probe.kind === "available" || probe.kind === "indeterminate") return undefined;
+  const extensionOnly = probe.kind === "extension_only";
+  return {
+    provider: probeProvider,
+    extensionOnly,
+    structured: {
+      status: "blocked",
+      verdict: "blocked",
+      verdictSource: "config_error",
+      parseError: extensionOnly ? extensionOnlyHintText(probeProvider) : unknownProviderHintText(probeProvider),
+      findings: [],
+      actionableCount: 0,
+    },
+  };
+}
+
+/** Isolate review children from host Pi extension side effects.
  *
  * Host extensions (usage HUDs, auto-reload bridges, etc.) may capture extension
  * ctx and touch it after session dispose/reload. That throws Pi's stale-context
@@ -143,6 +278,37 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
 
   // Isolate single-review children from host extension side effects (issue #8).
   args.push(...childIsolationArgs());
+
+  // Block before spawning when the requested provider only exists via host
+  // extensions (issue #8): the isolated child would otherwise die with a
+  // confusing unknown-provider error. Surface an actionable hint so the host
+  // agent knows to re-run with PI_REVIEW_CHILD_EXTENSIONS=1.
+  const configBlock = configBlockForProvider(config.piBin, parsed.provider || preset.provider, parsed.model || preset.model);
+  if (configBlock) {
+    const hint = configBlock.structured.parseError ?? "";
+    const meta: ReviewMeta = {
+      metaVersion: REVIEW_META_VERSION,
+      reviewMode: parsed.mode,
+      ...configBlock.structured,
+      durationMs: 0,
+      model: parsed.model || preset.model || null,
+      ...(parsed.thinking || preset.thinking ? { thinking: parsed.thinking || preset.thinking } : {}),
+      ...(configBlock.extensionOnly
+        ? { extensionHint: { provider: configBlock.provider, availableViaExtension: true } }
+        : {}),
+    };
+    process.stdout.write(`${hint}\n\n`);
+    process.stdout.write(`${formatReviewMetaAscii(meta)}\n`);
+    const metaJsonDest = process.env.PI_REVIEW_META_STDOUT?.toLowerCase();
+    const jsonLine = formatReviewMetaJsonLine(meta);
+    if (metaJsonDest === "1" || metaJsonDest === "true" || metaJsonDest === "stdout") {
+      process.stdout.write(jsonLine);
+    } else {
+      process.stderr.write(jsonLine);
+    }
+    return { meta, exitCode: reviewExitCode(meta.status) };
+  }
+
   args.push(...(payload.attachableFileRefs ?? payload.fileRefs), prompt);
 
   let progressWriter: ProgressLogWriter | undefined;

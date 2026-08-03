@@ -42,6 +42,15 @@ function writeFakePi(tempDir: string): string {
   fs.writeFileSync(
     fakePi,
     `#!/usr/bin/env node
+if (process.argv.includes("--list-models")) {
+  // "configured" is available both with and without extensions; "extonly"
+  // only appears once host extensions are loaded (issue #8 probe fixture).
+  const isolated = process.argv.includes("--no-extensions");
+  const rows = ["provider      model", "configured    explicit-model"];
+  if (!isolated) rows.push("extonly       anything");
+  process.stdout.write(rows.join("\\n") + "\\n");
+  process.exit(0);
+}
 const prompt = process.argv[process.argv.length - 1] || "";
 const scenario = process.env.FAKE_PANEL_SCENARIO || "agree-bug";
 const idMatch = prompt.match(/Reviewer ID:\\s*(\\S+)/);
@@ -211,6 +220,37 @@ test("panel review keeps an explicitly configured reviewer model even when the p
   assert.equal(meta!.model, "mixed");
   // The sentinel also reaches the human-readable ASCII footer Model line.
   assert.match(result.stdout, /Model\s+mixed/);
+});
+
+test("panel review blocks extension-only providers with structured extensionHints (issue #8 probe)", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  const result = runPanelCli(fakePi, "agree-bug", [
+    "--reviewers", "3",
+    "--consensus", "quorum", "--min-agree", "2",
+    "--reviewer-model", "r1=extonly/anything",
+  ]);
+  // A blocked reviewer leaves panel health blocked (exit 4) even though the
+  // healthy reviewers still ran; the remaining finding only reached advisory
+  // support (1 < quorum 2), so it cannot confirm.
+  assert.equal(result.status, 4, result.stderr);
+  const meta = metaRecord(result);
+  assert.ok(meta, result.stderr);
+  assert.equal(meta!.panelHealth, "blocked");
+
+  const reviewerMetas = meta!.reviewers as Array<{ reviewerId: string; verdictSource?: string; parseError?: string }>;
+  const r1 = reviewerMetas.find((r) => r.reviewerId === "r1")!;
+  assert.equal(r1.verdictSource, "config_error");
+  assert.match(r1.parseError ?? "", /PI_REVIEW_CHILD_EXTENSIONS=1/);
+
+  // The machine-readable hint survives aggregation so the host agent can
+  // programmatically decide to re-run with PI_REVIEW_CHILD_EXTENSIONS=1.
+  assert.deepEqual(meta!.extensionHints, [{ provider: "extonly", availableViaExtension: true }]);
+
+  // Healthy reviewers were not probed and still ran.
+  const r2 = reviewerMetas.find((r) => r.reviewerId === "r2")!;
+  assert.notEqual(r2.verdictSource, "config_error");
 });
 
 test("panel review where all reviewers approve is clean and exits 0", () => {

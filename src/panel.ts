@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import { PANEL_READ_ONLY_TOOLS, REVIEW_META_VERSION } from "./types.js";
 import type {
+  ExtensionHint,
   ParsedArgs,
   PanelReviewMeta,
   ReviewerSubmission,
@@ -15,7 +16,7 @@ import type {
 } from "./types.js";
 export { PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { spawnStreamingChild } from "./child-process.js";
-import { childEnv, childIsolationArgs, childRuntimeError, formatChildRuntimeDetail, readReviewStdin } from "./review.js";
+import { childEnv, childIsolationArgs, childRuntimeError, configBlockForProvider, formatChildRuntimeDetail, readReviewStdin } from "./review.js";
 import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, normalizePayloadRefs, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
@@ -126,6 +127,32 @@ interface ReviewerRunInput {
 async function runReviewerChild(input: ReviewerRunInput): Promise<ReviewerSubmission> {
   const { config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt, signal, emit, quietProgress } = input;
   const args = buildReviewerArgs(config, parsed, preset, prompt, fileRefs, reviewer, progressLog, systemPrompt);
+
+  // Block this reviewer before spawning when its provider only exists via host
+  // extensions (issue #8): the isolated child would otherwise fail with a
+  // confusing unknown-provider error. The hint tells the host agent to re-run
+  // with PI_REVIEW_CHILD_EXTENSIONS=1.
+  const effectiveReviewerModel = resolveReviewerModelThinking(reviewer, {
+    model: parsed.model || preset.model,
+    thinking: parsed.thinking || preset.thinking,
+  });
+  const configBlock = configBlockForProvider(
+    config.piBin,
+    reviewer.provider || parsed.provider || preset.provider,
+    effectiveReviewerModel.model,
+  );
+  if (configBlock) {
+    return {
+      reviewerId: reviewer.id,
+      role: reviewer.role,
+      model: effectiveReviewerModel.model ?? null,
+      durationMs: 0,
+      result: configBlock.structured,
+      ...(configBlock.extensionOnly
+        ? { extensionHint: { provider: configBlock.provider, availableViaExtension: true } }
+        : {}),
+    };
+  }
 
   let progressWriter: ProgressLogWriter | undefined;
   if (progressLog) {
@@ -376,6 +403,23 @@ export function shouldPreserveSubmissionOnAbort(submission: ReviewerSubmission):
   return submission.result.verdictSource !== "runtime_error";
 }
 
+/**
+ * Collect every extension-only provider hint from reviewer submissions,
+ * deduplicated by provider (first occurrence wins). Returns undefined when no
+ * reviewer was blocked on an extension provider.
+ */
+export function collectPanelExtensionHints(submissions: ReviewerSubmission[]): ExtensionHint[] | undefined {
+  const seen = new Set<string>();
+  const hints: ExtensionHint[] = [];
+  for (const submission of submissions) {
+    const hint = submission.extensionHint;
+    if (!hint || seen.has(hint.provider)) continue;
+    seen.add(hint.provider);
+    hints.push(hint);
+  }
+  return hints.length > 0 ? hints : undefined;
+}
+
 /** Run one complete panel evaluation and return the aggregate result (no exit). */
 export async function runPanelReviewOnce(
   parsed: ParsedArgs,
@@ -495,6 +539,11 @@ export async function runPanelReviewOnce(
   // unconfigured panel still surfaces the model every reviewer actually ran on.
   const panelModel = resolvePanelEffectiveModel(submissions, parsed.model || preset.model || null);
 
+  // Surface every extension-only provider hint so machine consumers of
+  // PI_REVIEW_META_JSON can detect that re-running with
+  // PI_REVIEW_CHILD_EXTENSIONS=1 is required (issue #8).
+  const extensionHints = collectPanelExtensionHints(submissions);
+
   const panelMeta: PanelReviewMeta = {
     ...aggregate,
     metaVersion: REVIEW_META_VERSION,
@@ -503,6 +552,7 @@ export async function runPanelReviewOnce(
     model: panelModel,
     thinking: panelThinking,
     usage: sumPanelUsage(submissions.map((s) => s.usage)),
+    ...(extensionHints && extensionHints.length > 0 ? { extensionHints } : {}),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
   };
 

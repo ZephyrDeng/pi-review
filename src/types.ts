@@ -128,7 +128,7 @@ export interface ReviewPreset {
 
 export interface VerdictInfo {
   verdict: Verdict;
-  verdictSource: "parsed" | "fallback" | "runtime_error";
+  verdictSource: "parsed" | "fallback" | "runtime_error" | "config_error";
   parseError?: string;
 }
 
@@ -142,6 +142,16 @@ export interface VerdictInfo {
  */
 export const REVIEW_META_VERSION = 1 as const;
 
+/**
+ * Machine-readable hint that the requested provider only exists with host Pi
+ * extensions loaded, so the run must be retried with
+ * `PI_REVIEW_CHILD_EXTENSIONS=1` (issue #8).
+ */
+export interface ExtensionHint {
+  provider: string;
+  availableViaExtension: boolean;
+}
+
 export interface ReviewMeta extends StructuredReviewResult {
   /** Schema discriminator for `PI_REVIEW_META_JSON`; see `REVIEW_META_VERSION`. */
   metaVersion: typeof REVIEW_META_VERSION;
@@ -153,6 +163,13 @@ export interface ReviewMeta extends StructuredReviewResult {
   /** Token usage from the child pi --mode json stream, when available. */
   usage?: TokenUsage;
   sessionHandle?: string;
+  /**
+   * Present when the requested provider only exists with host Pi extensions
+   * loaded, but the review child runs with --no-extensions (issue #8). The
+   * host agent should re-run with `PI_REVIEW_CHILD_EXTENSIONS=1` (or pass it
+   * in the environment) before retrying.
+   */
+  extensionHint?: ExtensionHint;
 }
 
 export interface ReviewRunResult {
@@ -278,7 +295,14 @@ export interface PanelFields {
 export interface PanelAggregationResult extends StructuredReviewResult, PanelFields {}
 
 /** Review metadata for a panel evaluation; additive over ReviewMeta. */
-export interface PanelReviewMeta extends ReviewMeta, PanelFields {}
+export interface PanelReviewMeta extends ReviewMeta, PanelFields {
+  /**
+   * All extension-only providers that blocked reviewers before spawn
+   * (issue #8), deduplicated by provider. Unlike single-review runs a panel
+   * may span several extension providers, so every hint is preserved here.
+   */
+  extensionHints?: ExtensionHint[];
+}
 
 /** A reviewer's structured submission fed to the pure aggregation seam. */
 export interface ReviewerSubmission {
@@ -292,6 +316,8 @@ export interface ReviewerSubmission {
   usage?: TokenUsage;
   durationMs: number;
   result: StructuredReviewResult;
+  /** Extension-only provider hint, when this reviewer was blocked before spawn (issue #8). */
+  extensionHint?: ReviewMeta["extensionHint"];
 }
 
 /** One reviewer definition inside a named panel preset. */

@@ -106,6 +106,18 @@ export function splitModelThinking(value: string): { model: string; thinking?: s
   return { model: value.slice(0, idx), thinking: after };
 }
 
+/**
+ * Extract the provider prefix from a `provider/model` model token.
+ * `px:openai/agnes-2.0-flash` → `px:openai`; `gpt-5.6-sol` → undefined.
+ * Glob patterns such as `anthropic/*` resolve to `anthropic`, which is the
+ * intended scope for provider-availability probing.
+ */
+export function splitModelProvider(model: string): string | undefined {
+  const slash = model.indexOf("/");
+  if (slash <= 0 || slash === model.length - 1) return undefined;
+  return model.slice(0, slash);
+}
+
 export type ReviewerModelOverride = { model: string; thinking?: string };
 
 /** Parse `id=provider/model[:thinking]` overrides; last write wins for duplicate ids. */

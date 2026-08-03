@@ -391,7 +391,7 @@ Override defaults via environment variables:
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
 | `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |
-| `PI_REVIEW_CHILD_EXTENSIONS` | Set to `1`/`true`/`keep` to let review children load host Pi extensions (default: children run with `--no-extensions`) |
+| `PI_REVIEW_CHILD_EXTENSIONS` | Set to `1`/`true`/`keep` to let review children load host Pi extensions (default: children run with `--no-extensions`; with an explicit `--provider`, pi-review first probes the model catalog and blocks with a hint if the provider only exists via extensions) |
 
 ## Pi Package Usage
 
@@ -427,6 +427,7 @@ Completions are a hint layer only; execution remains skill-driven. When the mode
 - Each review and every loop round runs in an isolated child Pi session
 - Default runs use `--no-session` — no child context is stored
 - Default runs also pass `--no-extensions` so host usage HUDs / reload bridges cannot crash a reviewer via stale extension context after dispose (see issue #8). Opt out with `PI_REVIEW_CHILD_EXTENSIONS=1` only when a custom provider truly must register inside the child.
+- Before spawning, pi-review probes the Pi model catalog when an explicit provider is in effect (via `--provider` or the `provider/` prefix of `--model`): if the provider only exists with host extensions loaded, the run is blocked with an actionable hint (`verdictSource: "config_error"`, meta `extensionHint`; panel runs aggregate every affected provider into `extensionHints`) instead of failing with a confusing unknown-provider error — the host agent should re-run with `PI_REVIEW_CHILD_EXTENSIONS=1`. Catalog probes are cached only on success; a transient probe failure never blocks a review.
 - On reviewer runtime failure, the panel footer and `reviewers[].runtimeError` keep a child stderr/stack tail for diagnosis
 - `--keep-session` stores only the child review session for explicit follow-up
 - The review session is read-only: no file edits, patches, commits, or deployments
