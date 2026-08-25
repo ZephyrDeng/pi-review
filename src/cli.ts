@@ -5,12 +5,20 @@ import { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.j
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
 import { runPanelReview, runPanelReviewOnce, runPanelReviewWithUi } from "./panel.js";
 import { resolveConfig } from "./config.js";
+import { currentConfig } from "./pi-config.js";
 import { installSkill, uninstallSkill } from "./skill.js";
 import { runUpdate } from "./update.js";
 import { runInstall } from "./install.js";
 
 const parsed = parseArgs(process.argv.slice(2));
 if (isInstallHelp(parsed)) usage(0);
+
+// The config file is advisory: warn about leniently-ignored values but never
+// block core functionality — a config written by a newer pi-review must not
+// brick an older one.
+for (const warning of currentConfig().warnings) {
+  process.stderr.write(`pi-review: config warning: ${warning}\n`);
+}
 
 if (parsed.command === "models") {
   const config = resolveConfig();

@@ -18,6 +18,8 @@ import { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils
 import { resolveConfig } from "./config.js";
 import { splitModelProvider } from "./panel-config.js";
 import { formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
+import { currentConfig, resolveChildExtensions } from "./pi-config.js";
+import type { PiReviewConfig } from "./pi-config.js";
 
 export function readReviewStdin(): string {
   if (process.stdin.isTTY) return "";
@@ -127,9 +129,9 @@ export function extensionOnlyHintText(provider: string): string {
     `provider "${provider}" is registered by a Pi extension, but review children`,
     `run isolated with --no-extensions (issue #8).`,
     "",
-    "Re-run with host extensions enabled:",
-    `    PI_REVIEW_CHILD_EXTENSIONS=1 pi-review ...`,
-    "(accepts 1 / true / keep; see README PI_REVIEW_CHILD_EXTENSIONS)",
+    "Enable extension-registered providers persistently in the review config:",
+    `    ~/.pi/pi-review/config.json  →  { "childExtensions": true }`,
+    "(or override one run: PI_REVIEW_CHILD_EXTENSIONS=1 pi-review ...)",
   ].join("\n");
 }
 
@@ -185,13 +187,25 @@ export function configBlockForProvider(
  * ctx and touch it after session dispose/reload. That throws Pi's stale-context
  * error and can crash an otherwise successful reviewer child (issue #8).
  *
- * Opt out with PI_REVIEW_CHILD_EXTENSIONS=1 when a custom provider truly requires
- * host extension registration inside the child.
+ * The effective value comes from the persistent review config
+ * (childExtensions, ~/.pi/pi-review/config.json), overridden per process by
+ * PI_REVIEW_CHILD_EXTENSIONS (1/true/keep enable, any other set value
+ * disables). Bare CLI stays isolated (--no-extensions) until the config says
+ * otherwise.
  */
-export function childIsolationArgs(env: NodeJS.ProcessEnv = process.env): string[] {
-  const raw = env.PI_REVIEW_CHILD_EXTENSIONS?.trim().toLowerCase();
-  if (raw === "1" || raw === "true" || raw === "keep") return [];
-  return ["--no-extensions"];
+export function childIsolationArgs(env: NodeJS.ProcessEnv = process.env, cfg?: PiReviewConfig): string[] {
+  const decision = resolveChildExtensions(env, cfg ?? currentConfig(env).config);
+  return decision.enabled ? [] : ["--no-extensions"];
+}
+
+/**
+ * Build the catalog command args so the models command shows the same catalog
+ * an actual review child would see: the effective isolation config applies
+ * here too (F2: catalog and review must agree on extension-registered
+ * providers).
+ */
+export function modelsArgs(args: string[], env: NodeJS.ProcessEnv = process.env, cfg?: PiReviewConfig): string[] {
+  return ["--list-models", ...childIsolationArgs(env, cfg), ...args];
 }
 
 /** Prefer the larger of two captured stderr buffers; keep a readable stack tail. */
@@ -225,7 +239,7 @@ export function childRuntimeError(child: Pick<ChildRunResult, "status" | "signal
 }
 
 export function runModels(piBin: string, args: string[]): never {
-  const result = spawnSync(piBin, ["--list-models", ...args], {
+  const result = spawnSync(piBin, modelsArgs(args), {
     stdio: "inherit",
     env: childEnv(piBin),
   });

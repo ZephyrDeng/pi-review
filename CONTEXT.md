@@ -27,6 +27,8 @@
 
 **Model catalog**: The model list returned by `pi --list-models`, exposed through `pi-review models [search]`.
 
+**Review config**: The persistent machine-level settings file (`~/.pi/pi-review/config.json`) that shapes review children — currently one key, `childExtensions`. It is the durable home for behavior defaults; per-process env overrides it, and `/rv-config` shows the effective value with its source.
+
 **Pi package**: The installable package shape that lets Pi load the `/rv` extension and the `pi-review` skill via `pi install`.
 
 **Shell CLI**: The npm `bin` entry exposed as `pi-review` for terminal, CI, and editor integration workflows.
@@ -35,6 +37,6 @@
 
 - A **review run** always executes in a child Pi process — never in the parent session.
 - A **loop round** remains review-only; only the **host agent** may act on an **actionable finding**.
-- `pi-review models` delegates to the Pi **model catalog** directly.
+- `pi-review models` delegates to the Pi **model catalog** directly. The packaged skill ensures the **review config** enables `childExtensions` so review children see providers registered only via host Pi extensions; bare CLI still isolates with `--no-extensions` until the config says otherwise (env overrides per run).
 - The Pi package slash commands select strategy only: `/rv` panel, `/rv-loop` loop closeout, `/rv-models` catalog. Targets after the command stay natural language. Remaining strategy matching (mode, model, panel, path-vs-file handling) lives in the skill and CLI. Continuations, kept sessions, loop, and explicit buffered runs retain the shell-CLI path.
 - The package skill guides non-Pi hosts to call the **shell CLI** and show the ASCII footer to users. `/rv` orchestration uses native live rendering for new Pi Panel runs and forbids default `--no-stream` / `--progress-log`. On **Claude Code / Codex / Cursor / agy**-style hosts, the skill defaults to `--progress-log` + background run + tail (`skills/pi-review/references/codex-tools.md`).

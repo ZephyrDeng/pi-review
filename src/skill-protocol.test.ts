@@ -21,6 +21,21 @@ test("shipped skill defines bounded host-owned loop closeout", () => {
   }
 });
 
+test("shipped skill defaults to config-file managed registered providers", () => {
+  const skill = fs.readFileSync(skillPath, "utf8");
+
+  for (const required of [
+    "Registered providers",
+    "childExtensions",
+    "~/.pi/pi-review/config.json",
+    "/rv-config",
+    "extension-registered providers",
+    "PI_REVIEW_CHILD_EXTENSIONS=0",
+  ]) {
+    assert.match(skill, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), `skill missing: ${required}`);
+  }
+});
+
 test("shipped skill documents Panel Review, consensus, and advisories", () => {
   const skill = fs.readFileSync(skillPath, "utf8");
 

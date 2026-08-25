@@ -4,21 +4,43 @@ import {
   CHILD_STDERR_DIAGNOSTIC_LIMIT,
   childIsolationArgs,
   formatChildRuntimeDetail,
+  modelsArgs,
 } from "./review.js";
 import { buildReviewerArgs } from "./panel.js";
 import type { Config } from "./config.js";
 import type { ParsedArgs } from "./types.js";
 
 test("childIsolationArgs defaults to --no-extensions for host isolation", () => {
-  assert.deepEqual(childIsolationArgs({}), ["--no-extensions"]);
-  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "" }), ["--no-extensions"]);
-  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "0" }), ["--no-extensions"]);
+  assert.deepEqual(childIsolationArgs({}, {}), ["--no-extensions"]);
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "" }, {}), ["--no-extensions"]);
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "0" }, {}), ["--no-extensions"]);
 });
 
 test("childIsolationArgs can opt back into host extensions", () => {
-  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "1" }), []);
-  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "true" }), []);
-  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "KEEP" }), []);
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "1" }, {}), []);
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "true" }, {}), []);
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "KEEP" }, {}), []);
+});
+
+test("childIsolationArgs honors the persistent config childExtensions key", () => {
+  assert.deepEqual(childIsolationArgs({}, { childExtensions: true }), []);
+  assert.deepEqual(childIsolationArgs({}, { childExtensions: false }), ["--no-extensions"]);
+});
+
+test("childIsolationArgs: env overrides the persistent config in both directions", () => {
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "0" }, { childExtensions: true }), ["--no-extensions"]);
+  assert.deepEqual(childIsolationArgs({ PI_REVIEW_CHILD_EXTENSIONS: "1" }, { childExtensions: false }), []);
+});
+
+test("modelsArgs applies the same effective isolation as review children", () => {
+  assert.deepEqual(modelsArgs(["openai"], {}, {}), ["--list-models", "--no-extensions", "openai"]);
+  assert.deepEqual(modelsArgs(["openai"], {}, { childExtensions: true }), ["--list-models", "openai"]);
+  assert.deepEqual(modelsArgs(["openai"], { PI_REVIEW_CHILD_EXTENSIONS: "1" }, {}), ["--list-models", "openai"]);
+  assert.deepEqual(modelsArgs(["openai"], { PI_REVIEW_CHILD_EXTENSIONS: "0" }, { childExtensions: true }), [
+    "--list-models",
+    "--no-extensions",
+    "openai",
+  ]);
 });
 
 test("formatChildRuntimeDetail preserves a multi-line child stack tail", () => {

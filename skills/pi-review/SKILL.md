@@ -21,6 +21,17 @@ If `pi-review` is not on PATH but this skill came from the Pi package, use the p
 node ../../bin/pi-review.js --help
 ```
 
+## Registered providers (explicit opt-in)
+
+Review children stay isolated (`--no-extensions`) unless the persistent review config enables host extensions. Enable them only when the review needs an extension-registered provider (e.g. `px:anthropic`, `zenmux`) — and only with explicit user acceptance:
+
+```json
+// ~/.pi/pi-review/config.json
+{ "childExtensions": true }
+```
+
+Before writing, tell the user the config is machine-level: every later pi-review on this machine (including bare CLI) inherits it. Write it only on acceptance; when editing an existing file, keep every unknown key and never overwrite a value the user set (invalid JSON — stop, do not overwrite). Verify on Pi with `/rv-config`, elsewhere with `cat ~/.pi/pi-review/config.json`. Isolate one run with `PI_REVIEW_CHILD_EXTENSIONS=0` (env overrides config). If a child exits with stale extension ctx after dispose/reload (issue #8), retry that one run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
+
 ## Default workflow by host
 
 | Host | How to run `pi-review` |
@@ -51,6 +62,7 @@ Slash commands select **strategy only**. Everything after the command is a **nat
 | `/rv <natural-language target>` | Panel review via native **Pi Review Panel** (`pi_review` API tool); preset `code-experts` unless `--reviewers`/`--panel` say otherwise |
 | `/rv-loop <natural-language target>` | Loop closeout via shell `pi-review loop`; host fix point `--max-rounds 1` by default |
 | `/rv-models` | Model catalog only |
+| `/rv-config` | Show the effective configuration (config file, env overrides, resolved paths) |
 | `/rv --continue <handle> [text]` | Continue a kept single-review session |
 
 - Pass the user target **as given**. Path mentions like `@src` or `@src/foo.ts` are fine as text. Do **not** expand directories into multi-file lists in the parent agent.
@@ -184,6 +196,7 @@ pi-review --reviewers 3 --ui web --ui-url-file /tmp/pi-review-ui-url.txt -- @src
    pi-review models [search]
    ```
    Rules:
+   - Extension-registered providers appear in the catalog only when the config enables them (`childExtensions: true`, see **Registered providers** — explicit opt-in).
    - Run this before building the review command. **Never invent a `provider/model` id** — only ids from the catalog output.
    - **Cross-model review**: identify the model this host session itself runs on (its id is in your session context), then prefer reviewer models from a different model family — same-family reviewers share the author model's blind spots. On a panel, keep the host's family to a minority of reviewers.
    - Follow **[references/model-selection.md](./references/model-selection.md)** for everything else: profile inference (code / frontend / plan), priority lists, cross-model resolution, user-named-model resolution, and thinking aliases (`max`/`最高` → `xhigh`, with fallback to the nearest supported level).
@@ -204,7 +217,7 @@ pi-review --reviewers 3 --ui web --ui-url-file /tmp/pi-review-ui-url.txt -- @src
    pi-review [--mode <name>] [--model <provider/model[:thinking]>] [--keep-session|--continue <handle>] [--progress-log <path>] -- <natural-language target...>
    ```
    Rules:
-   - Use the model decision from step 1 and the execution path from **Default workflow by host**.
+   - Use the model decision from step 1 and the execution path from **Default workflow by host**. **Registered providers** enable host extensions only after explicit user acceptance (see **Registered providers**); override a single run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
    - Omit `--mode` for normal code review; the command defaults to `code`.
    - Use `--keep-session` only when the user wants follow-up questions on this review; use `--continue <handle>` only with a **Session** path from a prior ASCII footer or `sessionHandle` in `PI_REVIEW_META_JSON`.
    - Pass the review request as natural language after `--`. Path mentions (`@src`, `@src/foo.ts`) are allowed as text. Do **not** expand directories into multi-file attachment lists — the CLI keeps directory `@refs` as tool path targets and only attaches real files.

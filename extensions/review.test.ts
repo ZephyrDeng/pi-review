@@ -3,6 +3,7 @@ import { test } from "vitest";
 import piReviewExtension from "./review.js";
 
 type CommandConfig = {
+  description?: string;
   getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null;
 };
 
@@ -48,6 +49,13 @@ test("extension completion fallback never replaces an entered target when the ca
   // Natural-language targets have no static candidate; returning null is safer than
   // replacing the whole argument with a bare --model/--mode suggestion.
   assert.equal(complete!("review auth behavior"), null);
+});
+
+test("extension registers the read-only /rv-config command", () => {
+  const { commands } = registeredExtension();
+  const config = commands.get("rv-config");
+  assert.ok(config);
+  assert.match(config!.description ?? "", /effective pi-review configuration/);
 });
 
 test("a new session with an empty catalog does not reuse models captured by a previous session", () => {

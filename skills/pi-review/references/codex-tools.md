@@ -10,6 +10,8 @@ Skills may use Claude Code tool names. On **Codex**, **Claude Code**, **Cursor**
 
 This file is **pi-review–specific** and ships with the pi-review package.
 
+Skill-invoked runs inherit **Registered providers** from the parent skill: the persistent config enables extension-registered providers only after explicit user acceptance (`childExtensions: true` in `~/.pi/pi-review/config.json`). Verify with `cat ~/.pi/pi-review/config.json`; isolate one run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
+
 ## Long-running `pi-review` (default on Codex / Claude Code / Cursor / agy)
 
 Native shell tools on these hosts **buffer stdout/stderr until the command exits**. A multi-minute foreground `pi-review` run looks like a silent wait, then one large dump — never promise live foreground streaming. Which side channel to use depends on the run type: panel review gets the browser dashboard; single review and `loop` get the tailed progress log.

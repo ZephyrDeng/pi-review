@@ -4,7 +4,7 @@ Use this after `pi-review models` (or `pi-review models <search>`). **Never inve
 
 ## Workflow (Claude Code, Codex, Cursor, agy, Pi parent agent)
 
-1. Run `pi-review models` (narrow with search if the user named a vendor or model family).
+1. Run `pi-review models` (narrow with search if the user named a vendor or model family). Extension-registered providers appear in the catalog only when the config enables them (`childExtensions: true`); if a needed provider is missing, follow the parent skill's **Registered providers** section (explicit opt-in).
 2. Infer **review profile** from the target (see table below).
 3. **Cross-model review**: identify the host session's own model — the model that wrote or will fix the code under review; its id is in your own session context. Walk the **priority list** for that profile skipping rows in the host's model family, and pick the **first** remaining row whose `idContains` matches some listed model id (case-insensitive substring). Same-family reviewers share the author model's blind spots; return to the host's own family only when no other family matches the catalog. On a panel, spread reviewer models so the host's family stays a minority. If several ids match one row, prefer the **newest** id (higher version suffix, e.g. `2.7` over `2.5`, `4-8` over `4-6`).
 4. Set `--model <exact-listed-provider/model>` from the catalog. Add `:thinking` only if that model supports it in Pi and the preset suggests it (see thinking column).

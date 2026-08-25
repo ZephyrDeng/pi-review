@@ -19,6 +19,7 @@ import {
 } from "./rv-interactive.js";
 import { RvModelPickerComponent, type ModelPickerResult } from "./rv-model-picker.js";
 import { registerPanelReviewTool } from "./panel-tool.js";
+import { buildRvConfigLines } from "./rv-config.js";
 
 /**
  * Captured at `session_start` so the synchronous-ish `getArgumentCompletions`
@@ -275,5 +276,15 @@ export default function piReviewExtension(pi: ExtensionAPI) {
     description: "List pi-review models. Usage: /rv-models",
     getArgumentCompletions: (prefix) => argumentCompletions(prefix, "models"),
     handler: async (_rawArgs, ctx) => handleRvCommand("models", "", ctx),
+  });
+
+  pi.registerCommand("rv-config", {
+    description:
+      "Show effective pi-review configuration (config file ~/.pi/pi-review/config.json, env overrides, resolved paths). Usage: /rv-config",
+    handler: async (_rawArgs, ctx) => {
+      // Direct UI notification, not a user message: no LLM turn, no local
+      // paths entering the model context (F3).
+      ctx.ui.notify(buildRvConfigLines({ locale: localeForHandler(ctx) }).join("\n"), "info");
+    },
   });
 }

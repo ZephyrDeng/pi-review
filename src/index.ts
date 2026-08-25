@@ -7,6 +7,7 @@ export {
   childEnv,
   childIsolationArgs,
   childRuntimeError,
+  modelsArgs,
   configBlockForProvider,
   extensionOnlyHintText,
   formatChildRuntimeDetail,
@@ -96,3 +97,12 @@ export {
   uninstallSkill,
 } from "./skill.js";
 export type { DirectSkillInstallTarget, SkillMethod, SkillOpResult } from "./skill.js";
+export {
+  DEFAULT_CONFIG_PATH,
+  configFilePath,
+  currentConfig,
+  loadReviewConfigFile,
+  parseReviewConfig,
+  resolveChildExtensions,
+} from "./pi-config.js";
+export type { PiReviewConfig, ConfigSource, ChildExtensionsDecision, ReviewConfigLoad } from "./pi-config.js";

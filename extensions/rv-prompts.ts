@@ -532,7 +532,7 @@ function piHostRules(strategy: RvStrategy): string {
   return [
     "Follow the pi-review skill.",
     "Host: Pi interactive session (/rv*).",
-    "Slash commands select strategy only: /rv = panel review, /rv-loop = loop closeout, /rv-models = model catalog.",
+    "Slash commands select strategy only: /rv = panel review, /rv-loop = loop closeout, /rv-models = model catalog, /rv-config = effective configuration.",
     "Everything after the command is a natural-language review request. Path mentions like @src are fine as text.",
     "Do not expand directory targets into multi-file lists. Strategy matching beyond the slash command (mode defaults, model choice, panel preset, path-vs-file handling) lives in the pi-review skill and CLI.",
     strategy === "panel"
