@@ -21,6 +21,48 @@
 
 - 已安装并配置好 [Pi CLI](https://pi.dev)，且至少有一个可用模型
 
+## 用 OrcaRouter 运行审查
+
+`pi-review` 与模型无关——它运行在你 [Pi](https://pi.dev) 中配置的任意模型服务商之上。若要
+把 [OrcaRouter](https://www.orcarouter.ai) 作为审查背后的服务商，请将其添加到
+`~/.pi/agent/models.json`（OpenAI 兼容）：
+
+```json
+{
+  "providers": {
+    "orcarouter": {
+      "baseUrl": "https://api.orcarouter.ai/v1",
+      "api": "openai-completions",
+      "apiKey": "ORCA_KEY",
+      "models": [
+        {
+          "id": "orcarouter/auto",
+          "name": "OrcaRouter Auto",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 200000,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}
+```
+
+然后导出你的密钥：
+
+```bash
+export ORCA_KEY="sk-orca-..."
+```
+
+并在运行审查时选择该模型：
+
+```bash
+pi-review --model orcarouter/orcarouter/auto -- @src/foo.ts
+```
+
+[![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36)
+
 ## 安装
 
 ```bash
@@ -208,14 +250,20 @@ CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/
 
 提交代码：`npm install` 后会启用 **Husky** 钩子（`.husky/` → `ai-commit` 的 prepare-commit-msg / commit-msg / pre-commit）。也可 `git add` 后直接 `ai-commit commit`。配置见 `.ai-commit.yaml`（英文、`ai_footer: off`，需本机安装 ai-commit ≥ v0.1.45）。
 
-可通过 `PI_REVIEW_HOME`、`PI_REVIEW_PRESETS`、`PI_REVIEW_SYSTEM_PROMPT` 等环境变量覆盖预设与系统提示词路径。预设与审查指令文件内容均为英文。
+持久化设置在评审配置文件 `~/.pi/pi-review/config.json`（可用 `PI_REVIEW_CONFIG` 覆盖其位置）中。配置是建议性的、向前兼容的：未知键被忽略，`null` 视为未设置，其它任何问题（类型错误、无效 JSON）只打印警告并回落——配置绝不阻塞核心功能，新版本写的配置不会弄坏旧版本。在 Pi 中用 `/rv-config` 查看生效配置（取值、来源、警告、解析路径）。
+
+| 键 | 类型 | 默认 | 说明 |
+|-----|------|---------|-------------|
+| `childExtensions` | boolean | `false` | 是否让评审子进程加载宿主 Pi 扩展，以使用仅由扩展注册的 provider。等价于单次运行 `PI_REVIEW_CHILD_EXTENSIONS=1`；`false` 保持子进程隔离（`--no-extensions`，issue #8）。 |
+
+环境变量提供单次进程级覆盖（env 优先于配置文件）：`PI_REVIEW_HOME`、`PI_REVIEW_PRESETS`、`PI_REVIEW_PANEL_PRESETS`、`PI_REVIEW_SYSTEM_PROMPT`、`PI_REVIEW_SESSION_DIR`、`PI_REVIEW_META_STDOUT`、`PI_REVIEW_CHILD_EXTENSIONS`（`1`/`true`/`keep` 开启、其它已设值如 `0` 强制隔离、空值视为未设置；持久化等价写法为配置文件里 `{ "childExtensions": true }`）、`PI_REVIEW_CONFIG`。预设与审查指令文件内容均为英文。
 
 ## 安全
 
 - 每次审查在隔离子进程中运行
 - 默认不保留子会话；`--keep-session` 仅用于显式跟进
-- 默认还会传 `--no-extensions`，避免宿主 usage HUD / reload bridge 在 dispose 后触 stale extension ctx 搞崩 reviewer（见 issue #8）。仅当自定义 provider 必须在子进程内注册时，才用 `PI_REVIEW_CHILD_EXTENSIONS=1` 退出隔离
-- 显式指定 provider（`--provider` 或 `--model` 的 `provider/` 前缀）时，spawn 前会先探测 Pi 模型目录：若该 provider 仅在加载宿主扩展后才存在，则直接以可执行的提示阻塞运行（`verdictSource: "config_error"`，meta 带 `extensionHint`；panel 运行会把所有受影响的 provider 聚合到 `extensionHints`），而不是抛一个令人困惑的 unknown-provider 错误——宿主 agent 应设置 `PI_REVIEW_CHILD_EXTENSIONS=1` 后重跑。目录探测仅在成功时缓存，瞬时探测失败不会阻塞审查
+- 默认子进程以 `--no-extensions` 隔离运行，避免宿主 usage HUD / reload bridge 在 dispose 后触 stale extension ctx 搞崩 reviewer（见 issue #8）。需要自定义 provider 在子进程内注册时，可在 `~/.pi/pi-review/config.json` 里持久化 `{ "childExtensions": true }`，或单次运行用 `PI_REVIEW_CHILD_EXTENSIONS=1`
+- 显式指定 provider（`--provider` 或 `--model` 的 `provider/` 前缀）时，spawn 前会先探测 Pi 模型目录：若该 provider 仅在加载宿主扩展后才存在，则直接以可执行的提示阻塞运行（`verdictSource: "config_error"`，meta 带 `extensionHint`；panel 运行会把所有受影响的 provider 聚合到 `extensionHints`），而不是抛一个令人困惑的 unknown-provider 错误——在配置文件中设置 `childExtensions: true` 或重跑时加 `PI_REVIEW_CHILD_EXTENSIONS=1`。目录探测仅在成功时缓存，瞬时探测失败不会阻塞审查
 - reviewer 运行时失败时，panel footer 与 `reviewers[].runtimeError` 会保留子进程 stderr/stack 尾部便于诊断
 - 审查会话只读，不编辑、不部署
 

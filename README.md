@@ -14,6 +14,48 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 - [Pi CLI](https://pi.dev) installed and configured with at least one model provider
 
+## Run reviews on OrcaRouter
+
+`pi-review` is model-agnostic — it runs on any model provider configured in your
+[Pi](https://pi.dev) installation. To use [OrcaRouter](https://www.orcarouter.ai) as
+the provider behind your reviews, add it to `~/.pi/agent/models.json` (OpenAI-compatible):
+
+```json
+{
+  "providers": {
+    "orcarouter": {
+      "baseUrl": "https://api.orcarouter.ai/v1",
+      "api": "openai-completions",
+      "apiKey": "ORCA_KEY",
+      "models": [
+        {
+          "id": "orcarouter/auto",
+          "name": "OrcaRouter Auto",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 200000,
+          "maxTokens": 8192
+        }
+      ]
+    }
+  }
+}
+```
+
+Then export your key:
+
+```bash
+export ORCA_KEY="sk-orca-..."
+```
+
+and pick the model when you run a review:
+
+```bash
+pi-review --model orcarouter/orcarouter/auto -- @src/foo.ts
+```
+
+[![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36)
+
 ## Features
 
 - **Isolated review sessions** — each review runs in a clean child process with no shared state
@@ -380,7 +422,13 @@ Session flags (`--keep-session`, `--continue`, `--name`) are unsupported by `loo
 
 ## Configuration
 
-Override defaults via environment variables:
+Persistent settings live in the review config file `~/.pi/pi-review/config.json` (override its location with `PI_REVIEW_CONFIG`). The config is advisory and forward-compatible: unknown keys are ignored, `null` counts as unset, and any other problem (wrong-typed value, invalid JSON) only prints a warning and falls back — the config never blocks core functionality, so a config written by a newer pi-review cannot brick an older one. In Pi, `/rv-config` shows the effective configuration (values, sources, warnings, resolved paths).
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `childExtensions` | boolean | `false` | Let review children load host Pi extensions so providers registered only through extensions are usable. Equivalent to per-run `PI_REVIEW_CHILD_EXTENSIONS=1`; `false` keeps children isolated with `--no-extensions` (issue #8). |
+
+Per-process overrides via environment variables (env wins over the config file):
 
 | Variable | Description |
 |----------|-------------|
@@ -391,7 +439,8 @@ Override defaults via environment variables:
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
 | `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |
-| `PI_REVIEW_CHILD_EXTENSIONS` | Set to `1`/`true`/`keep` to let review children load host Pi extensions (default: children run with `--no-extensions`; with an explicit `--provider`, pi-review first probes the model catalog and blocks with a hint if the provider only exists via extensions) |
+| `PI_REVIEW_CHILD_EXTENSIONS` | Per-run override for `childExtensions`: `1`/`true`/`keep` enables host extensions for this process, any other set value (e.g. `0`) forces isolation; an empty value counts as unset. Persistent equivalent: `{ "childExtensions": true }` in the config file. With an explicit `--provider`, pi-review first probes the model catalog and blocks with a hint if the provider only exists via extensions |
+| `PI_REVIEW_CONFIG` | Path to the review config file (default: `~/.pi/pi-review/config.json`) |
 
 ## Pi Package Usage
 
@@ -402,7 +451,7 @@ After installing as a Pi package, use the `/rv` slash command:
 /rv --mode challenge @docs/design.md
 ```
 
-Slash commands inject a task message for the parent agent. Strategy is selected by the command (`/rv`, `/rv-loop`, `/rv-models`); the remainder is the natural-language target. Use plain `/rv @src`, `/rv review the auth changes`, or `/rv-loop fix until clean @src` in Pi — no extra streaming flags needed for panel runs. `--continue`, `--keep-session`, loop, and explicit `--no-stream` retain the shell CLI path.
+Slash commands inject a task message for the parent agent. Strategy is selected by the command (`/rv`, `/rv-loop`, `/rv-models`); the remainder is the natural-language target. `/rv-config` is read-only: it shows the effective configuration (config file, env overrides, resolved paths). Use plain `/rv @src`, `/rv review the auth changes`, or `/rv-loop fix until clean @src` in Pi — no extra streaming flags needed for panel runs. `--continue`, `--keep-session`, loop, and explicit `--no-stream` retain the shell CLI path.
 
 ```
 /rv models
@@ -426,8 +475,8 @@ Completions are a hint layer only; execution remains skill-driven. When the mode
 
 - Each review and every loop round runs in an isolated child Pi session
 - Default runs use `--no-session` — no child context is stored
-- Default runs also pass `--no-extensions` so host usage HUDs / reload bridges cannot crash a reviewer via stale extension context after dispose (see issue #8). Opt out with `PI_REVIEW_CHILD_EXTENSIONS=1` only when a custom provider truly must register inside the child.
-- Before spawning, pi-review probes the Pi model catalog when an explicit provider is in effect (via `--provider` or the `provider/` prefix of `--model`): if the provider only exists with host extensions loaded, the run is blocked with an actionable hint (`verdictSource: "config_error"`, meta `extensionHint`; panel runs aggregate every affected provider into `extensionHints`) instead of failing with a confusing unknown-provider error — the host agent should re-run with `PI_REVIEW_CHILD_EXTENSIONS=1`. Catalog probes are cached only on success; a transient probe failure never blocks a review.
+- Children run isolated with `--no-extensions` by default so host usage HUDs / reload bridges cannot crash a reviewer via stale extension context after dispose (see issue #8). Enable host extension loading persistently with `{ "childExtensions": true }` in `~/.pi/pi-review/config.json`, or per run with `PI_REVIEW_CHILD_EXTENSIONS=1` — only when a custom provider truly must register inside the child.
+- Before spawning, pi-review probes the Pi model catalog when an explicit provider is in effect (via `--provider` or the `provider/` prefix of `--model`): if the provider only exists with host extensions loaded, the run is blocked with an actionable hint (`verdictSource: "config_error"`, meta `extensionHint`; panel runs aggregate every affected provider into `extensionHints`) instead of failing with a confusing unknown-provider error — set `childExtensions: true` in the config file or re-run with `PI_REVIEW_CHILD_EXTENSIONS=1`. Catalog probes are cached only on success; a transient probe failure never blocks a review.
 - On reviewer runtime failure, the panel footer and `reviewers[].runtimeError` keep a child stderr/stack tail for diagnosis
 - `--keep-session` stores only the child review session for explicit follow-up
 - The review session is read-only: no file edits, patches, commits, or deployments
