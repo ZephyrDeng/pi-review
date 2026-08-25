@@ -32,11 +32,11 @@
    export ORCA_KEY="sk-orca-..."
    ```
 
-2. **注册服务商**——把 [`resources/orcarouter.json`](./resources/orcarouter.json) 合并进 `~/.pi/agent/models.json`（OpenAI 兼容）：
+2. **注册服务商**——把 [`resources/providers/orcarouter.json`](./resources/providers/orcarouter.json) 合并进 `~/.pi/agent/models.json`（OpenAI 兼容）：
 
    ```bash
    # models.json 不存在时可以直接整个使用；已有内容时用 jq 或手工合并
-   cp resources/orcarouter.json ~/.pi/agent/models.json
+   cp resources/providers/orcarouter.json ~/.pi/agent/models.json
    ```
 
 ```json

@@ -26,11 +26,11 @@ the provider behind your reviews:
    export ORCA_KEY="sk-orca-..."
    ```
 
-2. **Register the provider** — merge [`resources/orcarouter.json`](./resources/orcarouter.json) into `~/.pi/agent/models.json` (OpenAI-compatible), e.g.:
+2. **Register the provider** — merge [`resources/providers/orcarouter.json`](./resources/providers/orcarouter.json) into `~/.pi/agent/models.json` (OpenAI-compatible), e.g.:
 
    ```bash
    # jq not required; the file also works as-is when models.json doesn't exist yet
-   cp resources/orcarouter.json ~/.pi/agent/models.json
+   cp resources/providers/orcarouter.json ~/.pi/agent/models.json
    ```
 
 ```json
