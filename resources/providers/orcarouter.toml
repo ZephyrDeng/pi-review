@@ -1,0 +1,11 @@
+# OrcaRouter provider configuration (Codex CLI / opencode-style TOML).
+# Sign up & get a key: https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36
+
+model = "orcarouter/auto"
+model_provider = "orcarouter"
+
+[model_providers.orcarouter]
+name = "OrcaRouter"
+base_url = "https://api.orcarouter.ai/v1"
+wire_api = "responses"
+env_key = "ORCA_KEY"
