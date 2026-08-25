@@ -24,8 +24,20 @@
 ## 用 OrcaRouter 运行审查
 
 `pi-review` 与模型无关——它运行在你 [Pi](https://pi.dev) 中配置的任意模型服务商之上。若要
-把 [OrcaRouter](https://www.orcarouter.ai) 作为审查背后的服务商，请将其添加到
-`~/.pi/agent/models.json`（OpenAI 兼容）：
+把 [OrcaRouter](https://www.orcarouter.ai) 作为审查背后的服务商：
+
+1. **获取 key**——还没有账号？**用我们的推荐链接注册** <https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36>（下方徽章亦可）。已有 key？直接下一步。
+
+   ```bash
+   export ORCA_KEY="sk-orca-..."
+   ```
+
+2. **注册服务商**——把 [`resources/orcarouter.json`](./resources/orcarouter.json) 合并进 `~/.pi/agent/models.json`（OpenAI 兼容）：
+
+   ```bash
+   # models.json 不存在时可以直接整个使用；已有内容时用 jq 或手工合并
+   cp resources/orcarouter.json ~/.pi/agent/models.json
+   ```
 
 ```json
 {
@@ -49,13 +61,7 @@
 }
 ```
 
-然后导出你的密钥：
-
-```bash
-export ORCA_KEY="sk-orca-..."
-```
-
-并在运行审查时选择该模型：
+3. **选择模型**运行审查：
 
 ```bash
 pi-review --model orcarouter/orcarouter/auto -- @src/foo.ts

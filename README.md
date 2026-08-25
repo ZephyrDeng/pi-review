@@ -18,7 +18,20 @@ Works as a standalone CLI, a Pi package (extension + skill), or integrated into 
 
 `pi-review` is model-agnostic — it runs on any model provider configured in your
 [Pi](https://pi.dev) installation. To use [OrcaRouter](https://www.orcarouter.ai) as
-the provider behind your reviews, add it to `~/.pi/agent/models.json` (OpenAI-compatible):
+the provider behind your reviews:
+
+1. **Get a key** — no account yet? **Sign up with our referral link** <https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36> (also available from the badge below). Already have a key? Skip ahead.
+
+   ```bash
+   export ORCA_KEY="sk-orca-..."
+   ```
+
+2. **Register the provider** — merge [`resources/orcarouter.json`](./resources/orcarouter.json) into `~/.pi/agent/models.json` (OpenAI-compatible), e.g.:
+
+   ```bash
+   # jq not required; the file also works as-is when models.json doesn't exist yet
+   cp resources/orcarouter.json ~/.pi/agent/models.json
+   ```
 
 ```json
 {
@@ -42,13 +55,7 @@ the provider behind your reviews, add it to `~/.pi/agent/models.json` (OpenAI-co
 }
 ```
 
-Then export your key:
-
-```bash
-export ORCA_KEY="sk-orca-..."
-```
-
-and pick the model when you run a review:
+3. **Pick the model** when you run a review:
 
 ```bash
 pi-review --model orcarouter/orcarouter/auto -- @src/foo.ts
