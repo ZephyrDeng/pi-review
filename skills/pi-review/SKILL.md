@@ -118,6 +118,7 @@ Use this protocol when the host is closing out implementation work and may edit 
    - **stop-and-escalate** — ambiguous intent, architectural expansion, unsafe migration, blocked tooling, or anything requiring a human decision; stop rather than guess.
    - A rejected finding must be intentional and recorded with its rationale in the final report. Never silently ignore it.
    - Check sibling instances of the same bug class only inside the frozen task/PR scope. Do not turn the check into a repository-wide refactor.
+   - When `TYPESAFE_API_KEY` is available, `pi-review classify --baseline <text|@file> [--meta <path>]` turns this step into a typed Jev decision per finding (advisory; the host still owns the final call).
 6. **Fix only in-scope blockers in the host.** Never ask the child review session to implement fixes. After each host patch, rerun the narrowest relevant proof (focused test, typecheck, lint, or reproduction) before re-reviewing.
 7. **Re-review until a stop condition:**
    - `clean` → clean goal met; proceed to final proof and closeout.

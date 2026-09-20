@@ -96,23 +96,19 @@ const NOUL_CRITERIA = {
   false: "The findings are distinct issues, or merely share a file or symptom category.",
 } as const;
 
-/**
- * One System One call fanning out every Noul question in parallel. Throws
- * JevError on transport, HTTP, or envelope-level failures; individual missing
- * answers are reported in `missing` instead (treated as "no" by callers).
- */
-export async function evaluateNouls(
+interface SystemOneEnvelope {
+  answers: Record<string, unknown>;
+  usage?: JevUsage;
+  model?: string;
+}
+
+/** Shared transport: one POST to /v1/systemone with the given typed questions. */
+async function callSystemOne(
   connection: JevConnection,
   state: unknown,
-  questions: Record<string, string>,
-  fetchImpl: JevFetch = fetch,
-): Promise<JevNoulResult> {
-  const questionBody = Object.fromEntries(
-    Object.entries(questions).map(([id, instructions]) => [
-      id,
-      { type: "noul", instructions, criteria: { ...NOUL_CRITERIA } },
-    ]),
-  );
+  questionBody: Record<string, unknown>,
+  fetchImpl: JevFetch,
+): Promise<SystemOneEnvelope> {
   let response: Response;
   try {
     response = await fetchImpl(`${connection.baseUrl}/v1/systemone`, {
@@ -141,10 +137,40 @@ export async function evaluateNouls(
   if (!answers || typeof answers !== "object" || Array.isArray(answers)) {
     throw new JevError("typesafe api response is missing the answers object");
   }
+  const usageRaw = record.usage as Record<string, unknown> | undefined;
+  const usage =
+    usageRaw && typeof usageRaw.input_tokens === "number"
+      ? { inputTokens: usageRaw.input_tokens, outputTokens: typeof usageRaw.output_tokens === "number" ? usageRaw.output_tokens : 0 }
+      : undefined;
+  return {
+    answers: answers as Record<string, unknown>,
+    ...(usage ? { usage } : {}),
+    ...(typeof record.model === "string" ? { model: record.model } : {}),
+  };
+}
+
+/**
+ * One System One call fanning out every Noul question in parallel. Throws
+ * JevError on transport, HTTP, or envelope-level failures; individual missing
+ * answers are reported in `missing` instead (treated as "no" by callers).
+ */
+export async function evaluateNouls(
+  connection: JevConnection,
+  state: unknown,
+  questions: Record<string, string>,
+  fetchImpl: JevFetch = fetch,
+): Promise<JevNoulResult> {
+  const questionBody = Object.fromEntries(
+    Object.entries(questions).map(([id, instructions]) => [
+      id,
+      { type: "noul", instructions, criteria: { ...NOUL_CRITERIA } },
+    ]),
+  );
+  const envelope = await callSystemOne(connection, state, questionBody, fetchImpl);
   const probabilities: Record<string, number> = {};
   const missing: string[] = [];
   for (const id of Object.keys(questions)) {
-    const answer = (answers as Record<string, unknown>)[id] as Record<string, unknown> | undefined;
+    const answer = envelope.answers[id] as Record<string, unknown> | undefined;
     const noul = answer?.noul;
     if (answer?.type === "noul" && typeof noul === "number" && Number.isFinite(noul) && noul >= 0 && noul <= 1) {
       probabilities[id] = noul;
@@ -152,16 +178,72 @@ export async function evaluateNouls(
       missing.push(id);
     }
   }
-  const usageRaw = record.usage as Record<string, unknown> | undefined;
-  const usage =
-    usageRaw && typeof usageRaw.input_tokens === "number"
-      ? { inputTokens: usageRaw.input_tokens, outputTokens: typeof usageRaw.output_tokens === "number" ? usageRaw.output_tokens : 0 }
-      : undefined;
   return {
     probabilities,
     missing,
-    ...(usage ? { usage } : {}),
-    ...(typeof record.model === "string" ? { model: record.model } : {}),
+    ...(envelope.usage ? { usage: envelope.usage } : {}),
+    ...(envelope.model ? { model: envelope.model } : {}),
+  };
+}
+
+/** One Choice answer: the selected option plus its probability distribution peak. */
+export interface JevChoiceAnswer {
+  choice: string;
+  confidence: number;
+}
+
+export interface JevChoiceResult {
+  /** Per-question selected option; ids with a missing or malformed answer are absent. */
+  answers: Record<string, JevChoiceAnswer>;
+  /** Question ids the API omitted or returned in an unexpected shape. */
+  missing: string[];
+  usage?: JevUsage;
+  model?: string;
+}
+
+/**
+ * One System One call fanning out Choice questions. `criteria` maps each
+ * option id to its plain-language description; an explicit escape option
+ * (e.g. "other") belongs in the caller's criteria, per the Jev docs' advice.
+ */
+export async function evaluateChoices(
+  connection: JevConnection,
+  state: unknown,
+  questions: Record<string, { instructions: string; criteria: Record<string, string> }>,
+  fetchImpl: JevFetch = fetch,
+): Promise<JevChoiceResult> {
+  const questionBody = Object.fromEntries(
+    Object.entries(questions).map(([id, question]) => [
+      id,
+      { type: "choice", instructions: question.instructions, criteria: question.criteria },
+    ]),
+  );
+  const envelope = await callSystemOne(connection, state, questionBody, fetchImpl);
+  const answers: Record<string, JevChoiceAnswer> = {};
+  const missing: string[] = [];
+  for (const id of Object.keys(questions)) {
+    const answer = envelope.answers[id] as Record<string, unknown> | undefined;
+    const choice = answer?.choice;
+    const confidence = answer?.confidence;
+    if (
+      answer?.type === "choice" &&
+      typeof choice === "string" &&
+      choice in questions[id]!.criteria &&
+      typeof confidence === "number" &&
+      Number.isFinite(confidence) &&
+      confidence >= 0 &&
+      confidence <= 1
+    ) {
+      answers[id] = { choice, confidence };
+    } else {
+      missing.push(id);
+    }
+  }
+  return {
+    answers,
+    missing,
+    ...(envelope.usage ? { usage: envelope.usage } : {}),
+    ...(envelope.model ? { model: envelope.model } : {}),
   };
 }
 

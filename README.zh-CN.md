@@ -169,6 +169,16 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 **裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。显式 `--consensus-model` 时仍走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。裁决发生时聚合 meta 带 `adjudicationEngine: "jev" | "pi"`，`/rv-config` 可查看当前生效值与 key 是否存在。
 
+**范围分类（`pi-review classify`）。** 同一个 Jev 后端还能把上一次评审的 actionable findings 对照冻结的任务基线分类——把 loop 收尾协议里的 scope governor 从 host 的主观判断变成 typed 决策：
+
+```bash
+pi-review classify --baseline "修登录崩溃；UI 调优不在本次范围" --meta /tmp/last-review-meta.txt
+# 或直接管道：
+pi-review -- @src 2>&1 | pi-review classify --baseline "..."
+```
+
+每个 actionable finding 对应一个 Choice 问题（`in_scope_blocker` | `follow_up` | `stop_and_escalate`），单次调用并行 fan-out。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_CLASSIFY_JSON` 机器行；置信度低于 0.5 的标记为 low-confidence。classify 是 advisory、由 host 主动调用——不改文件、不单独卡门禁，且必须有 `TYPESAFE_API_KEY`（缺失时 exit 4）。
+
 ### 成本与失败
 
 审查者运行数 = `--reviewers <n>` × `--max-rounds`（loop）；启用 `--consensus-model` 时每轮最多再跑一次仲裁。用 `--concurrency <n>` 限制并发（默认等于审查者数，不超过）。审查者运行时失败 → `blocked`；无法解析的脏输出或未决澄清 → `needs_human`；绝不悄悄 clean。面板审查 v1 不支持 `--keep-session`、`--continue`、`--name`（审查者用 `--no-session`）；宿主 Agent 仍是唯一可编辑者。

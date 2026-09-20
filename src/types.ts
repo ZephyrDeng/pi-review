@@ -50,7 +50,7 @@ export interface StructuredReviewResult extends VerdictInfo {
 }
 
 export interface ParsedArgs {
-  command: "review" | "loop" | "models" | "install" | "install-skill" | "uninstall-skill" | "update";
+  command: "review" | "loop" | "classify" | "models" | "install" | "install-skill" | "uninstall-skill" | "update";
   /** For `install`: run `pi install npm:@zephyrdeng/pi-review` */
   installPi?: boolean;
   /** For `install`: run agent skill install (skills CLI / Claude + agy direct fallback) */
@@ -114,6 +114,10 @@ export interface ParsedArgs {
   uiTtlSeconds?: number;
   /** Panel: auto-open the dashboard URL in the default browser (default: true; --no-ui-open sets false). */
   uiOpen?: boolean;
+  /** Classify: frozen task/scope baseline (literal text or @file). */
+  baseline?: string;
+  /** Classify: path to a file containing a review's PI_REVIEW_META_JSON (default: stdin). */
+  metaFile?: string;
 }
 
 export interface ReviewPreset {

@@ -233,6 +233,16 @@ Two-phase matching: deterministic matching on stable anchors (path + normalized 
 
 **Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call. Explicit `--consensus-model` keeps the Pi adjudicator; `PI_REVIEW_JEV=0` disables Jev for one run; any Jev failure falls back to the Pi adjudicator and is recorded as `adjudicationFallbackNote` in the meta. The aggregate meta carries `adjudicationEngine: "jev" | "pi"` whenever adjudication ran, and `/rv-config` shows the effective setting and key presence.
 
+**Scope classification (`pi-review classify`).** The same Jev backend can classify a previous review's actionable findings against your frozen task baseline — the loop-closeout scope governor as a typed decision instead of a judgment call:
+
+```bash
+pi-review classify --baseline "fix the login crash; UI polish is out of scope" --meta /tmp/last-review-meta.txt
+# or pipe the review output directly:
+pi-review -- @src 2>&1 | pi-review classify --baseline "..."
+```
+
+Each actionable finding gets one Choice question (`in_scope_blocker` | `follow_up` | `stop_and_escalate`), all fanned out in a single call. Output is an ASCII summary plus a `PI_REVIEW_CLASSIFY_JSON` machine line on stderr; findings below confidence 0.5 are flagged as low-confidence. Classify is advisory and host-invoked — it never edits, never blocks a gate by itself, and requires `TYPESAFE_API_KEY` (exit 4 without it).
+
 ### Cost and failure
 
 Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication call may run per round when `--consensus-model` is set. Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean. Panel review rejects `--keep-session`, `--continue`, and `--name` (reviewers run `--no-session`); the host agent remains the only editor.

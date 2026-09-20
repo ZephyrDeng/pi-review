@@ -7,6 +7,7 @@ export function usage(exitCode = 0): never {
   pi-review models [search]
   pi-review [review] [options] -- <@files|text...>
   pi-review loop [options] -- <@files|text...>
+  pi-review classify --baseline <text|@file> [--meta <path>]   Classify a previous review's findings against the frozen baseline (Jev required)
   pi-review update                      Update package + agent skill content
   pi-review install [options]           Pi package + agent skills (one-shot)
   pi-review install-skill [options]     Install skill to AI agents only
@@ -372,6 +373,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (argv[0] === "update") {
     return { command: "update", mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
+  if (argv[0] === "classify") {
+    return parseClassifyCommand(argv.slice(1));
+  }
 
   try {
     return parseReviewCommand(argv);
@@ -380,4 +384,23 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (error.message) process.stderr.write(`pi-review: ${error.message}\n`);
     usage(error.exitCode);
   }
+}
+
+/** classify is a Jev-only post-processing command: --baseline + optional --meta, nothing else. */
+function parseClassifyCommand(argv: string[]): ParsedArgs {
+  const options: ParsedArgs = { command: "classify", mode: "code", skills: [], payload: [], keepSession: false, stream: true };
+  while (argv.length > 0) {
+    const arg = argv.shift()!;
+    switch (arg) {
+      case "--baseline":
+        options.baseline = requireValue(arg, argv);
+        break;
+      case "--meta":
+        options.metaFile = requireValue(arg, argv);
+        break;
+      default:
+        throw new ArgsParseError(`classify: unknown option ${arg}`);
+    }
+  }
+  return options;
 }
