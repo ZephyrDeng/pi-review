@@ -3,35 +3,47 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>pi-review screen · 零生成秒级门禁初筛报告</title>
+  <title>pi-review screen · 零生成秒级门禁架构与工程实践报告</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #07090e;
-      --card-bg: rgba(15, 23, 42, 0.68);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --card-border-glow: rgba(56, 189, 248, 0.3);
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --text-faint: #475569;
-      --cyan: #38bdf8;
-      --cyan-glow: rgba(56, 189, 248, 0.25);
-      --cyan-bg: rgba(56, 189, 248, 0.07);
-      --purple: #c084fc;
-      --purple-glow: rgba(192, 132, 252, 0.2);
-      --purple-bg: rgba(192, 132, 252, 0.06);
-      --green: #10b981;
-      --green-glow: rgba(16, 185, 129, 0.2);
-      --green-bg: rgba(16, 185, 129, 0.07);
-      --amber: #f59e0b;
-      --amber-bg: rgba(245, 158, 11, 0.08);
-      --red: #ef4444;
-      --red-glow: rgba(239, 68, 68, 0.25);
-      --red-bg: rgba(239, 68, 68, 0.08);
+      --bg: #f8fafc;
+      --bg-subtle: #f1f5f9;
+      --card-bg: #ffffff;
+      --card-border: #e2e8f0;
+      --card-border-hover: #cbd5e1;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-faint: #94a3b8;
+      
+      --brand: #0284c7;
+      --brand-light: #e0f2fe;
+      --brand-border: #bae6fd;
+      
+      --purple: #7c3aed;
+      --purple-light: #f5f3ff;
+      --purple-border: #ddd6fe;
+      
+      --green: #059669;
+      --green-light: #ecfdf5;
+      --green-border: #a7f3d0;
+      
+      --amber: #d97706;
+      --amber-light: #fffbeb;
+      --amber-border: #fde68a;
+      
+      --red: #dc2626;
+      --red-light: #fef2f2;
+      --red-border: #fecaca;
+      
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'Fira Code', monospace;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+      --shadow-card: 0 20px 25px -5px rgba(0, 0, 0, 0.03), 0 8px 10px -6px rgba(0, 0, 0, 0.02);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,20 +51,19 @@
     body {
       background-color: var(--bg);
       background-image: 
-        radial-gradient(circle at 15% 0%, rgba(56, 189, 248, 0.15), transparent 45%),
-        radial-gradient(circle at 85% 15%, rgba(192, 132, 252, 0.12), transparent 45%),
-        radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.05), transparent 60%),
-        radial-gradient(circle at 80% 90%, rgba(239, 68, 68, 0.06), transparent 50%);
+        radial-gradient(at 0% 0%, rgba(2, 132, 199, 0.04) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(124, 58, 237, 0.04) 0px, transparent 50%),
+        radial-gradient(at 50% 100%, rgba(5, 150, 105, 0.03) 0px, transparent 50%);
       color: var(--text-main);
       font-family: var(--font-sans);
       line-height: 1.6;
-      padding: 56px 24px 80px;
+      padding: 48px 24px 80px;
       -webkit-font-smoothing: antialiased;
     }
 
-    .container { max-width: 1180px; margin: 0 auto; }
+    .container { max-width: 1140px; margin: 0 auto; }
 
-    /* Pill Badges */
+    /* Top Brand Pill */
     .pill {
       display: inline-flex;
       align-items: center;
@@ -60,300 +71,318 @@
       font-size: 12px;
       font-family: var(--font-mono);
       font-weight: 600;
-      color: var(--cyan);
-      background: var(--cyan-bg);
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      padding: 5px 16px;
+      color: var(--brand);
+      background: var(--brand-light);
+      border: 1px solid var(--brand-border);
+      padding: 4px 14px;
       border-radius: 9999px;
       margin-bottom: 20px;
-      letter-spacing: 0.05em;
-      box-shadow: 0 0 20px var(--cyan-glow);
+      letter-spacing: 0.04em;
     }
 
-    /* Hero Header */
+    /* Hero Section */
     .hero {
       text-align: center;
-      margin-bottom: 56px;
+      margin-bottom: 48px;
     }
     .hero h1 {
-      font-size: 46px;
+      font-size: 44px;
       font-weight: 900;
-      letter-spacing: -0.03em;
-      line-height: 1.15;
-      margin-bottom: 18px;
+      letter-spacing: -0.035em;
+      line-height: 1.2;
+      color: var(--text-main);
+      margin-bottom: 16px;
     }
-    .hero h1 em {
-      font-style: normal;
-      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+    .hero h1 span.highlight {
+      color: var(--brand);
+      background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 30px var(--cyan-glow);
     }
     .hero-subtitle {
       font-size: 17px;
       color: var(--text-muted);
-      max-width: 820px;
+      max-width: 800px;
       margin: 0 auto;
       line-height: 1.7;
     }
 
-    /* Top Stats Grid */
-    .stats-banner {
+    /* Metric Cards Grid */
+    .metrics-grid {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
-      margin-bottom: 48px;
+      gap: 18px;
+      margin-bottom: 44px;
     }
-    @media (max-width: 900px) {
-      .stats-banner { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 500px) {
-      .stats-banner { grid-template-columns: 1fr; }
-    }
-    .stat-card {
+    @media (max-width: 900px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 550px) { .metrics-grid { grid-template-columns: 1fr; } }
+    
+    .metric-card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 18px;
-      padding: 24px 22px;
-      backdrop-filter: blur(14px);
-      box-shadow: 0 16px 36px -10px rgba(0,0,0,0.5);
+      border-radius: 14px;
+      padding: 22px 20px;
+      box-shadow: var(--shadow-sm);
       position: relative;
       overflow: hidden;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
-    .stat-card::before {
+    .metric-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--card-border-hover);
+    }
+    .metric-card::before {
       content: '';
       position: absolute;
       top: 0; left: 0; right: 0; height: 3px;
-      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+      background: var(--brand);
     }
-    .stat-card.red::before {
-      background: linear-gradient(90deg, transparent, var(--red), transparent);
-    }
-    .stat-card.green::before {
-      background: linear-gradient(90deg, transparent, var(--green), transparent);
-    }
-    .stat-card.purple::before {
-      background: linear-gradient(90deg, transparent, var(--purple), transparent);
-    }
-    .stat-tag {
-      font-size: 11px;
+    .metric-card.green::before { background: var(--green); }
+    .metric-card.purple::before { background: var(--purple); }
+    .metric-card.red::before { background: var(--red); }
+    
+    .metric-tag {
+      font-size: 11.5px;
       font-family: var(--font-mono);
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.05em;
       color: var(--text-faint);
       margin-bottom: 8px;
     }
-    .stat-val {
-      font-size: 38px;
+    .metric-val {
+      font-size: 34px;
       font-weight: 800;
       font-family: var(--font-mono);
-      line-height: 1;
-      margin-bottom: 8px;
+      line-height: 1.1;
+      margin-bottom: 6px;
+      color: var(--text-main);
     }
-    .stat-card.cyan .stat-val { color: #bae6fd; text-shadow: 0 0 20px var(--cyan-glow); }
-    .stat-card.green .stat-val { color: #a7f3d0; text-shadow: 0 0 20px var(--green-glow); }
-    .stat-card.red .stat-val { color: #fca5a5; text-shadow: 0 0 20px var(--red-glow); }
-    .stat-card.purple .stat-val { color: #e9d5ff; text-shadow: 0 0 20px var(--purple-glow); }
-    .stat-desc {
-      font-size: 12.5px;
+    .metric-desc {
+      font-size: 13px;
       color: var(--text-muted);
       line-height: 1.5;
     }
 
-    /* Section Headers */
+    /* Section Headings */
     .section-title {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 800;
       letter-spacing: -0.02em;
-      margin: 64px 0 24px;
+      margin: 56px 0 20px;
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 12px;
+      color: var(--text-main);
     }
     .section-title::after {
       content: '';
       flex: 1;
       height: 1px;
-      background: linear-gradient(90deg, var(--card-border), transparent);
+      background: var(--card-border);
     }
-    .section-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
+    .title-badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
-      background: var(--cyan-bg);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      color: var(--cyan);
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      font-size: 14px;
+      background: var(--brand-light);
+      color: var(--brand);
+      font-weight: 700;
     }
 
-    /* Dilemma Battle Box */
-    .dilemma-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 24px;
-      margin-bottom: 48px;
-    }
-    @media (max-width: 768px) {
-      .dilemma-grid { grid-template-columns: 1fr; }
-    }
-    .dilemma-card {
+    /* to-humans Engineering Mental Model Box */
+    .mental-model-card {
       background: var(--card-bg);
-      border-radius: 20px;
       border: 1px solid var(--card-border);
-      padding: 30px;
-      position: relative;
-      backdrop-filter: blur(14px);
+      border-radius: 16px;
+      padding: 32px 28px;
+      margin-bottom: 44px;
+      box-shadow: var(--shadow-sm);
     }
-    .dilemma-card.bad {
-      border-color: rgba(239, 68, 68, 0.3);
-      background: linear-gradient(180deg, rgba(30, 16, 24, 0.7) 0%, rgba(15, 23, 42, 0.6) 100%);
+    .mm-header {
+      margin-bottom: 24px;
     }
-    .dilemma-card.good {
-      border-color: rgba(56, 189, 248, 0.35);
-      background: linear-gradient(180deg, rgba(14, 32, 54, 0.7) 0%, rgba(15, 23, 42, 0.6) 100%);
-      box-shadow: 0 20px 45px -15px var(--cyan-glow);
-    }
-    .dilemma-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 18px;
-      padding-bottom: 14px;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .dilemma-title {
-      font-size: 18px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .dilemma-badge {
-      font-family: var(--font-mono);
+    .mm-tag {
       font-size: 11px;
+      font-family: var(--font-mono);
       font-weight: 700;
-      padding: 3px 10px;
-      border-radius: 6px;
+      color: var(--purple);
       text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
     }
-    .bad .dilemma-badge { background: var(--red-bg); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); }
-    .good .dilemma-badge { background: var(--cyan-bg); color: var(--cyan); border: 1px solid rgba(56,189,248,0.4); }
-    .dilemma-body {
+    .mm-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--text-main);
+      margin-bottom: 8px;
+    }
+    .mm-desc {
       font-size: 14px;
       color: var(--text-muted);
       line-height: 1.7;
-      margin-bottom: 20px;
     }
-    .dilemma-items {
-      list-style: none;
+
+    .mm-compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 24px 0;
+    }
+    @media (max-width: 768px) { .mm-compare-grid { grid-template-columns: 1fr; } }
+    
+    .mm-card {
+      background: var(--bg-subtle);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 22px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
     }
-    .dilemma-item {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 13.5px;
+    .mm-card.trad {
+      border-left: 4px solid var(--purple);
     }
-    .d-icon {
-      font-weight: 800;
-      flex-shrink: 0;
-      width: 20px;
-      height: 20px;
-      border-radius: 4px;
+    .mm-card.screen {
+      border-left: 4px solid var(--brand);
+      background: #f0f9ff;
+    }
+    .mm-card-head {
       display: flex;
+      justify-content: space-between;
       align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      margin-top: 2px;
+      margin-bottom: 12px;
     }
-    .bad .d-icon { background: rgba(239, 68, 68, 0.2); color: var(--red); }
-    .good .d-icon { background: rgba(16, 185, 129, 0.2); color: var(--green); }
+    .mm-card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .mm-card-pill {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .trad .mm-card-pill { background: var(--purple-light); color: var(--purple); border: 1px solid var(--purple-border); }
+    .screen .mm-card-pill { background: var(--brand-light); color: var(--brand); border: 1px solid var(--brand-border); }
+    
+    .mm-analogy {
+      font-size: 13.5px;
+      color: var(--text-main);
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+    .mm-list {
+      list-style: none;
+      font-size: 13px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 14px;
+      flex: 1;
+    }
+    .mm-meta-tag {
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-faint);
+    }
 
-    /* Architecture Flow Card */
-    .arch-card {
+    .mm-breakdown-box {
+      background: #fff;
+      border: 1px dashed var(--card-border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .mm-breakdown-box strong { color: var(--text-main); }
+
+    /* Architecture Flow (Light) */
+    .flow-container {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 20px;
-      padding: 36px 32px;
-      margin-bottom: 48px;
-      backdrop-filter: blur(16px);
-      box-shadow: 0 20px 48px -16px rgba(0,0,0,0.6);
+      border-radius: 16px;
+      padding: 30px;
+      margin-bottom: 44px;
+      box-shadow: var(--shadow-sm);
     }
     .flow-steps {
       display: grid;
       grid-template-columns: 1fr auto 1fr auto 1fr;
       align-items: center;
       gap: 16px;
-      margin: 28px 0;
+      margin: 20px 0 28px;
     }
-    @media (max-width: 900px) {
+    @media (max-width: 860px) {
       .flow-steps { grid-template-columns: 1fr; text-align: center; }
-      .flow-arrow { transform: rotate(90deg); margin: 8px 0; }
+      .flow-arrow { transform: rotate(90deg); margin: 6px 0; }
     }
     .flow-step {
-      background: rgba(0, 0, 0, 0.35);
+      background: var(--bg-subtle);
       border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 22px 18px;
-      position: relative;
+      border-radius: 12px;
+      padding: 20px;
     }
     .flow-step.active {
-      border-color: rgba(56, 189, 248, 0.4);
-      background: linear-gradient(180deg, rgba(56, 189, 248, 0.08) 0%, rgba(0, 0, 0, 0.4) 100%);
-      box-shadow: 0 0 24px rgba(56, 189, 248, 0.15);
+      background: #f0f9ff;
+      border-color: var(--brand-border);
+      box-shadow: 0 4px 12px -2px rgba(2, 132, 199, 0.08);
     }
-    .step-num {
-      font-family: var(--font-mono);
+    .flow-step-tag {
       font-size: 11px;
+      font-family: var(--font-mono);
       font-weight: 700;
-      color: var(--cyan);
-      letter-spacing: 0.08em;
-      margin-bottom: 6px;
+      color: var(--brand);
+      margin-bottom: 4px;
     }
-    .step-name {
+    .flow-step-title {
       font-size: 15px;
       font-weight: 700;
       color: var(--text-main);
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
-    .step-desc {
+    .flow-step-desc {
       font-size: 12.5px;
       color: var(--text-muted);
       line-height: 1.5;
     }
     .flow-arrow {
-      font-size: 20px;
-      color: var(--cyan);
-      opacity: 0.6;
+      font-size: 18px;
+      color: var(--text-faint);
     }
 
-    /* Radar Catalog Grid */
+    /* Pattern Radar Grid */
     .radar-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-      gap: 18px;
-      margin-bottom: 48px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin-bottom: 44px;
     }
     .radar-card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 14px;
-      padding: 20px;
-      transition: all 0.2s ease;
+      border-radius: 12px;
+      padding: 18px;
       display: flex;
       flex-direction: column;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.15s ease;
     }
     .radar-card:hover {
-      border-color: rgba(56, 189, 248, 0.4);
+      border-color: var(--brand-border);
       transform: translateY(-2px);
-      box-shadow: 0 12px 28px -10px rgba(56, 189, 248, 0.2);
+      box-shadow: var(--shadow-md);
     }
-    .radar-head {
+    .radar-top {
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -361,23 +390,23 @@
     }
     .radar-id {
       font-family: var(--font-mono);
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 700;
-      color: #7dd3fc;
+      color: var(--brand);
     }
-    .radar-sev {
+    .radar-badge {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: 10.5px;
       font-weight: 700;
       padding: 2px 7px;
       border-radius: 4px;
       text-transform: uppercase;
     }
-    .radar-sev.critical { background: var(--red-bg); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .radar-sev.major { background: var(--amber-bg); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
-    .radar-sev.minor { background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.2); }
+    .radar-badge.critical { background: var(--red-light); color: var(--red); border: 1px solid var(--red-border); }
+    .radar-badge.major { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber-border); }
+    .radar-badge.minor { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--card-border); }
     
-    .radar-title {
+    .radar-name {
       font-size: 14px;
       font-weight: 700;
       color: var(--text-main);
@@ -390,216 +419,145 @@
       margin-bottom: 12px;
       flex: 1;
     }
-    .radar-snippet {
+    .radar-code {
       font-family: var(--font-mono);
-      font-size: 11.5px;
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      padding: 8px 10px;
+      font-size: 11px;
+      background: #0f172a;
+      color: #7dd3fc;
+      padding: 7px 10px;
       border-radius: 6px;
-      color: #93c5fd;
       overflow-x: auto;
       white-space: pre;
     }
 
-    /* Comparison Table Card */
+    /* Tables */
     .table-card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 18px;
+      border-radius: 14px;
       overflow: hidden;
-      margin-bottom: 48px;
-      backdrop-filter: blur(14px);
+      margin-bottom: 44px;
+      box-shadow: var(--shadow-sm);
     }
-    table.data-table {
+    table.spec-table {
       width: 100%;
       border-collapse: collapse;
       text-align: left;
     }
-    table.data-table th {
-      padding: 16px 20px;
-      font-size: 12.5px;
+    table.spec-table th {
+      padding: 14px 18px;
+      font-size: 12px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-faint);
-      background: rgba(255, 255, 255, 0.02);
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      background: var(--bg-subtle);
       border-bottom: 1px solid var(--card-border);
     }
-    table.data-table td {
-      padding: 16px 20px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      font-size: 14px;
+    table.spec-table td {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 13.5px;
+      color: var(--text-main);
     }
-    table.data-table tr:last-child td { border-bottom: none; }
-    table.data-table tr:hover td { background: rgba(255, 255, 255, 0.02); }
+    table.spec-table tr:last-child td { border-bottom: none; }
+    table.spec-table tr:hover td { background: #f8fafc; }
 
-    .tag-highlight {
+    .tag-badge {
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 700;
       padding: 3px 8px;
       border-radius: 4px;
     }
-    .tag-highlight.fast { background: var(--green-bg); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
-    .tag-highlight.slow { background: var(--red-bg); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
-    .tag-highlight.normal { background: rgba(255,255,255,0.05); color: var(--text-muted); }
+    .tag-badge.fast { background: var(--green-light); color: var(--green); border: 1px solid var(--green-border); }
+    .tag-badge.slow { background: var(--bg-subtle); color: var(--text-muted); border: 1px solid var(--card-border); }
+    .tag-badge.block { background: var(--red-light); color: var(--red); border: 1px solid var(--red-border); }
 
-    /* Scenarios Cards */
+    /* Scenario Cards (Light) */
     .scenario-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 20px;
-      margin-bottom: 48px;
+      gap: 18px;
+      margin-bottom: 44px;
     }
     .scenario-card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 26px;
+      border-radius: 14px;
+      padding: 24px;
       display: flex;
       flex-direction: column;
-      position: relative;
+      box-shadow: var(--shadow-sm);
     }
-    .scenario-tag {
+    .scenario-num {
       font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 700;
-      color: var(--cyan);
+      color: var(--brand);
       text-transform: uppercase;
-      margin-bottom: 8px;
-      letter-spacing: 0.06em;
+      margin-bottom: 6px;
     }
     .scenario-name {
-      font-size: 17px;
-      font-weight: 700;
+      font-size: 16px;
+      font-weight: 800;
       color: var(--text-main);
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .scenario-desc {
-      font-size: 13.5px;
+      font-size: 13px;
       color: var(--text-muted);
       line-height: 1.6;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       flex: 1;
     }
     .scenario-code {
-      background: rgba(0, 0, 0, 0.45);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: #0f172a;
       border-radius: 8px;
       padding: 12px 14px;
       font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: 11.5px;
       color: #93c5fd;
       line-height: 1.5;
       overflow-x: auto;
     }
 
-    /* Decision Tree Banner */
-    .decision-banner {
-      background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(192, 132, 252, 0.08) 100%);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 20px;
-      padding: 36px;
-      margin-bottom: 48px;
-      backdrop-filter: blur(16px);
+    /* Decision Flow Banner (Light) */
+    .decision-card {
+      background: linear-gradient(135deg, #f0f9ff 0%, #f5f3ff 100%);
+      border: 1px solid var(--brand-border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      margin-bottom: 44px;
+      box-shadow: var(--shadow-sm);
     }
-    .tree-title {
-      font-size: 20px;
+    .decision-title {
+      font-size: 19px;
       font-weight: 800;
-      margin-bottom: 12px;
+      color: var(--text-main);
+      margin-bottom: 8px;
       display: flex;
       align-items: center;
       gap: 10px;
     }
-    .tree-desc {
-      font-size: 14px;
+    .decision-desc {
+      font-size: 13.5px;
       color: var(--text-muted);
       line-height: 1.6;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
-    .tree-box {
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 20px 24px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.8;
-      color: #cbd5e1;
-      overflow-x: auto;
-    }
-
-    /* ELI5 Banner */
-    .eli5-banner {
-      background: linear-gradient(180deg, rgba(15, 23, 42, 0.8) 0%, rgba(10, 16, 30, 0.9) 100%);
-      border: 1px solid var(--card-border-glow);
-      border-radius: 22px;
-      padding: 36px 32px;
-      margin-bottom: 56px;
-      box-shadow: 0 20px 50px -15px rgba(56, 189, 248, 0.2);
-    }
-    .eli5-header { text-align: center; margin-bottom: 30px; }
-    .eli5-header h2 em { font-style: normal; color: var(--cyan); text-shadow: 0 0 20px var(--cyan-glow); }
-    .eli5-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 24px;
-      margin-bottom: 24px;
-    }
-    @media (max-width: 768px) { .eli5-grid { grid-template-columns: 1fr; } }
-    .eli5-card {
-      background: rgba(0, 0, 0, 0.35);
+    .decision-box {
+      background: #ffffff;
       border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 26px;
-      display: flex;
-      flex-direction: column;
-    }
-    .eli5-card.trad { border-color: rgba(192, 132, 252, 0.3); }
-    .eli5-card.screen {
-      border-color: rgba(56, 189, 248, 0.45);
-      background: linear-gradient(180deg, rgba(56, 189, 248, 0.06) 0%, rgba(0, 0, 0, 0.4) 100%);
-      box-shadow: 0 10px 30px -10px var(--cyan-glow);
-    }
-    .eli5-badge {
-      align-self: flex-start;
+      border-radius: 10px;
+      padding: 18px 22px;
       font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      padding: 3px 10px;
-      border-radius: 6px;
-      margin-bottom: 14px;
-      text-transform: uppercase;
-    }
-    .trad .eli5-badge { background: var(--purple-bg); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.3); }
-    .screen .eli5-badge { background: var(--cyan-bg); color: var(--cyan); border: 1px solid rgba(56, 189, 248, 0.4); }
-    .eli5-emoji { font-size: 38px; margin-bottom: 12px; }
-    .eli5-title { font-size: 17px; font-weight: 800; color: var(--text-main); margin-bottom: 10px; }
-    .eli5-analogy { font-size: 13.5px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.6; }
-    .eli5-points { list-style: none; font-size: 13px; color: var(--text-muted); display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; flex: 1; }
-    .eli5-footer {
       font-size: 12.5px;
-      font-weight: 600;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: rgba(255,255,255,0.03);
-      color: var(--text-faint);
+      line-height: 1.8;
+      color: var(--text-main);
+      overflow-x: auto;
+      box-shadow: var(--shadow-sm);
     }
-    .eli5-footer.best { background: rgba(56, 189, 248, 0.1); color: #7dd3fc; }
-    .eli5-secret {
-      background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-      border-radius: 14px;
-      padding: 20px 24px;
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 18px;
-      align-items: center;
-    }
-    .secret-icon { font-size: 32px; }
-    .secret-title { font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
-    .secret-desc { font-size: 13px; color: #cbd5e1; line-height: 1.6; }
 
     footer {
       text-align: center;
@@ -617,235 +575,172 @@
   <!-- Header -->
   <header class="hero">
     <div class="pill">
-      <span>⚡️ SUB-SECOND ZERO-GENERATION GATE</span>
+      <span>⚡️ SUB-SECOND ZERO-GENERATION GATEWAY</span>
       <span>•</span>
       <span>pi-review v0.16.1</span>
     </div>
     <h1>
-      <em>pi-review screen</em>
-      <br>极速门禁初筛深度报告
+      <em>pi-review screen</em><br>
+      <span class="highlight">零生成秒级门禁架构</span> 与工程实践
     </h1>
     <p class="hero-subtitle">
-      突破大语言模型 30s~200s 的生成延迟下限。通过<strong>确定性声明语法切片</strong>与 <strong>TypeSafe Jev 单次轻量概率决策</strong>，在 1.0 秒内完成高危代码缺陷拦截，打造工程流水线的第一道「极速安检门」。
+      突破传统 LLM 审查 30s~200s 的生成延迟下限。通过<strong>确定性声明语法切片</strong>与 <strong>TypeSafe Jev 单次轻量概率决策</strong>，在 1.0 秒内完成高危代码缺陷拦截，打造工程流水线的第一道「极速旁路安检门」。
     </p>
   </header>
 
-  <!-- Hero Top Stats -->
-  <div class="stats-banner">
-    <div class="stat-card cyan">
-      <div class="stat-tag">End-to-End Latency</div>
-      <div class="stat-val">1.03 s</div>
-      <div class="stat-desc">单次完整扫描 106 行服务，端到端耗时突破至 1 秒以内</div>
+  <!-- Top Metrics -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-tag">端到端延迟 (Latency)</div>
+      <div class="metric-val">1.03 s</div>
+      <div class="metric-desc">106 行服务单次完整扫描，响应压缩至 1 秒以内</div>
     </div>
-    <div class="stat-card green">
-      <div class="stat-tag">LLM Generation on Path</div>
-      <div class="stat-val">0</div>
-      <div class="stat-desc">剔除长篇散文生成，关键阻塞决策全程由 typed 概率驱动</div>
+    <div class="metric-card green">
+      <div class="metric-tag">关键路径生成 Token</div>
+      <div class="metric-val">0</div>
+      <div class="metric-desc">完全剥离大模型长篇散文推理，阻断决策纯概率化</div>
     </div>
-    <div class="stat-card purple">
-      <div class="stat-tag">Single Call Questions</div>
-      <div class="stat-val">108 题</div>
-      <div class="stat-desc">12 个声明 Hunk 并行微决策，单次 HTTP 往返瞬间归档</div>
+    <div class="metric-card purple">
+      <div class="metric-tag">单次判定题量</div>
+      <div class="metric-val">108 题</div>
+      <div class="metric-desc">12 个声明切片并行微决策，单次 HTTP 往返瞬间归档</div>
     </div>
-    <div class="stat-card red">
-      <div class="stat-tag">Defect Recall</div>
-      <div class="stat-val">100%</div>
-      <div class="stat-desc">SQL 注入、异步丢失、循环越界等 5 大生产缺陷全数捕获</div>
-    </div>
-  </div>
-
-  <!-- ELI5 Section -->
-  <div class="eli5-banner">
-    <div class="eli5-header">
-      <div class="pill" style="margin-bottom: 10px;">💡 ELI5 · 像 5 岁小孩一样秒懂</div>
-      <h2 style="font-size: 28px; font-weight: 900; margin-bottom: 8px;">
-        什么是 <em>screen</em>？两个死比喻彻底讲透
-      </h2>
-      <p style="color: var(--text-muted); font-size: 15px;">
-        如果把开发者写代码比作去高铁站坐车，AI 审查其实分成了两种完全不同的角色：
-      </p>
-    </div>
-
-    <div class="eli5-grid">
-      <!-- Metaphor 1 -->
-      <div class="eli5-card trad">
-        <div class="eli5-badge">传统 AI 审查 · 深度会诊</div>
-        <div class="eli5-emoji">👨‍⚕️ 🩺 📜</div>
-        <div class="eli5-title">3 位老中医坐诊，手写 800 字调理报告</div>
-        <div class="eli5-analogy">
-          <strong>场景：</strong>你只想刷卡进站，门口却强制安排了 3 位资深老中医给你把脉。
-        </div>
-        <ul class="eli5-points">
-          <li>• 每个人要闭目思考 40 秒，仔细看你的面相和舌苔；</li>
-          <li>• 每个人拿毛笔工整写出 800 字的就医、起居与饮食建议；</li>
-          <li>• <strong>结果：</strong>诊断极深极准，但排队排了 2 小时，车早开走了（<strong>Git Push 超时卡死</strong>）。</li>
-        </ul>
-        <div class="eli5-footer">适合：重大疑难杂症（核心架构 PR 深度会诊）</div>
-      </div>
-
-      <!-- Metaphor 2 -->
-      <div class="eli5-card screen">
-        <div class="eli5-badge best">pi-review screen · 秒级安检</div>
-        <div class="eli5-emoji">🚇 🎒 🚨</div>
-        <div class="eli5-title">进站口的行李 X 光安检机</div>
-        <div class="eli5-analogy">
-          <strong>场景：</strong>行李（代码）滑过履带，传感器 1.0 秒钟扫一下透视图。
-        </div>
-        <ul class="eli5-points">
-          <li>• 它不给你写养生建议，它只看有没有带管制刀具（SQL 注入、数组越界）；</li>
-          <li>• 扫到危险品瞬间 <strong>「嘀嘀嘀」</strong> 报警把你拦下，红灯标出第几行；</li>
-          <li>• 没带危险品 <strong>「滴」</strong> 一声 1.0 秒直接放行（<strong>零等待丝滑进站</strong>）。</li>
-        </ul>
-        <div class="eli5-footer best">适合：日常刷卡进站（Git Hook / CI 极速门禁）</div>
-      </div>
-    </div>
-
-    <!-- The Secret Box -->
-    <div class="eli5-secret">
-      <div class="secret-icon">⚡️</div>
-      <div>
-        <div class="secret-title">为什么 screen 能从 80 秒压缩到 1.0 秒？</div>
-        <div class="secret-desc">
-          <strong>秘密在于「不写大作文，改刷机读卡」</strong>：<br>
-          传统审查最慢的是大模型现场逐字生成 1000 字长篇散文；<br>
-          <code>screen</code> 是把代码切成小块，在 1 秒内用光学机读卡连刷 108 道判断题（有没有越界？有没有漏 await？）。只拿概率评分，在本地直接查表贴标签，<strong>把耗时最长的大模型写作文环节彻底砍掉了</strong>。
-        </div>
-      </div>
+    <div class="metric-card red">
+      <div class="metric-tag">植入缺陷召回率</div>
+      <div class="metric-val">100%</div>
+      <div class="metric-desc">SQL 注入、悬空异步、循环越界等 5 大生产缺陷全命中</div>
     </div>
   </div>
 
-  <!-- Section 1: The Dilemma -->
+  <!-- to-humans Engineering Mental Model -->
   <div class="section-title">
-    <span class="section-icon">⚔️</span>
-    <span>核心矛盾：AI 审查深度 vs 工程流水线延迟</span>
+    <span class="title-badge">🧠</span>
+    <span>工程隐喻：如何向技术团队解释 screen 的定位？</span>
   </div>
 
-  <div class="dilemma-grid">
-    <div class="dilemma-card bad">
-      <div class="dilemma-head">
-        <div class="dilemma-title">
-          <span>传统 LLM Code Review</span>
-        </div>
-        <span class="dilemma-badge">30s ~ 200s+ 延迟</span>
+  <div class="mental-model-card">
+    <div class="mm-header">
+      <div class="mm-tag">Engineering Mental Model · to-humans</div>
+      <div class="mm-title">L4 网络快速包过滤 vs L7 深度报文应用审计</div>
+      <div class="mm-desc">
+        在工业级高并发网关中，没有任何系统会对全量流量直接拉起深度 L7 报文重组与语义审计。工程系统的标准解法永远是<strong>分层漏斗（Layered Funnel）</strong>：
       </div>
-      <div class="dilemma-body">
-        适合 PR 深度专家会诊，但由于无法逾越「阅读思考 + 逐字生成 Markdown」的物理下限，直接挂在 Git 提交流水线中会造成灾难性阻塞。
-      </div>
-      <ul class="dilemma-items">
-        <li class="dilemma-item">
-          <span class="d-icon">✕</span>
-          <span><strong>破坏开发心流</strong>：提交代码需干等一分多钟，导致开发者倾向于使用 <code>--no-verify</code> 跳过检查。</span>
-        </li>
-        <li class="dilemma-item">
-          <span class="d-icon">✕</span>
-          <span><strong>吞噬 CI 队列并发</strong>：简单的越界拼写错误也要拉起昂贵的大模型推理，耗尽云端 Runner 算力。</span>
-        </li>
-        <li class="dilemma-item">
-          <span class="d-icon">✕</span>
-          <span><strong>修辞冗余</strong>：开发者在门禁时刻只需要知道「第 43 行越界」，不需要看一段 300 字的散文论证。</span>
-        </li>
-      </ul>
     </div>
 
-    <div class="dilemma-card good">
-      <div class="dilemma-head">
-        <div class="dilemma-title">
-          <span>pi-review screen</span>
+    <div class="mm-compare-grid">
+      <!-- Traditional Review -->
+      <div class="mm-card trad">
+        <div class="mm-card-head">
+          <span class="mm-card-title">传统 LLM 审查 (review / panel)</span>
+          <span class="mm-card-pill">L7 深度语义审计</span>
         </div>
-        <span class="dilemma-badge">1.0 秒瞬间拦截</span>
+        <div class="mm-analogy">
+          <strong>类比：</strong>对每一个入站 TCP 请求做全量上下文追踪、AST 跨文件还原、调用链推导，并生成 1000 字的架构诊断日志。
+        </div>
+        <ul class="mm-list">
+          <li>• <strong>耗时下限：</strong>受大模型逐字吐 Token 物理限制，耗时锁定在 30s ~ 80s+；</li>
+          <li>• <strong>配额开销：</strong>消耗昂贵的主模型 Token 上下文与 API 并发额度；</li>
+          <li>• <strong>工程结果：</strong>诊断极深，但挂在 Git Hook 里会导致开发者频繁使用 <code>--no-verify</code> 绕过。</li>
+        </ul>
+        <div class="mm-meta-tag">定位：疑难杂症攻坚、PR 合并最终专家会诊</div>
       </div>
-      <div class="dilemma-body">
-        专门定位为「极速安检门」。跳过大模型散文生成，采用声明切片与单次 Jev 概率决策，在 1 秒内给出精准的二值拦截信号。
+
+      <!-- Screen -->
+      <div class="mm-card screen">
+        <div class="mm-card-head">
+          <span class="mm-card-title">pi-review screen</span>
+          <span class="mm-card-pill">L4 极速特征旁路过滤</span>
+        </div>
+        <div class="mm-analogy">
+          <strong>类比：</strong>在网卡驱动层部署高性能 Syn-cookie 与硬件 ACL 规则，1.0 秒扫描数据包特征，发现异常立即 RST 阻断。
+        </div>
+        <ul class="mm-list">
+          <li>• <strong>零散文生成：</strong>不写解释性作文，只做 <code>p &gt; 0.6</code> 的二值概率判断；</li>
+          <li>• <strong>零评委负担：</strong>走独立的 System One 极速旁路，0 消耗主模型 Token；</li>
+          <li>• <strong>工程结果：</strong>耗时 1.0 秒，开发者毫无卡顿感知，脏代码根本出不了本地机器。</li>
+        </ul>
+        <div class="mm-meta-tag">定位：Git Pre-push 钩子、CI/CD 极速 Fail-Fast 哨卡</div>
       </div>
-      <ul class="dilemma-items">
-        <li class="dilemma-item">
-          <span class="d-icon">✓</span>
-          <span><strong>零感知推入 Git Hook</strong>：1.0 秒执行完毕，完美契合 <code>pre-commit</code> / <code>pre-push</code> 的交互要求。</span>
-        </li>
-        <li class="dilemma-item">
-          <span class="d-icon">✓</span>
-          <span><strong>零消耗评委 Token 额度</strong>：走专属 System One 通道，不占用主评委上下文窗口与并发配额。</span>
-        </li>
-        <li class="dilemma-item">
-          <span class="d-icon">✓</span>
-          <span><strong>精准标准化组装</strong>：行号来自切片器，修复指南来自专家模板，直奔主题、即刻修改。</span>
-        </li>
-      </ul>
+    </div>
+
+    <div class="mm-breakdown-box">
+      <strong>⚠️ 隐喻的边界（Where the metaphor breaks down）：</strong><br>
+      <code>screen</code> 并不是简单的正则匹配或传统 AST Linter。静态规则很难捕获像 <code>float_equality</code>（复杂的浮点判等上下文）或 <code>cache_aliasing</code>（隐式指针可变共享）这种带有语义倾向的深层缺陷。<code>screen</code> 背后是具备代码理解能力的 TypeSafe System One 模型，它拥有 LLM 级的语义穿透力，但通过限制输出格式规避了文本生成的延迟惩罚。
     </div>
   </div>
 
-  <!-- Section 2: Architecture -->
+  <!-- Three-Stage Architecture -->
   <div class="section-title">
-    <span class="section-icon">📐</span>
-    <span>三步零生成架构：从代码到门禁</span>
+    <span class="title-badge">📐</span>
+    <span>三步零生成架构：从源文件到 Exit Code</span>
   </div>
 
-  <div class="arch-card">
-    <div style="font-size: 15px; color: var(--text-muted); margin-bottom: 12px;">
-      关键路径上没有任何 LLM 散文生成，全流程在本地计算与单次轻量 HTTP 决策之间穿透：
+  <div class="flow-container">
+    <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 8px;">
+      去除大模型逐字输出的瓶颈，全流程在本地内存计算与单次 HTTP 概率探测之间流水线流转：
     </div>
 
     <div class="flow-steps">
       <div class="flow-step">
-        <div class="step-num">STAGE 01 · 本地毫秒级</div>
-        <div class="step-name">确定性语法切片</div>
-        <div class="step-desc">本地切片器按 class / method / interface 边界切分出独立 Hunk，锁定物理行号。</div>
+        <div class="flow-step-tag">STAGE 01 · 本地毫秒级</div>
+        <div class="flow-step-title">声明式语法切片</div>
+        <div class="flow-step-desc">本地切片器按 class / method / interface 边界将源码切分成独立的逻辑代码块 (Hunk)，锁定物理起始行号。</div>
       </div>
       <div class="flow-arrow">➔</div>
       <div class="flow-step active">
-        <div class="step-num">STAGE 02 · 1.0 秒决策</div>
-        <div class="step-name">单次 Jev 并行微决策</div>
-        <div class="step-desc">单次调用向 TypeSafe Jev 发送 108 道判定题（兜底通用题 + 8 大模式题），瞬时返回概率向量 P。</div>
+        <div class="flow-step-tag">STAGE 02 · 1.0 秒网关</div>
+        <div class="flow-step-title">单次 Jev 并行微决策</div>
+        <div class="flow-step-desc">单次 HTTP 请求向 TypeSafe Jev 发送 108 道判定题（兜底通用题 + 8 大模式题），并行返回各模式置信概率向量 P。</div>
       </div>
       <div class="flow-arrow">➔</div>
       <div class="flow-step">
-        <div class="step-num">STAGE 03 · 本地毫秒级</div>
-        <div class="step-name">模板装配与门禁判定</div>
-        <div class="step-desc">P ≥ 0.6 触发模式模板组装 Finding，存在高危缺陷立即 exit 1 阻断，干净则 exit 0。</div>
+        <div class="flow-step-tag">STAGE 03 · 本地毫秒级</div>
+        <div class="flow-step-title">查表装配与门禁阻断</div>
+        <div class="flow-step-desc">概率 p ≥ 0.6 触发对应缺陷模式的标准修复模板，组装 Finding。发现高危缺陷立即以 exit 1 阻断。</div>
       </div>
     </div>
 
     <!-- Mapping Table -->
-    <div style="margin-top: 28px;">
-      <div style="font-size: 14px; font-weight: 700; color: var(--text-main); margin-bottom: 12px;">ReviewFinding 各字段产生机制清单：</div>
-      <table class="data-table" style="background: rgba(0,0,0,0.25); border-radius: 10px;">
+    <div style="margin-top: 24px;">
+      <div style="font-size: 13.5px; font-weight: 700; color: var(--text-main); margin-bottom: 10px;">ReviewFinding 各字段解构清单：</div>
+      <table class="spec-table" style="background: #ffffff; border: 1px solid var(--card-border); border-radius: 8px;">
         <thead>
           <tr>
-            <th>Finding 字段</th>
+            <th>字段</th>
             <th>产出源</th>
-            <th>机制说明</th>
-            <th>耗时贡献</th>
+            <th>工程机制</th>
+            <th>延迟贡献</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><code>id</code>, <code>path</code>, <code>location</code></td>
             <td><strong>本地语法切片器</strong></td>
-            <td>确定性解析函数/类起始与结束行号</td>
+            <td>确定性解析类/函数起始与结束行号</td>
             <td>&lt; 1 ms</td>
           </tr>
           <tr>
             <td><code>actionable</code></td>
             <td><strong>Jev 概率阈值</strong></td>
-            <td>Jev 返回缺陷概率 $p \ge 0.6$ 自动标记为 true</td>
+            <td>缺陷置信度 $p \ge 0.6$ 自动置为 true</td>
             <td>0 ms</td>
           </tr>
           <tr>
             <td><code>severity</code>, <code>summary</code></td>
-            <td><strong>内置缺陷模式目录</strong></td>
-            <td>命中特定模式时直接映射专家级标准描述</td>
+            <td><strong>缺陷模式目录</strong></td>
+            <td>命中模式后查表映射专家级标准摘要</td>
             <td>&lt; 1 ms</td>
           </tr>
           <tr>
             <td><code>recommendation</code></td>
-            <td><strong>内置缺陷模式目录</strong></td>
+            <td><strong>缺陷模式目录</strong></td>
             <td>查表返回标准的行业防御性修复代码模板</td>
             <td>&lt; 1 ms</td>
           </tr>
           <tr>
             <td><code>details</code> (Evidence)</td>
             <td><strong>上下文轻量拼装</strong></td>
-            <td>命中的模式标识 + 对应代码块行号摘要</td>
+            <td>命中的模式标识 + 对应代码块行号上下文</td>
             <td>&lt; 1 ms</td>
           </tr>
         </tbody>
@@ -853,124 +748,124 @@
     </div>
   </div>
 
-  <!-- Section 3: Radar Patterns -->
+  <!-- Pattern Radar Catalog -->
   <div class="section-title">
-    <span class="section-icon">🎯</span>
-    <span>内置 8 大高危代码缺陷探测雷达</span>
+    <span class="title-badge">🎯</span>
+    <span>内置 8 大高频代码缺陷探测雷达</span>
   </div>
 
   <div class="radar-grid">
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">off_by_one_loop</span>
-        <span class="radar-sev critical">Critical</span>
+        <span class="radar-badge critical">Critical</span>
       </div>
-      <div class="radar-title">循环下标越界读取</div>
-      <div class="radar-desc">循环条件使用 <code>i &lt;= length</code> 导致末次访问 <code>undefined</code> 触发运行时崩溃。</div>
-      <div class="radar-snippet">for (let i = 0; i &lt;= items.length; i++)</div>
+      <div class="radar-name">循环越界访问</div>
+      <div class="radar-desc">循环条件使用 <code>i &lt;= length</code> 导致末次访问 <code>undefined</code> 触发运行时 Crash。</div>
+      <div class="radar-code">for (let i = 0; i &lt;= items.length; i++)</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">unawaited_async</span>
-        <span class="radar-sev critical">Critical</span>
+        <span class="radar-badge critical">Critical</span>
       </div>
-      <div class="radar-title">异步调用丢失 await</div>
-      <div class="radar-desc">数据库写入未挂起等待，导致未捕获拒绝以及邮件在落库前提前发出的时序错乱。</div>
-      <div class="radar-snippet">this.db.query("INSERT INTO ...") // no await</div>
+      <div class="radar-name">异步落库漏 await</div>
+      <div class="radar-desc">数据库插入未等待 Promise，导致未捕获拒绝以及对外通知在落库前提前触发。</div>
+      <div class="radar-code">this.db.query("INSERT INTO ...") // 悬空</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">sql_injection</span>
-        <span class="radar-sev critical">Critical</span>
+        <span class="radar-badge critical">Critical</span>
       </div>
-      <div class="radar-title">字符串拼接 SQL 注入</div>
-      <div class="radar-desc">在查询中直接使用模板字符串插值拼接未经清洗的参数，造成注入漏洞。</div>
-      <div class="radar-snippet">`SELECT * WHERE id = '${customerId}'`</div>
+      <div class="radar-name">模板字符串拼接 SQL</div>
+      <div class="radar-desc">在查询语句中直接使用字符串插值拼接未经清洗的参数，造成高危 SQL 注入。</div>
+      <div class="radar-code">`SELECT * WHERE id = '${customerId}'`</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">slice_off_by_one</span>
-        <span class="radar-sev major">Major</span>
+        <span class="radar-badge major">Major</span>
       </div>
-      <div class="radar-title">切片越界截断丢数据</div>
-      <div class="radar-desc"><code>slice(start, end - 1)</code> 对本身非包含的 end 多减了 1，导致分页末位元素永久丢失。</div>
-      <div class="radar-snippet">return items.slice(start, end - 1);</div>
+      <div class="radar-name">分页切片边界偏移</div>
+      <div class="radar-desc"><code>slice(start, end - 1)</code> 对本身非包含的 end 多减 1，导致分页末位元素永久丢失。</div>
+      <div class="radar-code">return items.slice(start, end - 1);</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">float_equality</span>
-        <span class="radar-sev major">Major</span>
+        <span class="radar-badge major">Major</span>
       </div>
-      <div class="radar-title">浮点精确判等异常</div>
-      <div class="radar-desc">在循环分支中对累计金额做 <code>=== 100.0</code> 判等，受精度影响导致提早异常中断。</div>
-      <div class="radar-snippet">if (total === 100.0) return total;</div>
+      <div class="radar-name">浮点数直接严格判等</div>
+      <div class="radar-desc">在循环中对累加浮点数使用 <code>=== 100.0</code>，受 IEEE 754 精度影响导致提前异常中断。</div>
+      <div class="radar-code">if (total === 100.0) return total;</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">float_money</span>
-        <span class="radar-sev major">Major</span>
+        <span class="radar-badge major">Major</span>
       </div>
-      <div class="radar-title">浮点数直接累加货币</div>
-      <div class="radar-desc">直接使用浮点数做交易金额累加，随着流水规模增长产生分厘账目对账故障。</div>
-      <div class="radar-snippet">total += order.total; // float</div>
+      <div class="radar-name">浮点数直接累加货币</div>
+      <div class="radar-desc">直接使用浮点数做交易金额累加，随着订单量增长产生对账分厘误差。</div>
+      <div class="radar-code">total += order.total; // 浮点累加</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">cache_aliasing</span>
-        <span class="radar-sev minor">Minor</span>
+        <span class="radar-badge minor">Minor</span>
       </div>
-      <div class="radar-title">缓存共享可变引用</div>
+      <div class="radar-name">缓存共享可变引用</div>
       <div class="radar-desc">从内存 Map 取出的对象未做深浅拷贝直接修改，导致调用方脏写与状态分裂。</div>
-      <div class="radar-snippet">order.status = "shipped"; cache.set(id, order);</div>
+      <div class="radar-code">order.status = "shipped"; cache.set(id, order);</div>
     </div>
 
     <div class="radar-card">
-      <div class="radar-head">
+      <div class="radar-top">
         <span class="radar-id">missing_validation</span>
-        <span class="radar-sev minor">Minor</span>
+        <span class="radar-badge minor">Minor</span>
       </div>
-      <div class="radar-title">边界缺乏防御性校验</div>
-      <div class="radar-desc">信任边界对空数组、负数、未定义入参不做前置防御，异常穿透至深层引发 Crash。</div>
-      <div class="radar-snippet">placeOrder(id, items) // no validation</div>
+      <div class="radar-name">边界缺乏入参防御</div>
+      <div class="radar-desc">公共接口对空数组、负数、未定义入参不做前置防御校验，异常穿透至深层。</div>
+      <div class="radar-code">placeOrder(id, items) // 无入参守卫</div>
     </div>
   </div>
 
-  <!-- Section 4: Benchmark Comparison -->
+  <!-- Benchmark -->
   <div class="section-title">
-    <span class="section-icon">📊</span>
+    <span class="title-badge">📊</span>
     <span>生产靶场实测权威对比（106 行真实服务）</span>
   </div>
 
   <div class="table-card">
-    <table class="data-table">
+    <table class="spec-table">
       <thead>
         <tr>
           <th>模式 / 方案</th>
           <th>端到端耗时</th>
-          <th>耗时对比</th>
-          <th>门禁决策</th>
-          <th>缺陷召回</th>
-          <th>适用定位</th>
+          <th>提速倍率</th>
+          <th>门禁结论</th>
+          <th>缺陷召回率</th>
+          <th>推荐场景</th>
         </tr>
       </thead>
       <tbody>
-        <tr style="background: rgba(56, 189, 248, 0.05);">
+        <tr style="background: #f0f9ff;">
           <td><strong><code>pi-review screen</code></strong></td>
-          <td><span class="tag-highlight fast">1.03 秒</span></td>
-          <td><span style="color:#34d399; font-weight:700;">1.0x (极速基准)</span></td>
-          <td><span class="tag-highlight slow">Exit 1 (阻断)</span></td>
+          <td><span class="tag-badge fast">1.03 秒</span></td>
+          <td><strong style="color:var(--green);">1.0x (基准)</strong></td>
+          <td><span class="tag-badge block">Exit 1 (阻断)</span></td>
           <td><strong>100% (10/10)</strong></td>
-          <td><strong>Git Hook / PR 极速安检门</strong></td>
+          <td><strong>Git Hook / PR 极速安检</strong></td>
         </tr>
         <tr>
           <td>单评委审查 (Gemini 3.8 Flash)</td>
-          <td><span class="tag-highlight normal">78.1 秒</span></td>
+          <td><span class="tag-badge slow">78.1 秒</span></td>
           <td>慢 75.8 倍</td>
           <td>Exit 1 (阻断)</td>
           <td>100% (8/8)</td>
@@ -978,7 +873,7 @@
         </tr>
         <tr>
           <td>3 评委共识面板 (混合编队)</td>
-          <td><span class="tag-highlight normal">89.0 秒</span></td>
+          <td><span class="tag-badge slow">89.0 秒</span></td>
           <td>慢 86.4 倍</td>
           <td>Exit 1 (阻断)</td>
           <td>100% (9/9)</td>
@@ -986,7 +881,7 @@
         </tr>
         <tr>
           <td>3 评委 2 轮 Loop 复查</td>
-          <td><span class="tag-highlight normal">71.3 秒</span></td>
+          <td><span class="tag-badge slow">71.3 秒</span></td>
           <td>慢 69.2 倍</td>
           <td>Exit 1 (阻断)</td>
           <td>100% (7/7)</td>
@@ -996,24 +891,24 @@
     </table>
   </div>
 
-  <!-- Section 5: Scenarios -->
+  <!-- Scenarios -->
   <div class="section-title">
-    <span class="section-icon">🚀</span>
+    <span class="title-badge">🚀</span>
     <span>四大工程落地场景</span>
   </div>
 
   <div class="scenario-grid">
     <div class="scenario-card">
-      <div class="scenario-tag">SCENARIO 01</div>
+      <div class="scenario-num">SCENARIO 01</div>
       <div class="scenario-name">Git 本地零感知推送拦截</div>
-      <div class="scenario-desc">在开发者执行 <code>git push</code> 时，以 1 秒内的心流体验秒级拦截越界、注入等低级错误，脏代码绝不出本地机器。</div>
+      <div class="scenario-desc">在开发者执行 <code>git push</code> 时，以 1 秒内的极速体验秒级拦截越界、注入等低级错误，脏代码绝不出本地机器。</div>
       <div class="scenario-code"># .husky/pre-push
 STAGED=$(git diff --name-only origin/main...HEAD)
 pi-review screen $STAGED || exit 1</div>
     </div>
 
     <div class="scenario-card">
-      <div class="scenario-tag">SCENARIO 02</div>
+      <div class="scenario-num">SCENARIO 02</div>
       <div class="scenario-name">CI/CD 差异化两段式门禁</div>
       <div class="scenario-desc">在 GitHub Actions 中作为 Stage 1 运行。1 秒内快速打回有问题的 PR，完全不用等待后面数分钟的构建镜像与全量单测。</div>
       <div class="scenario-code"># .github/workflows/ci.yml
@@ -1022,7 +917,7 @@ pi-review screen $STAGED || exit 1</div>
     </div>
 
     <div class="scenario-card">
-      <div class="scenario-tag">SCENARIO 03</div>
+      <div class="scenario-num">SCENARIO 03</div>
       <div class="scenario-name">Monorepo 变更大仓前置分诊</div>
       <div class="scenario-desc">面对同时改动几十个模块的巨大提交，先用 <code>screen</code> 进行极速扫描，仅将亮红灯的核心模块交由大模型会诊，节省 90% 审查开销。</div>
       <div class="scenario-code">pi-review screen @packages/*
@@ -1030,7 +925,7 @@ pi-review screen $STAGED || exit 1</div>
     </div>
 
     <div class="scenario-card">
-      <div class="scenario-tag">SCENARIO 04</div>
+      <div class="scenario-num">SCENARIO 04</div>
       <div class="scenario-name">Agent 闭环修复的冒烟初筛</div>
       <div class="scenario-desc">在 Agent 运行 <code>loop --until clean</code> 循环修复代码时，每一轮先用 <code>screen</code> 冒烟，最基本的编译与语法问题未修好前直接打回重修。</div>
       <div class="scenario-code"># Agent 内部守卫逻辑
@@ -1039,16 +934,16 @@ if screen(patch) == 0:
     </div>
   </div>
 
-  <!-- Section 6: Decision Tree -->
-  <div class="decision-banner">
-    <div class="tree-title">
+  <!-- Decision Tree -->
+  <div class="decision-card">
+    <div class="decision-title">
       <span>🌲</span>
       <span>代码审查模式选型决策树</span>
     </div>
-    <div class="tree-desc">
-      根据审查所处的生命周期与容忍耗时，选择最贴合工程实际的运行策略：
+    <div class="decision-desc">
+      根据代码所处的生命周期、上下文依赖程度与工程容忍耗时，选择匹配的审查策略：
     </div>
-    <div class="tree-box">
+    <div class="decision-box">
 代码变更准备进入审查流程
    │
    ├─► 是 Pre-commit / Pre-push 钩子或 CI 快速阻断？
@@ -1058,7 +953,7 @@ if screen(patch) == 0:
    │     └─► <strong>pi-review --reviewers 3</strong>（多数票 Quorum，过滤孤证误报）
    │
    ├─► 是 Agent 自动化修复、需要多轮验证收敛？
-   │     └─► <strong>pi-review loop --until clean</strong>（*必须开启 Jev 保持跨轮状态记忆*）
+   │     └─► <strong>pi-review loop --until clean</strong>（*依靠 Jev 保持跨轮状态记忆*）
    │
    └─► 只是本地日常功能自查？
          └─► <strong>pi-review review</strong>（单模型深度细审，获取修复建议）
