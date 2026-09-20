@@ -443,7 +443,7 @@ Session flags (`--keep-session`, `--continue`, `--name`) are unsupported by `loo
 
 ## Configuration
 
-Persistent settings live in the review config file `~/.pi/pi-review/config.json` (override its location with `PI_REVIEW_CONFIG`). The config is advisory and forward-compatible: unknown keys are ignored, `null` counts as unset, and any other problem (wrong-typed value, invalid JSON) only prints a warning and falls back — the config never blocks core functionality, so a config written by a newer pi-review cannot brick an older one. In Pi, `/rv-config` shows the effective configuration (values, sources, warnings, resolved paths).
+Persistent settings live in the review config file `~/.pi/pi-review/config.json` (override its location with `PI_REVIEW_CONFIG`). The config is advisory and forward-compatible: unknown keys are ignored, `null` counts as unset, and any other problem (wrong-typed value, invalid JSON) only prints a warning and falls back — the config never blocks core functionality, so a config written by a newer pi-review cannot brick an older one. In Pi, `/rv-config` shows the effective configuration (values, sources, warnings, resolved paths). There is deliberately no `/rv-config set` command — the preferred editor is your agent via the pi-review agent skill, which knows the config schema, keeps unknown keys, never overwrites invalid JSON, and never writes secrets (API keys stay environment variables, e.g. `TYPESAFE_API_KEY`; the config file holds flags only).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

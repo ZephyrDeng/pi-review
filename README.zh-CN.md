@@ -270,7 +270,7 @@ CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/
 
 提交代码：`npm install` 后会启用 **Husky** 钩子（`.husky/` → `ai-commit` 的 prepare-commit-msg / commit-msg / pre-commit）。也可 `git add` 后直接 `ai-commit commit`。配置见 `.ai-commit.yaml`（英文、`ai_footer: off`，需本机安装 ai-commit ≥ v0.1.45）。
 
-持久化设置在评审配置文件 `~/.pi/pi-review/config.json`（可用 `PI_REVIEW_CONFIG` 覆盖其位置）中。配置是建议性的、向前兼容的：未知键被忽略，`null` 视为未设置，其它任何问题（类型错误、无效 JSON）只打印警告并回落——配置绝不阻塞核心功能，新版本写的配置不会弄坏旧版本。在 Pi 中用 `/rv-config` 查看生效配置（取值、来源、警告、解析路径）。
+持久化设置在评审配置文件 `~/.pi/pi-review/config.json`（可用 `PI_REVIEW_CONFIG` 覆盖其位置）中。配置是建议性的、向前兼容的：未知键被忽略，`null` 视为未设置，其它任何问题（类型错误、无效 JSON）只打印警告并回落——配置绝不阻塞核心功能，新版本写的配置不会弄坏旧版本。在 Pi 中用 `/rv-config` 查看生效配置（取值、来源、警告、解析路径）。刻意不提供 `/rv-config set` 命令——推荐的编辑器是你的 agent（走 pi-review skill）：它知道配置 schema、保留未知键、坏 JSON 不覆盖，且绝不写入机密（API key 只走环境变量，如 `TYPESAFE_API_KEY`；配置文件只放开关）。
 
 | 键 | 类型 | 默认 | 说明 |
 |-----|------|---------|-------------|

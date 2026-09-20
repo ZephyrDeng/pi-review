@@ -32,6 +32,17 @@ Review children stay isolated (`--no-extensions`) unless the persistent review c
 
 Before writing, tell the user the config is machine-level: every later pi-review on this machine (including bare CLI) inherits it. Write it only on acceptance; when editing an existing file, keep every unknown key and never overwrite a value the user set (invalid JSON — stop, do not overwrite). Verify on Pi with `/rv-config`, elsewhere with `cat ~/.pi/pi-review/config.json`. Isolate one run with `PI_REVIEW_CHILD_EXTENSIONS=0` (env overrides config). If a child exits with stale extension ctx after dispose/reload (issue #8), retry that one run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
 
+### Setting config via the agent (preferred path)
+
+There is no `/rv-config set` command — the agent is the config editor. When the user asks to change a pi-review setting, edit `~/.pi/pi-review/config.json` directly, with these rules:
+
+- **Keys** — known schema today: `childExtensions` (bool), `jev` (bool). Keep every unknown key untouched (forward compat). Set only what the user asked for.
+- **Desensitization (脱敏)** — the config file holds *flags only, never secrets*:
+  - `TYPESAFE_API_KEY` and any other API keys are **environment variables by design**; never write them into `config.json`, and never echo a key's value back to the user or into logs/docs. Show key state as set/unset only.
+  - Never commit `~/.pi/pi-review/config.json` (machine-level, may reflect personal setup) into any repo.
+  - After editing, confirm with `/rv-config` (Pi) or `cat` + `jq` (elsewhere) — display values, not file dumps, when the conversation is logged.
+- **Sequence** — read the file (it may not exist), validate JSON, apply the one change, write back pretty-printed, verify with `/rv-config`, and state the machine-level consequence in one sentence.
+
 ## Default workflow by host
 
 | Host | How to run `pi-review` |
