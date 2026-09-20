@@ -169,7 +169,7 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 两阶段匹配：先用稳定锚点（路径 + 归一化摘要）做确定性匹配；只有路径相同、措辞不同的模糊候选才交给受限的**语义仲裁器**（用 `--consensus-model` 启用）。仲裁器只能聚类，不得发明 finding、丢弃 finding、补充证据或充当额外审查者，且没有写工具。低置信匹配保持为独立 advisory，避免靠"相似"制造虚假共识。
 
-**裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。**级联**：概率落在模糊区间（0.3–0.7）的 pair 会再用 Pi 仲裁器复核一次（单次额外调用）——清晰的 case 永不付 LLM 的钱，模糊的拿到第二意见，Pi 失败则保留 Jev 结果。显式 `--consensus-model` 时全部走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。裁决发生时聚合 meta 带 `adjudicationEngine: "jev" | "pi"`，`/rv-config` 可查看当前生效值与 key 是否存在。
+**裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。**级联**：概率落在模糊区间（0.3–0.7）的 pair 会再用 Pi 仲裁器复核一次（单次额外调用）——清晰的 case 永不付 LLM 的钱，模糊的拿到第二意见，Pi 失败则保留 Jev 结果。显式 `--consensus-model` 时全部走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。裁决发生时聚合 meta 带 `adjudicationEngine: "jev" | "pi"`，`/rv-config` 可查看当前生效值与 key 是否存在。三种裁决路径（纯 Jev、Pi 仲裁器、Jev + 边界升级级联）在单轮/多轮、单评委/3 评委下的实测对比记录在 [docs/research/jev-adjudication-case.md](docs/research/jev-adjudication-case.md)。
 
 **范围分类（`pi-review classify`）。** 同一个 Jev 后端还能把上一次评审的 actionable findings 对照冻结的任务基线分类——把 loop 收尾协议里的 scope governor 从 host 的主观判断变成 typed 决策：
 
@@ -180,6 +180,29 @@ pi-review -- @src 2>&1 | pi-review classify --baseline "..."
 ```
 
 每个 actionable finding 对应一个 Choice 问题（`in_scope_blocker` | `follow_up` | `stop_and_escalate`），单次调用并行 fan-out。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_CLASSIFY_JSON` 机器行；置信度低于 0.5 的标记为 low-confidence。classify 是 advisory、由 host 主动调用——不改文件、不单独卡门禁，且必须有 `TYPESAFE_API_KEY`（缺失时 exit 4）。
+
+**门禁级筛查（`pi-review screen`）。** screen 把 Jev 推到流水线最左侧：不再先让 LLM 评委生成 findings（每轮 30s+）再做裁决，而是对确定性切片的代码 hunk 直接问 Jev typed 问题，命中后从缺陷模式目录模板组装 finding——关键路径上完全没有 LLM 散文生成。在[筛查 fixture](docs/research/jev-screening-case.md) 上的实测：**端到端约 1.2s**（106 行服务、12 个 hunk、108 个问题、一次调用），同文件完整评审一轮要 32–53s。
+
+```bash
+pi-review screen src/order-service.ts     # 也支持 @file；有发现 exit 1，干净 exit 0
+```
+
+完整架构：
+
+```
+文件 ─► 1. 确定性切片              （本地，ms 级——按声明边界切 hunk）
+           │
+           ├─► 2. 一次 Jev 调用     （约 1s——每 hunk：1 个兜底 Noul
+           │     「有可拦缺陷吗？」    + 每个目录模式各 1 个 Noul；
+           │     并行 fan-out，超过 480 问自动分批）
+           │
+           └─► 3. 模板组装 + 门禁   （本地，ms 级——命中模式 ⇒ 从目录
+                的 severity/标题/修复建议组装 finding；
+                兜底命中但无模式命中 ⇒ 「未匹配信号」finding，
+                照样拦截——绝不静默丢弃）
+```
+
+`ReviewFinding` 各字段的产出方：`id`/`path`/`location` 来自切片器（确定性），`severity`/`summary`/`recommendation` 来自命中模式的目录模板，`actionable` 是阈值化后的概率——LLM 的散文角色收缩到目录外的新缺陷与跨 hunk 推理，这两类由「未匹配信号」finding 交回给完整 `pi-review`。目录（`src/screen.ts` 的 `SCREEN_PATTERNS`）是覆盖率旋钮：目前内置八个模式（循环越界、fire-and-forget 异步、SQL 注入、slice 越界、float 金额、float 精确比较、缓存别名、缺失输入校验）；历史里反复出现未匹配信号时就往里加。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_SCREEN_JSON` 机器行（status、findings、逐 hunk 概率、usage）；退出码与 review 一致（0 clean、1 has_findings、4 blocked/无 key）。screen 是快速门禁与分诊层，不替代带证据链的完整评审——实测数据与诚实边界见 [docs/research/jev-screening-case.md](docs/research/jev-screening-case.md)。
 
 ### 成本与失败
 

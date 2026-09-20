@@ -233,7 +233,7 @@ Singleton (uncorroborated) findings remain visible as **advisories** but do not 
 
 Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may not invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
 
-**Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call. **Cascade:** pairs whose probability lands in the borderline band (0.3–0.7) are re-judged once by the Pi adjudicator in a single extra call — clear cases never pay for an LLM, uncertain ones get a second opinion, and a Pi failure keeps Jev's judgments. Explicit `--consensus-model` keeps the Pi adjudicator for everything; `PI_REVIEW_JEV=0` disables Jev for one run; any Jev failure falls back to the Pi adjudicator and is recorded as `adjudicationFallbackNote` in the meta (escalations are noted there too). The aggregate meta carries `adjudicationEngine: "jev" | "pi"` whenever adjudication ran, and `/rv-config` shows the effective setting and key presence.
+**Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call. **Cascade:** pairs whose probability lands in the borderline band (0.3–0.7) are re-judged once by the Pi adjudicator in a single extra call — clear cases never pay for an LLM, uncertain ones get a second opinion, and a Pi failure keeps Jev's judgments. Explicit `--consensus-model` keeps the Pi adjudicator for everything; `PI_REVIEW_JEV=0` disables Jev for one run; any Jev failure falls back to the Pi adjudicator and is recorded as `adjudicationFallbackNote` in the meta (escalations are noted there too). The aggregate meta carries `adjudicationEngine: "jev" | "pi"` whenever adjudication ran, and `/rv-config` shows the effective setting and key presence. A measured comparison of Jev, the Pi adjudicator, and the shipped cascade across single/multi-round loops and 1/3 reviewers is recorded in [docs/research/jev-adjudication-case.md](docs/research/jev-adjudication-case.md).
 
 **Scope classification (`pi-review classify`).** The same Jev backend can classify a previous review's actionable findings against your frozen task baseline — the loop-closeout scope governor as a typed decision instead of a judgment call:
 
@@ -244,6 +244,30 @@ pi-review -- @src 2>&1 | pi-review classify --baseline "..."
 ```
 
 Each actionable finding gets one Choice question (`in_scope_blocker` | `follow_up` | `stop_and_escalate`), all fanned out in a single call. Output is an ASCII summary plus a `PI_REVIEW_CLASSIFY_JSON` machine line on stderr; findings below confidence 0.5 are flagged as low-confidence. Classify is advisory and host-invoked — it never edits, never blocks a gate by itself, and requires `TYPESAFE_API_KEY` (exit 4 without it).
+
+**Gate-grade screening (`pi-review screen`).** Screen pushes Jev furthest left in the pipeline: instead of generating findings with an LLM reviewer (30s+ per round) and adjudicating them afterwards, it asks Jev typed questions about deterministically sliced code hunks and assembles findings from a defect-pattern catalog — no LLM prose on the critical path at all. Measured end-to-end on the [screening fixture](docs/research/jev-screening-case.md): **~1.2s wall time** for a 106-line service (12 hunks, 108 questions, one call), vs 32–53s for a full review round on the same file.
+
+```bash
+pi-review screen src/order-service.ts     # or @file refs; exits 1 on findings, 0 when clean
+```
+
+The architecture, end to end:
+
+```
+files ─► 1. deterministic slice            (local, ms — declaration-boundary hunks)
+            │
+            ├─► 2. one Jev call            (~1s — per hunk: 1 catch-all Noul
+            │     "any blocking defect?"     + 1 Noul per catalog pattern;
+            │     fanned out in parallel, chunked past 480 questions)
+            │
+            └─► 3. template assembly       (local, ms — pattern hit ⇒ finding
+                  + gate                    from catalog severity/title/fix;
+                                            catch-all hit without a pattern ⇒
+                                            "unmatched signal" finding, still
+                                            blocks — never silently dropped)
+```
+
+Who produces each `ReviewFinding` field: `id`/`path`/`location` come from the slicer (deterministic), `severity`/`summary`/`recommendation` come from the matched catalog pattern's template, `actionable` is the thresholded probability — the LLM's prose role shrinks to off-catalog novel defects and cross-hunk reasoning, which the unmatched-signal finding hands back to a full `pi-review` run. The catalog (`SCREEN_PATTERNS` in `src/screen.ts`) is the coverage knob: eight patterns ship today (off-by-one loops, fire-and-forget async, SQL injection, slice off-by-one, float money, float equality, cache aliasing, missing validation); add entries as history shows repeated unmatched signals. Output is an ASCII summary plus a `PI_REVIEW_SCREEN_JSON` machine line on stderr (status, findings, per-hunk probabilities, usage); exit codes mirror review (0 clean, 1 has_findings, 4 blocked/no key). Screen is a fast gate and a triage layer, not a replacement for evidence-backed review — measurements and honest limits are in [docs/research/jev-screening-case.md](docs/research/jev-screening-case.md).
 
 ### Cost and failure
 
@@ -414,6 +438,8 @@ The JSON event schema is pi CLI's own internal format, not a contract `pi-review
 ```
 pi-review [review] [options] -- <@files|text...>
 pi-review loop [options] -- <@files|text...>
+pi-review screen <@files|paths...>
+pi-review classify --baseline <text|@file> [--meta <path>]
 pi-review models [search]
 ```
 

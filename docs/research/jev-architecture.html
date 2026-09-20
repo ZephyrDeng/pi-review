@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pi-review · Jev 增强模式架构图解</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07090e;
+      --card-bg: rgba(15, 23, 42, 0.65);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-faint: #475569;
+      --jev: #38bdf8;
+      --pi: #a855f7;
+      --green: #10b981;
+      --orange: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      background-image:
+        radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.1), transparent 40%),
+        radial-gradient(circle at 80% 10%, rgba(168, 85, 247, 0.08), transparent 40%);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      padding: 48px 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 32px; }
+    .pill {
+      display: inline-flex; gap: 8px; font-size: 12px; font-weight: 500;
+      font-family: 'Fira Code', monospace; color: var(--jev);
+      background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.3);
+      padding: 4px 14px; border-radius: 9999px; margin-bottom: 16px;
+    }
+    h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 10px; }
+    h1 em { font-style: normal; color: var(--jev); text-shadow: 0 0 24px rgba(56,189,248,0.3); }
+    .subtitle { color: var(--text-muted); font-size: 15px; max-width: 720px; margin: 0 auto; }
+
+    .diagram-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 24px;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 24px 48px -16px rgba(0,0,0,0.6);
+    }
+    svg { width: 100%; height: auto; display: block; }
+
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 14px; justify-content: center;
+      margin: 20px 0 36px;
+    }
+    .legend-chip {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--text-muted);
+      background: rgba(255,255,255,0.04); border: 1px solid var(--card-border);
+      padding: 6px 14px; border-radius: 9999px;
+    }
+    .legend-line { width: 22px; height: 3px; border-radius: 2px; }
+    .legend-line.blue { background: var(--jev); }
+    .legend-line.purple { background: var(--pi); }
+    .legend-line.green { background: var(--green); }
+    .legend-line.orange { background: var(--orange); }
+    .legend-line.red { background: var(--red); height: 0; border-top: 2px dashed var(--red); }
+    .legend-line.gray { background: #64748b; }
+
+    .takeaways {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px; margin-bottom: 40px;
+    }
+    .takeaway {
+      background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 14px; padding: 20px 22px; font-size: 13.5px;
+      color: var(--text-muted); line-height: 1.7;
+    }
+    .takeaway b { color: var(--text-main); display: block; margin-bottom: 6px; font-size: 14px; }
+    .takeaway.blue { border-top: 3px solid var(--jev); }
+    .takeaway.purple { border-top: 3px solid var(--pi); }
+    .takeaway.red { border-top: 3px solid var(--red); }
+
+    footer { text-align: center; color: var(--text-faint); font-size: 13px; font-family: 'Fira Code', monospace; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="pill">⚡️ ARCHITECTURE · pi-review × TypeSafe Jev</div>
+    <h1>Jev <em>增强模式</em> 架构图解</h1>
+    <p class="subtitle">五个阶段 + 一个多轮引擎：评委生成 → 确定性分组 → <b style="color:#7dd3fc">语义裁决（Jev 核心）</b> → 共识门禁 → Loop 跨轮收敛</p>
+  </header>
+
+  <div class="diagram-card">
+  <svg viewBox="0 0 1400 1000" xmlns="http://www.w3.org/2000/svg"
+       font-family="Inter, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+    <defs>
+      <marker id="arG" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker>
+      <marker id="arB" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#38bdf8"/></marker>
+      <marker id="arP" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#a855f7"/></marker>
+      <marker id="arGr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#10b981"/></marker>
+      <marker id="arO" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#f59e0b"/></marker>
+      <marker id="arOs" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M7,0 L0,3 L7,6 Z" fill="#f59e0b"/></marker>
+      <marker id="arR" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#ef4444"/></marker>
+    </defs>
+
+    <!-- ============ 阶段一 · 编排层 ============ -->
+    <rect x="60" y="40" width="1280" height="95" rx="14" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.06)"/>
+    <text x="80" y="66" font-size="12" font-weight="600" fill="#94a3b8">阶段一 · 编排层</text>
+    <rect x="350" y="62" width="700" height="58" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="700" y="86" text-anchor="middle" font-size="15" font-weight="700" fill="#f1f5f9">pi-review CLI 编排器</text>
+    <text x="700" y="106" text-anchor="middle" font-size="11" fill="#94a3b8">review · panel · loop · gate ｜ classify（Choice 题型分桶 bug/risk/nit）｜ --reviewers N · --consensus quorum · --until clean</text>
+
+    <!-- CLI -> 评委们 -->
+    <path d="M500 120 L283 188" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M700 120 L700 188" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M900 120 L1117 188" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+
+    <!-- ============ 阶段二 · 评委生成层 ============ -->
+    <rect x="60" y="150" width="1280" height="125" rx="14" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.06)"/>
+    <text x="80" y="176" font-size="12" font-weight="600" fill="#94a3b8">阶段二 · 评委生成层（并行）</text>
+
+    <rect x="120" y="190" width="320" height="70" rx="12" fill="rgba(168,85,247,0.07)" stroke="rgba(168,85,247,0.5)"/>
+    <text x="280" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#e9d5ff">评委 A · Pi 子会话</text>
+    <text x="280" y="240" text-anchor="middle" font-size="11" fill="#94a3b8">主模型通道 · deepseek-v4.1-flash</text>
+
+    <rect x="540" y="190" width="320" height="70" rx="12" fill="rgba(168,85,247,0.07)" stroke="rgba(168,85,247,0.5)"/>
+    <text x="700" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#e9d5ff">评委 B · Pi 子会话</text>
+    <text x="700" y="240" text-anchor="middle" font-size="11" fill="#94a3b8">独立人设 / 独立上下文</text>
+
+    <rect x="960" y="190" width="320" height="70" rx="12" fill="rgba(168,85,247,0.07)" stroke="rgba(168,85,247,0.5)"/>
+    <text x="1120" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#e9d5ff">评委 C · Pi 子会话</text>
+    <text x="1120" y="240" text-anchor="middle" font-size="11" fill="#94a3b8">同一代码 · 措辞必然漂移</text>
+
+    <!-- 评委 -> 汇总 -->
+    <path d="M280 260 L618 315" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M700 260 L700 312" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M1120 260 L782 315" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+
+    <!-- ============ 阶段三 · 语义裁决层 ============ -->
+    <rect x="60" y="295" width="1280" height="375" rx="16" fill="rgba(56,189,248,0.03)" stroke="rgba(56,189,248,0.35)" stroke-dasharray="7 5"/>
+    <text x="80" y="322" font-size="13" font-weight="700" fill="#7dd3fc">阶段三 · 语义裁决层 ★（Jev 核心所在）</text>
+
+    <rect x="560" y="315" width="280" height="46" rx="10" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="700" y="343" text-anchor="middle" font-size="13" font-weight="600" fill="#f1f5f9">汇总 findings：33~35 条 JSON</text>
+
+    <!-- 汇总 -> ① -->
+    <path d="M700 361 V 385 H 225 V 406" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+
+    <!-- ① 确定性分组 -->
+    <rect x="100" y="410" width="250" height="84" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="225" y="438" text-anchor="middle" font-size="14" font-weight="700" fill="#f1f5f9">① 确定性指纹分组</text>
+    <text x="225" y="460" text-anchor="middle" font-size="11" fill="#94a3b8">同 路径＋行号＋标题指纹</text>
+    <text x="225" y="478" text-anchor="middle" font-size="11" fill="#94a3b8">完全一致直接合并 · 零成本</text>
+
+    <!-- ② 候选对构造 -->
+    <rect x="390" y="410" width="250" height="84" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="515" y="438" text-anchor="middle" font-size="14" font-weight="700" fill="#f1f5f9">② 候选对构造</text>
+    <text x="515" y="460" text-anchor="middle" font-size="11" fill="#94a3b8">同路径 findings 两两配对</text>
+    <text x="515" y="478" text-anchor="middle" font-size="11" fill="#94a3b8">33~35 条 → 528~561 对</text>
+
+    <path d="M350 452 H 386" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M640 452 H 676" stroke="#38bdf8" stroke-width="2.5" fill="none" marker-end="url(#arB)"/>
+
+    <!-- Jev OFF 全量走 Pi -->
+    <path d="M515 410 V 372 H 1180 V 391" stroke="#a855f7" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arP)"/>
+    <text x="847" y="364" text-anchor="middle" font-size="11" fill="#c084fc">Jev OFF：候选对全量改走 Pi 仲裁器（17~61s）</text>
+
+    <!-- ③ Jev（发光高亮） -->
+    <rect x="676" y="391" width="308" height="122" rx="16" fill="none" stroke="rgba(56,189,248,0.22)" stroke-width="6"/>
+    <rect x="680" y="395" width="300" height="114" rx="14" fill="rgba(56,189,248,0.09)" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="830" y="428" text-anchor="middle" font-size="15" font-weight="800" fill="#7dd3fc">③ Jev · TypeSafe System One</text>
+    <text x="830" y="450" text-anchor="middle" font-size="12" fill="#e2e8f0">Noul 题型批量判定：561 对 / 1 次调用</text>
+    <text x="830" y="470" text-anchor="middle" font-size="12" font-weight="700" fill="#38bdf8">≈2 秒 · 独立通道 · 0 评委配额</text>
+    <text x="830" y="490" text-anchor="middle" font-size="11" fill="#64748b">输出：每对候选的合并概率 p</text>
+
+    <!-- Pi 仲裁器 -->
+    <rect x="1040" y="395" width="280" height="114" rx="14" fill="rgba(168,85,247,0.08)" stroke="#a855f7"/>
+    <text x="1180" y="428" text-anchor="middle" font-size="14" font-weight="700" fill="#d8b4fe">Pi 仲裁器（大模型会诊）</text>
+    <text x="1180" y="450" text-anchor="middle" font-size="12" fill="#e2e8f0">一次 JSON 会诊覆盖全部候选对</text>
+    <text x="1180" y="470" text-anchor="middle" font-size="12" font-weight="600" fill="#c084fc">17~61 秒 · 复用评委主模型通道</text>
+    <text x="1180" y="490" text-anchor="middle" font-size="11" fill="#64748b">429 限流风险与评委同源</text>
+
+    <!-- 级联升级（双向箭头） -->
+    <path d="M980 470 H 1033" stroke="#f59e0b" stroke-width="2" fill="none" marker-end="url(#arO)" marker-start="url(#arOs)"/>
+    <text x="1006" y="486" text-anchor="middle" font-size="10" fill="#fbbf24">0.3~0.7 级联升级</text>
+
+    <!-- Jev 决策输出 -->
+    <path d="M740 509 L 708 541" stroke="#10b981" stroke-width="1.5" fill="none" marker-end="url(#arGr)"/>
+    <text x="700" y="522" text-anchor="end" font-size="11" fill="#34d399">p ≥ 0.6 → 合并</text>
+    <path d="M900 509 V 541" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <text x="908" y="522" font-size="11" fill="#94a3b8">p &lt; 0.3 → 不合并</text>
+
+    <!-- ④ 合并决策 -->
+    <rect x="560" y="545" width="400" height="60" rx="12" fill="rgba(16,185,129,0.07)" stroke="#10b981"/>
+    <text x="760" y="570" text-anchor="middle" font-size="14" font-weight="700" fill="#6ee7b7">④ 合并落地 · 完整链接聚类</text>
+    <text x="760" y="590" text-anchor="middle" font-size="11" fill="#94a3b8">组内成员两两 ≥ 0.6 才允许合并（阻断链式折叠）</text>
+
+    <!-- 失败兜底 -->
+    <path d="M1260 509 V 549" stroke="#ef4444" stroke-width="1.5" fill="none" stroke-dasharray="4 4" marker-end="url(#arR)"/>
+    <rect x="1020" y="555" width="300" height="64" rx="12" fill="rgba(239,68,68,0.06)" stroke="rgba(239,68,68,0.5)" stroke-dasharray="5 4"/>
+    <text x="1170" y="580" text-anchor="middle" font-size="11" font-weight="700" fill="#fca5a5">失败兜底：adjudicationFailed</text>
+    <text x="1170" y="600" text-anchor="middle" font-size="10.5" fill="#94a3b8">任一裁决调用失败 → 降级确定性保守聚合，门禁不放开</text>
+
+    <!-- ④ -> ⑤ -->
+    <path d="M760 605 V 655 H 265 V 721" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+
+    <!-- ============ 阶段四 · 共识聚合与门禁 ============ -->
+    <rect x="60" y="700" width="1280" height="100" rx="14" fill="rgba(255,255,255,0.02)" stroke="rgba(255,255,255,0.06)"/>
+    <text x="80" y="726" font-size="12" font-weight="600" fill="#94a3b8">阶段四 · 共识聚合与门禁</text>
+
+    <rect x="100" y="725" width="330" height="62" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="265" y="750" text-anchor="middle" font-size="13" font-weight="700" fill="#f1f5f9">⑤ 簇共识投票</text>
+    <text x="265" y="772" text-anchor="middle" font-size="11" fill="#94a3b8">quorum 策略 · ≥2 评委同簇才确认</text>
+
+    <rect x="500" y="725" width="360" height="62" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="680" y="750" text-anchor="middle" font-size="13" font-weight="700" fill="#f1f5f9">Confirmed 簇 → 阻塞门禁</text>
+    <text x="680" y="772" text-anchor="middle" font-size="11" fill="#94a3b8">未达票数 → Advisory 仅建议（不阻塞）</text>
+
+    <rect x="940" y="725" width="380" height="62" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(255,255,255,0.14)"/>
+    <text x="1130" y="750" text-anchor="middle" font-size="13" font-weight="700" fill="#f1f5f9">⑥ Gate 门禁</text>
+    <text x="1130" y="772" text-anchor="middle" font-size="11" fill="#94a3b8">has_findings / clean ＋ 结构化报告与退出码</text>
+
+    <path d="M430 756 H 496" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M860 756 H 936" stroke="#64748b" stroke-width="1.5" fill="none" marker-end="url(#arG)"/>
+    <path d="M1130 787 V 822" stroke="#a855f7" stroke-width="1.5" fill="none" marker-end="url(#arP)"/>
+
+    <!-- ============ 多轮 Loop 引擎 ============ -->
+    <rect x="60" y="830" width="1280" height="140" rx="16" fill="rgba(168,85,247,0.04)" stroke="rgba(168,85,247,0.35)" stroke-dasharray="7 5"/>
+    <text x="80" y="858" font-size="13" font-weight="700" fill="#d8b4fe">多轮 Loop 复查引擎（--until clean 收敛判定）</text>
+
+    <rect x="100" y="865" width="230" height="64" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(168,85,247,0.4)"/>
+    <text x="215" y="890" text-anchor="middle" font-size="13" font-weight="700" fill="#e9d5ff">Round N+1 findings</text>
+    <text x="215" y="912" text-anchor="middle" font-size="11" fill="#94a3b8">新一轮评委输出</text>
+
+    <rect x="390" y="865" width="360" height="64" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(168,85,247,0.4)"/>
+    <text x="570" y="890" text-anchor="middle" font-size="13" font-weight="700" fill="#e9d5ff">跨轮匹配 loopMatcher</text>
+    <text x="570" y="912" text-anchor="middle" font-size="11" fill="#94a3b8">复用阶段三同一 Jev 裁决器 · 穿透措辞漂移</text>
+
+    <rect x="810" y="865" width="270" height="64" rx="12" fill="rgba(15,23,42,0.9)" stroke="rgba(168,85,247,0.4)"/>
+    <text x="945" y="890" text-anchor="middle" font-size="13" font-weight="700" fill="#e9d5ff">留存 =6 ｜ 新增 +3 ｜ 解决 -4</text>
+    <text x="945" y="912" text-anchor="middle" font-size="11" fill="#fca5a5">无 Jev 仅 =1 / +10 / -10（近乎失忆）</text>
+
+    <rect x="1140" y="865" width="190" height="64" rx="12" fill="rgba(16,185,129,0.07)" stroke="#10b981"/>
+    <text x="1235" y="886" text-anchor="middle" font-size="12" font-weight="700" fill="#6ee7b7">收敛判定</text>
+    <text x="1235" y="904" text-anchor="middle" font-size="11" fill="#94a3b8">连续两轮一致</text>
+    <text x="1235" y="920" text-anchor="middle" font-size="11" fill="#94a3b8">→ 提前停止烧预算</text>
+
+    <path d="M330 897 H 386" stroke="#a855f7" stroke-width="1.5" fill="none" marker-end="url(#arP)"/>
+    <path d="M750 897 H 806" stroke="#a855f7" stroke-width="1.5" fill="none" marker-end="url(#arP)"/>
+    <path d="M1080 897 H 1136" stroke="#a855f7" stroke-width="1.5" fill="none" marker-end="url(#arP)"/>
+
+    <!-- 回路：下一轮重新生成 -->
+    <path d="M100 897 H 32 V 225 H 114" stroke="#a855f7" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arP)"/>
+    <text x="26" y="560" transform="rotate(-90 26 560)" text-anchor="middle" font-size="11" fill="#c084fc">下一轮：重新生成 findings</text>
+  </svg>
+  </div>
+
+  <!-- 图例 -->
+  <div class="legend">
+    <span class="legend-chip"><span class="legend-line blue"></span>Jev 链路（独立 TypeSafe 通道）</span>
+    <span class="legend-chip"><span class="legend-line purple"></span>主模型通道（评委 / Pi 仲裁器 / Loop）</span>
+    <span class="legend-chip"><span class="legend-line green"></span>合并通过</span>
+    <span class="legend-chip"><span class="legend-line orange"></span>模糊对级联升级（双向）</span>
+    <span class="legend-chip"><span class="legend-line red"></span>失败降级安全网</span>
+    <span class="legend-chip"><span class="legend-line gray"></span>普通数据流</span>
+  </div>
+
+  <!-- 读图要点 -->
+  <div class="takeaways">
+    <div class="takeaway blue">
+      <b>⚡️ 蓝色链路 = Jev 的价值</b>
+      全部 528~561 个候选对压缩进<strong>一次</strong> Noul 批量调用，约 2 秒返回每对的合并概率；走独立 TypeSafe 通道，不占用评委模型的 API 配额与限流额度。
+    </div>
+    <div class="takeaway purple">
+      <b>🧠 紫色链路 = 主模型通道</b>
+      评委生成、Pi 仲裁器（Jev 关闭或模糊对升级时）、Loop 复查都走同一个主模型渠道——429 限流时它们会互相拖累，这正是 Jev 旁路裁决要规避的风险。
+    </div>
+    <div class="takeaway red">
+      <b>🛡️ 红色虚线 = 安全网</b>
+      任一裁决调用失败都会以 <code>adjudicationFailed</code> 降级为确定性保守聚合，门禁只紧不松；Jev 合并采用<strong>完整链接聚类</strong>（组内两两达标才并），链式误并已结构性消除。
+    </div>
+  </div>
+
+  <footer>pi-review v0.15.2 · Jev architecture · 数据取自 docs/research/jev-adjudication-case.md</footer>
+</div>
+</body>
+</html>

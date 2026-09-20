@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pi-review · Jev Mode 产品对比图</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07090e;
+      --card-bg: rgba(15, 23, 42, 0.65);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-faint: #475569;
+      --jev-color: #38bdf8;
+      --jev-glow: rgba(56, 189, 248, 0.25);
+      --jev-bg: rgba(56, 189, 248, 0.06);
+      --off-color: #a855f7;
+      --off-glow: rgba(168, 85, 247, 0.2);
+      --off-bg: rgba(168, 85, 247, 0.05);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: 'Fira Code', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.12), transparent 40%),
+        radial-gradient(circle at 80% 10%, rgba(168, 85, 247, 0.1), transparent 40%),
+        radial-gradient(circle at 50% 100%, rgba(16, 185, 129, 0.05), transparent 50%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      padding: 48px 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container { max-width: 1140px; margin: 0 auto; }
+
+    /* Header */
+    .hero-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      font-weight: 500;
+      color: var(--jev-color);
+      background: var(--jev-bg);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 4px 14px;
+      border-radius: 9999px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 40px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 14px;
+      line-height: 1.15;
+    }
+    h1 span.off { color: #c084fc; }
+    h1 span.on { color: var(--jev-color); text-shadow: 0 0 24px var(--jev-glow); }
+    .hero-desc {
+      color: var(--text-muted);
+      font-size: 16px;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    /* Big Side-by-Side Product Cards */
+    .battle-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 48px;
+      position: relative;
+    }
+    @media (max-width: 768px) {
+      .battle-grid { grid-template-columns: 1fr; }
+    }
+
+    .battle-card {
+      background: var(--card-bg);
+      border-radius: 20px;
+      border: 1px solid var(--card-border);
+      padding: 32px 28px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5);
+    }
+    .battle-card.off {
+      background: linear-gradient(180deg, rgba(24, 18, 38, 0.7) 0%, rgba(12, 16, 28, 0.6) 100%);
+      border-color: rgba(168, 85, 247, 0.25);
+    }
+    .battle-card.on {
+      background: linear-gradient(180deg, rgba(14, 30, 52, 0.7) 0%, rgba(12, 20, 35, 0.6) 100%);
+      border-color: rgba(56, 189, 248, 0.35);
+      box-shadow: 0 20px 50px -10px var(--jev-glow);
+    }
+
+    .card-ribbon {
+      position: absolute;
+      top: -12px;
+      right: 24px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #031427;
+      font-weight: 700;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      box-shadow: 0 4px 12px rgba(56, 189, 248, 0.4);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 20px;
+    }
+    .mode-title {
+      font-size: 22px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .mode-tag {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      padding: 2px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .off .mode-tag { background: rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+    .on .mode-tag { background: rgba(56, 189, 248, 0.2); color: var(--jev-color); }
+    .mode-meta { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Core Hero Stat */
+    .hero-stat {
+      margin-bottom: 24px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); margin-bottom: 4px; font-family: var(--font-mono); }
+    .stat-number { font-size: 32px; font-weight: 800; font-family: var(--font-mono); display: flex; align-items: baseline; gap: 8px; }
+    .off .stat-number { color: #e9d5ff; }
+    .on .stat-number { color: #bae6fd; text-shadow: 0 0 16px var(--jev-glow); }
+    .stat-desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* Feature Checklist */
+    .feature-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 24px;
+      flex: 1;
+    }
+    .feature-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 14px;
+    }
+    .icon-box {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+    .icon-box.bad { background: rgba(239, 68, 68, 0.15); color: var(--danger); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .icon-box.good { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+    .icon-box.warn { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    .feature-text strong { display: block; color: var(--text-main); font-weight: 600; margin-bottom: 2px; }
+    .feature-text span { color: var(--text-muted); font-size: 13px; }
+
+    /* Bottom Summary Badge */
+    .card-footer-box {
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .off .card-footer-box { background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.2); color: #d8b4fe; }
+    .on .card-footer-box { background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); color: #7dd3fc; }
+
+    /* Section Title */
+    .section-headline {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin: 48px 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-headline::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--card-border);
+    }
+
+    /* Comparison Table (Product Spec Style) */
+    .spec-table-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 48px;
+      backdrop-filter: blur(12px);
+    }
+    .spec-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    .spec-table th {
+      padding: 16px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-faint);
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--card-border);
+    }
+    .spec-table th.col-on { color: var(--jev-color); }
+    .spec-table th.col-off { color: #c084fc; }
+
+    .spec-table td {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      font-size: 14px;
+    }
+    .spec-table tr:last-child td { border-bottom: none; }
+    .spec-table td.dim { color: var(--text-muted); font-size: 13px; }
+    .spec-table tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    .stat-highlight {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .stat-highlight.good { color: var(--success); background: rgba(16, 185, 129, 0.1); }
+    .stat-highlight.bad { color: var(--danger); background: rgba(239, 68, 68, 0.1); }
+    .stat-highlight.neutral { color: var(--text-muted); }
+
+    /* Visual Bars Section */
+    .bars-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+    @media (max-width: 768px) { .bars-grid { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+    }
+    .chart-card h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .chart-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    .bar-row {
+      margin-bottom: 16px;
+    }
+    .bar-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      font-family: var(--font-mono);
+      margin-bottom: 6px;
+    }
+    .bar-track {
+      height: 10px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 6px;
+      overflow: hidden;
+      position: relative;
+    }
+    .bar-prog {
+      height: 100%;
+      border-radius: 6px;
+      transition: width 0.5s ease-out;
+    }
+    .bar-prog.jev { background: linear-gradient(90deg, #0284c7, #38bdf8); }
+    .bar-prog.pi { background: linear-gradient(90deg, #7e22ce, #c084fc); }
+
+    /* Bottom Practical Advice Box */
+    .advice-banner {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(168, 85, 247, 0.08) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 16px;
+      padding: 28px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 20px;
+      align-items: center;
+    }
+    .advice-icon {
+      font-size: 36px;
+    }
+    .advice-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+    .advice-desc {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-faint);
+      margin-top: 48px;
+      font-family: var(--font-mono);
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  
+  <!-- Hero Section -->
+  <header class="hero-header">
+    <div class="pill-badge">
+      <span>⚡️ PRODUCT COMPARISON</span>
+      <span>•</span>
+      <span>pi-review Benchmark</span>
+    </div>
+    <h1>
+      <span class="off">不用 Jev</span> vs <span class="on">开启 Jev</span>
+    </h1>
+    <p class="hero-desc">
+      从<strong>耗时延迟</strong>、<strong>模型配额消耗</strong>、<strong>多轮复查收敛</strong>与<strong>裁决准确性</strong>四个维度，直观透视开启 Jev 增强模式前后的体验跃迁与边界权衡。
+    </p>
+  </header>
+
+  <!-- Big 2-Column Battle Cards -->
+  <div class="battle-grid">
+
+    <!-- Column 1: Jev Mode OFF -->
+    <div class="battle-card off">
+      <div class="card-top">
+        <div>
+          <div class="mode-title">
+            <span>传统模式</span>
+            <span class="mode-tag">Jev OFF</span>
+          </div>
+          <div class="mode-meta">默认 / 显式 PI_REVIEW_JEV=0</div>
+        </div>
+      </div>
+
+      <div class="hero-stat">
+        <div class="stat-label">3 评委共识裁决阶段耗时</div>
+        <div class="stat-number">
+          17 ~ 61s
+          <span style="font-size: 14px; color: var(--danger); font-weight: normal;">(最高 103s)</span>
+        </div>
+        <div class="stat-desc">评委审完后，需额外拉起一个完整的 Pi 大模型子会话进行会诊，耗时显著。</div>
+      </div>
+
+      <ul class="feature-list">
+        <li class="feature-item">
+          <div class="icon-box bad">✕</div>
+          <div class="feature-text">
+            <strong>裁决速度缓慢</strong>
+            <span>每次裁决都要重新经历子进程冷启动与大模型 Token 生成（15~60秒+）。</span>
+          </div>
+        </li>
+        <li class="feature-item">
+          <div class="icon-box bad">✕</div>
+          <div class="feature-text">
+            <strong>挤占评委 API 渠道配额 (高危 429)</strong>
+            <span>仲裁器复用主评委的模型通道，高并发多评委时经常遭遇限流连带阻断。</span>
+          </div>
+        </li>
+        <li class="feature-item">
+          <div class="icon-box bad">✕</div>
+          <div class="feature-text">
+            <strong>跨轮复查"严重失忆" (1/10)</strong>
+            <span>第二轮评委换了措辞即判定为"全新问题"，<code>--until clean</code> 无法收敛空耗预算。</span>
+          </div>
+        </li>
+        <li class="feature-item">
+          <div class="icon-box good">✓</div>
+          <div class="feature-text">
+            <strong>成对合并几乎零错并 (P = 93%~100%)</strong>
+            <span>大模型单点理解细致，极少把同一函数内的两个不同 bug 错误合并。</span>
+          </div>
+        </li>
+      </ul>
+
+      <div class="card-footer-box">
+        🐢 适合：不计耗时与 API 消耗，追求报告绝对不合并两个细小 bug 的严苛场景。
+      </div>
+    </div>
+
+    <!-- Column 2: Jev Mode ON -->
+    <div class="battle-card on">
+      <div class="card-ribbon">RECOMMENDED</div>
+      <div class="card-top">
+        <div>
+          <div class="mode-title">
+            <span>Jev 增强模式</span>
+            <span class="mode-tag">Jev ON</span>
+          </div>
+          <div class="mode-meta">配置 TYPESAFE_API_KEY (默认自动生效)</div>
+        </div>
+      </div>
+
+      <div class="hero-stat">
+        <div class="stat-label">3 评委共识裁决阶段耗时</div>
+        <div class="stat-number">
+          1.9 ~ 2.2s
+          <span style="font-size: 14px; color: var(--success); font-weight: normal;">(提速 10~25x)</span>
+        </div>
+        <div class="stat-desc">单次轻量 typed 概率微决策，秒级完成归档，流水线不再漫长等待。</div>
+      </div>
+
+      <ul class="feature-list">
+        <li class="feature-item">
+          <div class="icon-box good">✓</div>
+          <div class="feature-text">
+            <strong>秒级裁决完成 (~2.0 秒)</strong>
+            <span>561 个候选对在单次轻量 API 中完成判定，端到端体验极其顺滑。</span>
+          </div>
+        </li>
+        <li class="feature-item">
+          <div class="icon-box good">✓</div>
+          <div class="feature-text">
+            <strong>0 评委配额消耗 & 物理通道隔离</strong>
+            <span>裁决走专属 TypeSafe 旁路，评委通道即使遭遇 429 也不受波及。</span>
+          </div>
+        </li>
+        <li class="feature-item">
+          <div class="icon-box good">✓</div>
+          <div class="feature-text">
+            <strong>跨轮复查稳健识别老问题 (6/10)</strong>
+            <span>语义穿透措辞漂移，准确识别"老毛病依旧未修"，驱动多轮收敛快速提前停止。</span>
+          </div>
+        </li>
+        <li class="feature-item">
+          <div class="icon-box warn">!</div>
+          <div class="feature-text">
+            <strong>存在链式合并风险 (Complete-Linkage 优化后清零)</strong>
+            <span>默认 Union-Find 算法在同函数多 bug 时偶发折叠（P=72%）；配 Complete-Linkage 可做到 100%。</span>
+          </div>
+        </li>
+      </ul>
+
+      <div class="card-footer-box">
+        ⚡️ 适合：现代 CI/CD 流水线、多评委即时代码评审、多轮自动收敛 Gate。
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Detailed Spec Table -->
+  <div class="section-headline">关键维度产品规格对比表 (Product Matrix)</div>
+  <div class="spec-table-card">
+    <table class="spec-table">
+      <thead>
+        <tr>
+          <th style="width: 25%;">场景 / 指标</th>
+          <th class="col-off" style="width: 37%;">不用 Jev (Default / OFF)</th>
+          <th class="col-on" style="width: 38%;">开启 Jev (Jev ON)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>单评委 · 单轮评审</strong></td>
+          <td><span class="stat-highlight neutral">38s ~ 53s</span><br><span class="dim">正常运行，无裁决环节</span></td>
+          <td><span class="stat-highlight neutral">38s ~ 53s</span><br><span class="dim"><strong>完全一致 (No-op)</strong>，不产生任何额外开销</span></td>
+        </tr>
+        <tr>
+          <td><strong>3 评委面板 · 裁决耗时</strong></td>
+          <td><span class="stat-highlight bad">17s ~ 61.4s</span><br><span class="dim">整轮耗时 133s，近半时间在等仲裁模型</span></td>
+          <td><span class="stat-highlight good">1.9s ~ 2.2s</span><br><span class="dim">整轮仅 96s，裁决瞬间完成（<strong>提速 15 倍+</strong>）</span></td>
+        </tr>
+        <tr>
+          <td><strong>Loop 多轮对比识别率</strong></td>
+          <td><span class="stat-highlight bad">1 / 10 留存</span><br><span class="dim">措辞稍变就以为旧问题解决、新增 10 个新问题</span></td>
+          <td><span class="stat-highlight good">6 / 10 留存</span><br><span class="dim"><strong>准确识别老问题持续存在</strong>，收敛信号真实有效</span></td>
+        </tr>
+        <tr>
+          <td><strong>评委 Provider 资源竞争</strong></td>
+          <td><span class="stat-highlight bad">共用 Token / 易 429 限流</span><br><span class="dim">曾测出评委 + 仲裁连带触发上游 429 直接 Blocked</span></td>
+          <td><span class="stat-highlight good">物理隔离 / 0 干扰</span><br><span class="dim">裁决走独立 System One 通道，即便挂了也能优雅降级</span></td>
+        </tr>
+        <tr>
+          <td><strong>合并准确率 (Precision)</strong></td>
+          <td><span class="stat-highlight good">93% ~ 100%</span><br><span class="dim">极少把两个不同 bug 误归为同一个</span></td>
+          <td><span class="stat-highlight neutral">72% ~ 75% (原始)</span> → <span class="stat-highlight good">100% (新算法)</span><br><span class="dim">完整链接 (Complete-Linkage) 优化后<strong>错并直接清零</strong></span></td>
+        </tr>
+        <tr>
+          <td><strong>问题漏并率 (Advisory 堆积)</strong></td>
+          <td><span class="stat-highlight bad">较高 (漏并 6~13 对)</span><br><span class="dim">评委报的同一个 bug 因措辞差异被降级为非阻塞 Advisory</span></td>
+          <td><span class="stat-highlight good">较低 (漏并 7~11 对)</span><br><span class="dim">召回更积极，更不容易把共识 bug 当成孤证放过</span></td>
+        </tr>
+        <tr>
+          <td><strong>门禁结论 (Gate Result)</strong></td>
+          <td><span class="stat-highlight good">has_findings</span><br><span class="dim">只要有任一 Confirmed 即可拦住门禁</span></td>
+          <td><span class="stat-highlight good">has_findings</span><br><span class="dim">核心阻断行为完全一致，不会发生安全漏判</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Visual Bar Meters -->
+  <div class="section-headline">性能对比量化直方图</div>
+  <div class="bars-grid">
+
+    <!-- Bar 1: Latency -->
+    <div class="chart-card">
+      <h3>⚡️ 裁决阶段耗时对比（越短越好）</h3>
+      <div class="chart-sub">同批 35 条 Findings (561 候选对) 的纯裁决阶段耗时</div>
+      
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span style="color:var(--jev-color);">Jev 增强模式</span>
+          <span style="color:var(--jev-color); font-weight:700;">2.2 秒</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-prog jev" style="width: 5%;"></div>
+        </div>
+      </div>
+
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span style="color:#c084fc;">传统 Pi 仲裁器 (最短样本)</span>
+          <span>16.8 秒</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-prog pi" style="width: 35%;"></div>
+        </div>
+      </div>
+
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span style="color:#c084fc;">传统 Pi 仲裁器 (平均样本)</span>
+          <span>61.4 秒</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-prog pi" style="width: 100%;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bar 2: Loop Retention -->
+    <div class="chart-card">
+      <h3>🔄 多轮 Loop 老问题留存识别率（越高越准）</h3>
+      <div class="chart-sub">当同一代码在前后两轮被评委措辞轻微改写时的识别留存率</div>
+
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span style="color:var(--jev-color);">Jev 模式 (语义匹配)</span>
+          <span style="color:var(--jev-color); font-weight:700;">60% ~ 100% 识别</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-prog jev" style="width: 80%;"></div>
+        </div>
+      </div>
+
+      <div class="bar-row">
+        <div class="bar-labels">
+          <span style="color:#c084fc;">传统模式 (纯文本匹配)</span>
+          <span>仅 10% 识别 (几乎失灵)</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-prog pi" style="width: 10%;"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Line Advice -->
+  <div class="advice-banner">
+    <div class="advice-icon">💡</div>
+    <div>
+      <div class="advice-title">一句话选型建议</div>
+      <div class="advice-desc">
+        <strong>默认必须开启 Jev Mode</strong>。它把多评委面板最沉重的分钟级裁决压到了 2 秒，规避了评委 API 429 限流，并且是多轮 Loop 复查能够收敛的前提。<br>
+        代码库中已内置 <strong>Complete-Linkage 完整链接合并算法</strong>，直接消除了 Jev 原有的链式误并隐患，实现了与大模型对齐的 <strong>100% 精度</strong>。
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Generated from docs/research/jev-adjudication-case.md benchmark data • opencode-go/deepseek-v4.1-flash
+  </footer>
+
+</div>
+
+</body>
+</html>
