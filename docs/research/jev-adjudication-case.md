@@ -157,6 +157,36 @@ live panel confirmed counts (8–11) and cluster sizes vary in both directions
 because each arm drew different reviewers, which is what the replay below
 removes.
 
+### Post-fix re-run: complete-linkage, mixed flash fleet
+
+After the union-find → complete-linkage fix, the same eight cells were re-run
+twice (independent samples) on a three-model flash fleet:
+`qwen/qwen3.8-flash:medium`, `deepseek/deepseek-v4.1-flash:low`,
+`z-ai/glm-5.3-flashx:high`, panel adjudicator pinned to
+`deepseek/deepseek-v4.1-flash`. Cell config otherwise unchanged.
+
+| Config | Jev | Sample A cross-round | Sample B cross-round |
+|--------|-----|---------------------|---------------------|
+| single, 2 rounds | off | =0 persisting · +11 · -9 | =0 persisting · +8 · -11 |
+| single, 2 rounds | on | =8 persisting · +1 · -3 | =9 persisting · +3 · -0 |
+| panel 3, 2 rounds | off | =2 persisting · +6 · -8 | =0 persisting · +8 · -9 |
+| panel 3, 2 rounds | on | =8 persisting · +1 · -2 | =8 persisting · +1 · -1 |
+
+Single-round cells stayed noisy in both samples (10–13 actionable, 25–38 s per
+round; Jev on/off ordering flips between samples). Panel 1-round: sample A
+151 s (`pi`) vs 149 s (`jev`, 14 escalated pairs); sample B 228 s (`pi`) vs
+89 s (`jev`, 12 escalated pairs) — reviewer sampling latency (up to 201 s in
+sample B) dominates, so panel wall time does not order the engines
+consistently on a fast fleet. Derived adjudication time (round duration minus
+slowest reviewer) spanned 9–110 s in the `jev` arm vs 21–73 s for `pi`;
+escalation cost scales with the borderline-pair count.
+
+Reproduced signal: with the shipped complete-linkage matcher the Jev arm
+accounts for 8–9 clusters as persisting in both samples (pre-fix: 5–6) while
+both deterministic off-arms read 0–2. The fleet also changed between the
+pre-fix table and these samples, so A/B agreement — not the pre/post delta —
+is the controlled evidence here. No cell flips its gate outcome.
+
 ### Controlled replay
 
 Frozen from the two `panel 3, 1 round` runs above (35 and 33 source findings,
