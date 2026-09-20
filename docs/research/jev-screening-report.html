@@ -530,6 +530,77 @@
       overflow-x: auto;
     }
 
+    /* ELI5 Banner */
+    .eli5-banner {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.8) 0%, rgba(10, 16, 30, 0.9) 100%);
+      border: 1px solid var(--card-border-glow);
+      border-radius: 22px;
+      padding: 36px 32px;
+      margin-bottom: 56px;
+      box-shadow: 0 20px 50px -15px rgba(56, 189, 248, 0.2);
+    }
+    .eli5-header { text-align: center; margin-bottom: 30px; }
+    .eli5-header h2 em { font-style: normal; color: var(--cyan); text-shadow: 0 0 20px var(--cyan-glow); }
+    .eli5-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 768px) { .eli5-grid { grid-template-columns: 1fr; } }
+    .eli5-card {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 26px;
+      display: flex;
+      flex-direction: column;
+    }
+    .eli5-card.trad { border-color: rgba(192, 132, 252, 0.3); }
+    .eli5-card.screen {
+      border-color: rgba(56, 189, 248, 0.45);
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.06) 0%, rgba(0, 0, 0, 0.4) 100%);
+      box-shadow: 0 10px 30px -10px var(--cyan-glow);
+    }
+    .eli5-badge {
+      align-self: flex-start;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 6px;
+      margin-bottom: 14px;
+      text-transform: uppercase;
+    }
+    .trad .eli5-badge { background: var(--purple-bg); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.3); }
+    .screen .eli5-badge { background: var(--cyan-bg); color: var(--cyan); border: 1px solid rgba(56, 189, 248, 0.4); }
+    .eli5-emoji { font-size: 38px; margin-bottom: 12px; }
+    .eli5-title { font-size: 17px; font-weight: 800; color: var(--text-main); margin-bottom: 10px; }
+    .eli5-analogy { font-size: 13.5px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.6; }
+    .eli5-points { list-style: none; font-size: 13px; color: var(--text-muted); display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; flex: 1; }
+    .eli5-footer {
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 8px 12px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.03);
+      color: var(--text-faint);
+    }
+    .eli5-footer.best { background: rgba(56, 189, 248, 0.1); color: #7dd3fc; }
+    .eli5-secret {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 14px;
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 18px;
+      align-items: center;
+    }
+    .secret-icon { font-size: 32px; }
+    .secret-title { font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
+    .secret-desc { font-size: 13px; color: #cbd5e1; line-height: 1.6; }
+
     footer {
       text-align: center;
       font-size: 13px;
@@ -580,6 +651,66 @@
       <div class="stat-tag">Defect Recall</div>
       <div class="stat-val">100%</div>
       <div class="stat-desc">SQL 注入、异步丢失、循环越界等 5 大生产缺陷全数捕获</div>
+    </div>
+  </div>
+
+  <!-- ELI5 Section -->
+  <div class="eli5-banner">
+    <div class="eli5-header">
+      <div class="pill" style="margin-bottom: 10px;">💡 ELI5 · 像 5 岁小孩一样秒懂</div>
+      <h2 style="font-size: 28px; font-weight: 900; margin-bottom: 8px;">
+        什么是 <em>screen</em>？两个死比喻彻底讲透
+      </h2>
+      <p style="color: var(--text-muted); font-size: 15px;">
+        如果把开发者写代码比作去高铁站坐车，AI 审查其实分成了两种完全不同的角色：
+      </p>
+    </div>
+
+    <div class="eli5-grid">
+      <!-- Metaphor 1 -->
+      <div class="eli5-card trad">
+        <div class="eli5-badge">传统 AI 审查 · 深度会诊</div>
+        <div class="eli5-emoji">👨‍⚕️ 🩺 📜</div>
+        <div class="eli5-title">3 位老中医坐诊，手写 800 字调理报告</div>
+        <div class="eli5-analogy">
+          <strong>场景：</strong>你只想刷卡进站，门口却强制安排了 3 位资深老中医给你把脉。
+        </div>
+        <ul class="eli5-points">
+          <li>• 每个人要闭目思考 40 秒，仔细看你的面相和舌苔；</li>
+          <li>• 每个人拿毛笔工整写出 800 字的就医、起居与饮食建议；</li>
+          <li>• <strong>结果：</strong>诊断极深极准，但排队排了 2 小时，车早开走了（<strong>Git Push 超时卡死</strong>）。</li>
+        </ul>
+        <div class="eli5-footer">适合：重大疑难杂症（核心架构 PR 深度会诊）</div>
+      </div>
+
+      <!-- Metaphor 2 -->
+      <div class="eli5-card screen">
+        <div class="eli5-badge best">pi-review screen · 秒级安检</div>
+        <div class="eli5-emoji">🚇 🎒 🚨</div>
+        <div class="eli5-title">进站口的行李 X 光安检机</div>
+        <div class="eli5-analogy">
+          <strong>场景：</strong>行李（代码）滑过履带，传感器 1.0 秒钟扫一下透视图。
+        </div>
+        <ul class="eli5-points">
+          <li>• 它不给你写养生建议，它只看有没有带管制刀具（SQL 注入、数组越界）；</li>
+          <li>• 扫到危险品瞬间 <strong>「嘀嘀嘀」</strong> 报警把你拦下，红灯标出第几行；</li>
+          <li>• 没带危险品 <strong>「滴」</strong> 一声 1.0 秒直接放行（<strong>零等待丝滑进站</strong>）。</li>
+        </ul>
+        <div class="eli5-footer best">适合：日常刷卡进站（Git Hook / CI 极速门禁）</div>
+      </div>
+    </div>
+
+    <!-- The Secret Box -->
+    <div class="eli5-secret">
+      <div class="secret-icon">⚡️</div>
+      <div>
+        <div class="secret-title">为什么 screen 能从 80 秒压缩到 1.0 秒？</div>
+        <div class="secret-desc">
+          <strong>秘密在于「不写大作文，改刷机读卡」</strong>：<br>
+          传统审查最慢的是大模型现场逐字生成 1000 字长篇散文；<br>
+          <code>screen</code> 是把代码切成小块，在 1 秒内用光学机读卡连刷 108 道判断题（有没有越界？有没有漏 await？）。只拿概率评分，在本地直接查表贴标签，<strong>把耗时最长的大模型写作文环节彻底砍掉了</strong>。
+        </div>
+      </div>
     </div>
   </div>
 
