@@ -207,7 +207,7 @@ pi-review screen src/order-service.ts     # 也支持 @file；有发现 exit 1�
                 照样拦截——绝不静默丢弃）
 ```
 
-`ReviewFinding` 各字段的产出方：`id`/`path`/`location` 来自切片器（确定性），`severity`/`summary`/`recommendation` 来自命中模式的目录模板，`actionable` 是阈值化后的概率——LLM 的散文角色收缩到目录外的新缺陷与跨 hunk 推理，这两类由「未匹配信号」finding 交回给完整 `pi-review`。目录（`src/screen.ts` 的 `SCREEN_PATTERNS`）是覆盖率旋钮：目前内置八个模式（循环越界、fire-and-forget 异步、SQL 注入、slice 越界、float 金额、float 精确比较、缓存别名、缺失输入校验）；历史里反复出现未匹配信号时就往里加。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_SCREEN_JSON` 机器行（status、findings、逐 hunk 概率、usage）；退出码与 review 一致（0 clean、1 has_findings、4 blocked/无 key）。screen 是快速门禁与分诊层，不替代带证据链的完整评审——实测数据与诚实边界见 [docs/research/jev-screening-case.md](docs/research/jev-screening-case.md)。
+`ReviewFinding` 各字段的产出方：`id`/`path`/`location` 来自切片器（确定性），`severity`/`summary`/`recommendation` 来自命中模式的目录模板，`actionable` 是阈值化后的概率——LLM 的散文角色收缩到目录外的新缺陷与跨 hunk 推理，这两类由「未匹配信号」finding 交回给完整 `pi-review`。目录（`src/screen.ts` 的 `SCREEN_PATTERNS`）是覆盖率旋钮：目前内置八个模式（循环越界、fire-and-forget 异步、SQL 注入、slice 越界、float 金额、float 精确比较、缓存别名、缺失输入校验）；历史里反复出现未匹配信号时就往里加。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_SCREEN_JSON` 机器行（status、findings、逐 hunk 概率、usage）；退出码与 review 一致（0 clean、1 has_findings、4 blocked/无 key）。screen 是快速门禁与分诊层，不替代带证据链的完整评审——详见 [交互式视觉报告 (docs/research/jev-screening-report.html)](docs/research/jev-screening-report.html)、[深度落地场景指南 (docs/research/jev-screening-guide.md)](docs/research/jev-screening-guide.md) 与 [实测数据与边界 (docs/research/jev-screening-case.md)](docs/research/jev-screening-case.md)。
 
 ### 成本与失败
 
