@@ -312,7 +312,7 @@ export function registerPanelReviewTool(pi: ExtensionAPI): void {
       consensus: Type.Optional(Type.String({ description: "any | quorum | majority | unanimous" })),
       minAgree: Type.Optional(Type.Number({ description: "Quorum threshold when consensus=quorum" })),
       consensusModel: Type.Optional(Type.String({ description: "Model for semantic adjudication only" })),
-      concurrency: Type.Optional(Type.Number({ description: "Bound parallel reviewers (≤ reviewer count)" })),
+      concurrency: Type.Optional(Type.Number({ description: "Bound parallel reviewers (≤ reviewer count). Omit for full parallelism — all reviewers run concurrently by default; do not pass 1 unless the provider account cannot handle concurrent requests." })),
       model: Type.Optional(Type.String({ description: "Optional shared reviewer model." })),
       thinking: Type.Optional(Type.String({ description: "Optional thinking level." })),
     }),
