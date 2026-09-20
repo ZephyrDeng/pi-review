@@ -96,6 +96,12 @@ const NOUL_CRITERIA = {
   false: "The findings are distinct issues, or merely share a file or symptom category.",
 } as const;
 
+/** Generic true/false rubric for non-matching Noul questions (e.g. screen). */
+export const GENERIC_NOUL_CRITERIA = {
+  true: "The supplied evidence establishes this condition.",
+  false: "The supplied evidence does not establish this condition.",
+} as const;
+
 interface SystemOneEnvelope {
   answers: Record<string, unknown>;
   usage?: JevUsage;
@@ -159,11 +165,12 @@ export async function evaluateNouls(
   state: unknown,
   questions: Record<string, string>,
   fetchImpl: JevFetch = fetch,
+  criteria: { readonly true: string; readonly false: string } = NOUL_CRITERIA,
 ): Promise<JevNoulResult> {
   const questionBody = Object.fromEntries(
     Object.entries(questions).map(([id, instructions]) => [
       id,
-      { type: "noul", instructions, criteria: { ...NOUL_CRITERIA } },
+      { type: "noul", instructions, criteria: { ...criteria } },
     ]),
   );
   const envelope = await callSystemOne(connection, state, questionBody, fetchImpl);
@@ -254,8 +261,9 @@ export async function evaluateChoices(
  * candidate group becomes one Noul question; all pairs across all groups go
  * out in a single System One call. Each pair above the no-merge floor becomes
  * a proposed merge whose confidence is the pair probability — the matcher's
- * union-find and SEMANTIC_MATCH_CONFIDENCE_THRESHOLD stay the single policy
- * point, and its provenance validation re-checks every id we emit.
+ * complete-linkage clustering and SEMANTIC_MATCH_CONFIDENCE_THRESHOLD stay the
+ * single policy point, and its provenance validation re-checks every id we
+ * emit.
  */
 export function createJevAdjudicator(
   connection: JevConnection,

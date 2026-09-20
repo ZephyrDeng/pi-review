@@ -15,6 +15,7 @@ import { installSkill, uninstallSkill } from "./skill.js";
 import { runUpdate } from "./update.js";
 import { runInstall } from "./install.js";
 import { runClassify } from "./classify.js";
+import { runScreen } from "./screen.js";
 
 const parsed = parseArgs(process.argv.slice(2));
 if (isInstallHelp(parsed)) usage(0);
@@ -55,6 +56,8 @@ if (parsed.command === "models") {
   runUpdate();
 } else if (parsed.command === "classify") {
   await runClassify(parsed, readReviewStdin());
+} else if (parsed.command === "screen") {
+  await runScreen(parsed);
 } else if (parsed.command === "install") {
   runInstall({
     pi: parsed.installPi !== false,
