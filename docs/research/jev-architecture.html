@@ -185,7 +185,7 @@
     <text x="1180" y="428" text-anchor="middle" font-size="14" font-weight="700" fill="#d8b4fe">Pi 仲裁器（大模型会诊）</text>
     <text x="1180" y="450" text-anchor="middle" font-size="12" fill="#e2e8f0">一次 JSON 会诊覆盖全部候选对</text>
     <text x="1180" y="470" text-anchor="middle" font-size="12" font-weight="600" fill="#c084fc">17~61 秒 · 复用评委主模型通道</text>
-    <text x="1180" y="490" text-anchor="middle" font-size="11" fill="#64748b">429 限流风险与评委同源</text>
+    <text x="1180" y="490" text-anchor="middle" font-size="11" fill="#64748b">持续消耗主模型评委 Token 额度</text>
 
     <!-- 级联升级（双向箭头） -->
     <path d="M980 470 H 1033" stroke="#f59e0b" stroke-width="2" fill="none" marker-end="url(#arO)" marker-start="url(#arOs)"/>
@@ -280,7 +280,7 @@
     </div>
     <div class="takeaway purple">
       <b>🧠 紫色链路 = 主模型通道</b>
-      评委生成、Pi 仲裁器（Jev 关闭或模糊对升级时）、Loop 复查都走同一个主模型渠道——429 限流时它们会互相拖累，这正是 Jev 旁路裁决要规避的风险。
+      评委生成、Pi 仲裁器（Jev 关闭或模糊对升级时）、Loop 复查都走同一个主模型渠道——共用模型上下文与 Token 配额，这正是 Jev 独立轻量旁路裁决要解耦的开销。
     </div>
     <div class="takeaway red">
       <b>🛡️ 红色虚线 = 安全网</b>

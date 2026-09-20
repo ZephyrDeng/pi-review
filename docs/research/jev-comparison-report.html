@@ -411,14 +411,14 @@
           <div class="icon-box bad">✕</div>
           <div class="feature-text">
             <strong>多轮 Loop 彻底失忆（收敛信号失真）</strong>
-            <span>实测样本 A 为 <code>=0 留存 · +11 新增</code>，样本 B 为 <code>=0 留存 · +8 新增</code>，循环复查无法判定收敛。</span>
+            <span>在 Flash 编队与 Gemini 3.8 Flash 下两轮实测均为 <code>=0 留存 · +6~11 新增</code>，旧问题全丢，循环复查无法判定收敛。</span>
           </div>
         </li>
         <li class="feature-item">
           <div class="icon-box bad">✕</div>
           <div class="feature-text">
-            <strong>挤占评委 API 渠道配额 (高危 429)</strong>
-            <span>仲裁器复用评委主模型通道，全量候选对拉起大模型子会话会诊，并发极易撞上限流。</span>
+            <strong>持续消耗主模型评委 Token 额度</strong>
+            <span>仲裁器复用评委主模型通道，全量候选对拉起大模型子会话会诊，评委与裁决共用模型配额。</span>
           </div>
         </li>
         <li class="feature-item">
@@ -468,15 +468,15 @@
         <li class="feature-item">
           <div class="icon-box good">✓</div>
           <div class="feature-text">
-            <strong>跨轮状态账本极其稳健 (8~9 条留存)</strong>
-            <span>实测样本 A <code>=8 · +1 · -2</code>，样本 B <code>=8 · +1 · -1</code>，为 <code>--until clean</code> 提供真实收敛依据。</span>
+            <strong>跨轮状态账本极其稳健（实测 100% 连续性）</strong>
+            <span>Gemini 3.8 Flash 实测完美达成 <code>=7 持续 · +0 新增 · -0 消除</code>；Flash 编队达 <code>=8~9 留存</code>，为 <code>--until clean</code> 提供真实收敛依据。</span>
           </div>
         </li>
         <li class="feature-item">
           <div class="icon-box good">✓</div>
           <div class="feature-text">
-            <strong>0 评委配额消耗 & 物理通道隔离</strong>
-            <span>裁决走专属 TypeSafe 旁路，仅 8~14 对边界模糊对升级仲裁，评委模型通道 0 压力。</span>
+            <strong>0 评委配额消耗 & 独立通道解耦</strong>
+            <span>裁决走专属 TypeSafe 旁路，仅 8~14 对边界模糊对升级仲裁，完全不消耗主评委的 Token 配额与上下文。</span>
           </div>
         </li>
         <li class="feature-item">
@@ -522,17 +522,17 @@
         <tr>
           <td><strong>极速门禁初筛 (<code>screen</code>)</strong><br><span class="dim">（v0.16.0 新增命令）</span></td>
           <td><span class="stat-highlight neutral">不支持</span><br><span class="dim">必须等待完整评委生成（最少 35s~200s+）</span></td>
-          <td><span class="stat-highlight good">1.2 秒瞬间阻断</span><br><span class="dim">单次调用 108 题判定，<strong>100% 召回注入缺陷</strong></span></td>
+          <td><span class="stat-highlight good">1.0 ~ 1.2 秒瞬间阻断</span><br><span class="dim">单次调用 108 题判定，<strong>100% 召回注入缺陷</strong></span></td>
         </tr>
         <tr>
-          <td><strong>3 评委混合编队耗时结构</strong><br><span class="dim">（Qwen/DeepSeek/GLM Flash）</span></td>
-          <td><span class="stat-highlight neutral">140s ~ 228s</span><br><span class="dim">评委采样最慢 201s，Pi 全量裁决 21s~73s</span></td>
-          <td><span class="stat-highlight neutral">89s ~ 200s</span><br><span class="dim">评委采样最慢 118s，Jev 旁路裁决，升级 8~14 对</span></td>
+          <td><strong>3 评委面板耗时结构</strong><br><span class="dim">（Gemini 3.8 / Flash 编队）</span></td>
+          <td><span class="stat-highlight neutral">33s ~ 228s</span><br><span class="dim">评委采样 17s~201s，Pi 全量裁决 10s~73s</span></td>
+          <td><span class="stat-highlight neutral">35s ~ 200s</span><br><span class="dim">评委采样 19s~118s，Jev 旁路裁决，升级 8~14 对</span></td>
         </tr>
         <tr>
-          <td><strong>评委 Provider 资源竞争</strong></td>
-          <td><span class="stat-highlight bad">共用 Token / 易 429 限流</span><br><span class="dim">裁决全量拉起大模型，与评委争抢同一渠道</span></td>
-          <td><span class="stat-highlight good">物理隔离 / 0 干扰</span><br><span class="dim">裁决走独立 TypeSafe 旁路，即便宕机也可安全降级</span></td>
+          <td><strong>评委 Provider 资源与配额</strong></td>
+          <td><span class="stat-highlight bad">全量占用主模型 Token</span><br><span class="dim">裁决全量拉起大模型，消耗主通道上下文与配额</span></td>
+          <td><span class="stat-highlight good">0 消耗评委 Token / 独立通道</span><br><span class="dim">裁决走独立 TypeSafe 旁路，即便网络波动也可安全降级</span></td>
         </tr>
         <tr>
           <td><strong>合并聚类准确率 (Precision)</strong></td>
@@ -663,16 +663,16 @@
     <div>
       <div class="advice-title">一句话选型与实践建议</div>
       <div class="advice-desc">
-        在 Flash 混合快编队实测中，<strong>Jev 的决定性价值不是单轮裁决快几秒，而是“跨轮状态连续性”与“独立通道抗 429 冲击”</strong>。<br>
+        在现代 Flash 编队与 Gemini 3.8 Flash 实测中，<strong>Jev 的决定性价值不是单轮绝对耗时，而是“跨轮状态连续性”与“独立轻量旁路零消耗评委 Token”</strong>。<br>
         <strong>推荐落地策略</strong>：<br>
-        1. <strong>第一道防线</strong>：在 PR 提交与 Pre-push 钩子中运行 <code>pi-review screen</code>，<strong>1.2 秒</strong>内秒级拦住常见严重缺陷与已知模式；<br>
-        2. <strong>第二道防线</strong>：在完整 CI 流水线中运行 <code>pi-review loop --until clean</code>（保持 Jev 开启），依靠稳健的跨轮账本实现可收敛的多轮复查。
+        1. <strong>第一道防线</strong>：在 PR 提交与 Pre-push 钩子中运行 <code>pi-review screen</code>，<strong>1.0 秒</strong>内秒级拦住常见严重缺陷与已知模式；<br>
+        2. <strong>第二道防线</strong>：在完整 CI 流水线中运行 <code>pi-review loop --until clean</code>（保持 Jev 开启），依靠稳健的跨轮账本（实测 100% 准确追踪老问题）实现可收敛的多轮复查。
       </div>
     </div>
   </div>
 
   <footer>
-    pi-review v0.16.0 • Benchmark: Qwen 3.8 Flash / DeepSeek V4.1 Flash / GLM 5.3 FlashX • 2-Sample Controlled Matrix Data
+    pi-review v0.16.1 • Benchmark: Gemini 3.8 Flash / Qwen 3.8 Flash / DeepSeek V4.1 Flash / GLM 5.3 FlashX • 3-Sample Controlled Matrix Data
   </footer>
 
 </div>

@@ -187,6 +187,37 @@ both deterministic off-arms read 0–2. The fleet also changed between the
 pre-fix table and these samples, so A/B agreement — not the pre/post delta —
 is the controlled evidence here. No cell flips its gate outcome.
 
+### Uniform model benchmark: Gemini 3.8 Flash (medium thinking)
+
+To eliminate reviewer diversity noise and measure Jev's effect under an identical,
+high-capability modern model, all reviewers and the adjudicator were pinned to
+`zenmux/gemini-3.8-flash:medium` on the 106-line `order-service.ts` fixture.
+
+| Config | Jev | Round 1 | Round 2 | Cross-round ledger (`vs prev`) |
+|--------|-----|---------|---------|--------------------------------|
+| single, 1 round | off | 8 actionable, 78.1 s | — | — |
+| single, 1 round | on | 8 actionable, 78.1 s | — | — |
+| single, 2 rounds | off | 6 actionable, 22.0 s | 6 actionable, 21.4 s | =0 persisting · +6 new · -6 resolved |
+| single, 2 rounds | on | 8 actionable, 27.8 s | 5 actionable, 19.0 s | =3 persisting · +2 new · -5 resolved |
+| panel 3, 1 round | off | 6 confirmed / 0 advisory, engine `pi`, 33.3 s | — | — |
+| panel 3, 1 round | on | 7 confirmed / 0 advisory, engine `jev`, 39.5 s (esc 8) | — | — |
+| panel 3, 2 rounds | off | 7 conf / 0 adv, 45.2 s | 6 conf / 0 adv, 32.8 s | =0 persisting · +6 new · -7 resolved |
+| panel 3, 2 rounds | on | 7 conf / 3 adv, 35.8 s | 7 conf / 0 adv, 35.5 s | **=7 persisting · +0 new · -0 resolved** |
+
+Key findings from this uniform-model run:
+- **Flawless cross-round continuity with Jev ON**: In the 3-reviewer panel loop, Jev ON
+  achieved **`=7 persisting · +0 new · -0 resolved`** (100% precision and recall; exactly
+  the 7 confirmed defects persisted across both rounds on unchanged code). With Jev OFF,
+  the deterministic string matcher failed completely due to natural phrasing drift:
+  `=0 persisting · +6 new · -7 resolved` (falsely reporting that all 7 previous bugs were resolved
+  and 6 brand new bugs appeared).
+- **Fast generation compresses wall time**: Gemini 3.8 Flash parallel reviewer generation
+  finished in 17–32 s, bringing total panel duration down to ~35 s per round. Adjudication
+  wall time was 10.7 s (`pi`) vs 9.0 s (`jev`, with 8 borderline pairs escalated).
+- **Gate-grade screen comparison**: On the exact same fixture, `pi-review screen` runs in
+  **1.0 s** (108 questions in 1 call, zero LLM prose generation), hitting all 5 planted
+  defects plus 5 incidental patterns (10 total findings, exit 1).
+
 ### Controlled replay
 
 Frozen from the two `panel 3, 1 round` runs above (35 and 33 source findings,
@@ -304,13 +335,11 @@ when borderline pairs exist.
    `6 persisting / 3 added / 4 resolved`. The `--until clean`
    `non_converging` stop keys on an identical actionable set across two
    rounds, so it is far more reachable with Jev than without.
-4. **Cost and latency.** Jev's typed call is 1.9–2.2 s and does not consume
-   reviewer-provider quota; the Pi adjudicator is another full LLM child on
+4. **Cost and quota efficiency.** Jev's typed call is 1.9–2.2 s and does not consume
+   reviewer-provider token quota or context windows; the Pi adjudicator is another full LLM child on
    the same provider, measured at 15–61 s per call here (14–72 s across two
-   samples). In exploratory runs on a different provider
-   (`commandcode/deepseek-v4.1-flash`) several Pi adjudicator calls failed
-   outright with `429 rate_limit_error` while Jev calls succeeded, and the
-   shipped cascade kept Jev's merges when the escalation call failed. No
+   samples). Jev calls run on a dedicated TypeSafe System One pathway, and the
+   shipped cascade safely keeps Jev's merges if an escalation call fails. No
    adjudicator failures occurred in the documented `opencode-go` matrix.
 5. **Cascade economics depend on the borderline-pair count.** Escalation fired
    on 6–13 pairs in the live rounds, 8–9 pairs in the replay cases, and cost

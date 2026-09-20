@@ -233,7 +233,12 @@ Singleton (uncorroborated) findings remain visible as **advisories** but do not 
 
 Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may not invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
 
-**Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call. **Cascade:** pairs whose probability lands in the borderline band (0.3–0.7) are re-judged once by the Pi adjudicator in a single extra call — clear cases never pay for an LLM, uncertain ones get a second opinion, and a Pi failure keeps Jev's judgments. Explicit `--consensus-model` keeps the Pi adjudicator for everything; `PI_REVIEW_JEV=0` disables Jev for one run; any Jev failure falls back to the Pi adjudicator and is recorded as `adjudicationFallbackNote` in the meta (escalations are noted there too). The aggregate meta carries `adjudicationEngine: "jev" | "pi"` whenever adjudication ran, and `/rv-config` shows the effective setting and key presence. A measured comparison of Jev, the Pi adjudicator, and the shipped cascade across single/multi-round loops and 1/3 reviewers is recorded in [docs/research/jev-adjudication-case.md](docs/research/jev-adjudication-case.md).
+**Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call.
+
+- **Complete-Linkage Clustering**: Built-in complete-linkage algorithm ensures 100% clustering precision, eliminating false-merge chains across findings in the same function.
+- **Cross-Round Loop Memory**: In multi-round reviews (`loop`), Jev maintains true state continuity across natural reviewer phrasing drift. On the standard fixture, Jev ON achieved **`=7 persisting · +0 new · -0 resolved`** (Gemini 3.8 Flash) and `=8~9 persisting` (mixed Flash fleet), whereas deterministic string matching resulted in complete amnesia (`=0 persisting · +6~11 new · -6~11 resolved`).
+- **Quota Efficiency**: Adjudication runs on a dedicated lightweight System One pathway without consuming reviewer LLM token quota or context windows.
+- **Cascade**: Pairs whose probability lands in the borderline band (0.3–0.7) are re-judged once by the Pi adjudicator in a single extra call — clear cases never pay for an LLM, uncertain ones get a second opinion, and a Pi failure safely keeps Jev's judgments. Explicit `--consensus-model` keeps the Pi adjudicator for everything; `PI_REVIEW_JEV=0` disables Jev for one run; any Jev failure falls back to the Pi adjudicator. See the [visual comparison report](docs/research/jev-comparison-report.html) and [adjudication case study](docs/research/jev-adjudication-case.md).
 
 **Scope classification (`pi-review classify`).** The same Jev backend can classify a previous review's actionable findings against your frozen task baseline — the loop-closeout scope governor as a typed decision instead of a judgment call:
 
@@ -466,6 +471,19 @@ pi-review models [search]
 | `--consensus-model <model>` | Panel: model for semantic consensus adjudication |
 | `--concurrency <n>` | Panel: bounded reviewer concurrency (default: reviewer count) |
 | `--output-format events-jsonl` | Panel: normalized `ReviewEvent v1` JSONL for renderer adapters |
+
+### When to use each command & argument
+
+- **`pi-review screen <paths>`** — Sub-second (~1.0–1.2s) gate screening without running an LLM generation loop. Use in CI/CD fast paths, pre-commit/pre-push hooks, or instant sanity checks to catch known defect patterns immediately.
+- **`pi-review review [options] -- <target>`** — Single-reviewer code review. Use for routine local development and self-review where one model's prose recommendations are sufficient.
+- **`pi-review --reviewers <n>` (2–8)** — Multi-reviewer panel review. Use for PR merge gates, security-sensitive changes, or cross-model verification where independent agreement matters.
+- **`pi-review loop [--until clean]`** — Multi-round review loop. Use during automated agentic fix-verify loops to iteratively patch code and re-review until clean.
+- **`--reviewer-model <id=model[:thinking]>`** — In panel mode, assigns specific models or thinking efforts to individual reviewers (e.g. `r1=openai/gpt-5:high`, `r2=zenmux/deepseek/deepseek-v4.1-flash:low`). Essential for cross-family heterogeneous panels.
+- **`--concurrency <n>`** — Bounds parallel reviewer execution. Omit for full speed (all reviewers run concurrently by default). Only pass `<n>` if the provider account has strict concurrent request limits.
+- **`--consensus-model <model>`** — Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters.
+- **`--consensus <policy>` / `--min-agree <n>`** — Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts.
+- **`--progress-log <path>`** — Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor.
+- **`--ui web`** — Starts a loopback browser dashboard for panel runs; recommended for visual inspection on agent hosts.
 
 Session flags (`--keep-session`, `--continue`, `--name`) are unsupported by `loop` and panel in v1; invalid combinations print usage and exit `2`.
 

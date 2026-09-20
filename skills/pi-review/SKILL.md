@@ -47,6 +47,7 @@ There is no `/rv-config set` command — the agent is the config editor. When th
 
 | Host | How to run `pi-review` |
 |------|-------------------------|
+| **Fast CI / Pre-commit Gate** | Run `pi-review screen <@files\|paths...>` (~1s wall time, zero LLM generation). Immediately blocks obvious defects (off-by-one, SQLi, unawaited async, float money) via typed Jev judgments before launching full reviewer sessions. |
 | **Pi** (`/rv`) | New panel reviews call the native `pi_review` API tool, shown to users as **Pi Review Panel**, which launches the packaged CLI in event mode and renders live reviewer state. Continuations, kept sessions, `/rv-loop`, and explicit `--no-stream` use the shell CLI. |
 | **Pi terminal** | Foreground `pi-review`; text deltas stream live by default. |
 | **Claude Code / Codex / Cursor / agy (Antigravity)** and similar agent hosts | These hosts buffer a shell tool's output until the command exits, so a foreground run looks like a silent wait. **Panel review (`--reviewers`/`--panel`) default: `--ui web --ui-url-file <path>` + background run** — get the dashboard in front of the user: on Claude Code the CLI auto-open lands in the system default browser; on Codex open the `--ui-url-file` URL in the host's built-in browser (the CLI cannot reach a GUI there); on agy prefer the host browser / share the URL the same way; hand over the URL as fallback either way. **Single review / `loop` default: `--progress-log <path>` + background run + tail the log** (`--ui web` requires an active panel and rejects `loop`). See [references/codex-tools.md](./references/codex-tools.md). Map skill mentions of `Bash` to your host shell tool. |
@@ -142,6 +143,35 @@ Use this protocol when the host is closing out implementation work and may edit 
 9. **Gate completion claims.** Never claim done, ship, commit-ready, or clean without a fresh `clean` result, unless the user gives explicit human acceptance of named remaining findings. Report accepted fixes, rejected findings with rationale, follow-ups, stop reason, and proof evidence.
 
 The shell exit policy is: `0` clean, `1` status is `has_findings`, `2` usage error, `3` needs human, `4` blocked/runtime failure. A non-zero loop result is a gate signal, not permission for the child reviewer to edit.
+
+## Gate-grade fast screening (`pi-review screen`)
+
+`pi-review screen <@files|paths...>` is a sub-second gate check that completely skips LLM prose generation. It slices files at declaration boundaries into hunks, evaluates each hunk against defect patterns via single-call typed Jev judgments, and assembles findings from catalog templates in **~1.0–1.2s**:
+
+```bash
+pi-review screen @src/order-service.ts
+```
+
+### When to choose `screen` vs `review` vs `panel` vs `loop`
+
+- **Use `screen`** for Pre-commit / Pre-push hooks, fast CI PR pre-flight checks, or when an operator asks for an instant sanity pass. Exit codes: `0` (clean), `1` (has findings / blocked), `4` (no `TYPESAFE_API_KEY`).
+- **Use `review`** (single review) for routine local development and self-review where one model's prose recommendations are sufficient.
+- **Use `panel`** (`--reviewers N`) for PR merge gates, security-sensitive changes, or cross-model verification where independent agreement matters.
+- **Use `loop`** (`loop [--until clean]`) during automated implementation closeout where an agent iteratively patches code and re-verifies until clean.
+
+## CLI arguments: when to use each
+
+| Argument | When to use |
+|---|---|
+| `screen <paths>` | Instant (~1s) gate screening; no LLM child session spawned. Requires `TYPESAFE_API_KEY`. |
+| `--reviewer-model <id=model[:thinking]>` | In panel mode, to assign specific models or thinking levels to individual reviewers (e.g. `r1=openai/gpt-5:high`, `r2=zenmux/deepseek/deepseek-v4.1-flash:low`). Essential for cross-family heterogeneous panels. |
+| `--concurrency <n>` | Bounds parallel reviewer execution. **Omit for full speed** (all reviewers run concurrently by default). Only pass `<n>` if the provider account has strict concurrent request limits. |
+| `--consensus-model <model>` | Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters. |
+| `--consensus <policy>` / `--min-agree <n>` | Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts. |
+| `--until clean` | In `loop` mode, automates iterative convergence (stops when confirmed actionable issues drop to 0 or hard `--max-rounds` cap is hit). |
+| `--progress-log <path>` | Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor. |
+| `--ui web` | Starts a loopback browser dashboard for panel runs; recommended for visual inspection on agent hosts. |
+
 
 ## Panel review
 

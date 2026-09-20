@@ -169,7 +169,12 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 两阶段匹配：先用稳定锚点（路径 + 归一化摘要）做确定性匹配；只有路径相同、措辞不同的模糊候选才交给受限的**语义仲裁器**（用 `--consensus-model` 启用）。仲裁器只能聚类，不得发明 finding、丢弃 finding、补充证据或充当额外审查者，且没有写工具。低置信匹配保持为独立 advisory，避免靠"相似"制造虚假共识。
 
-**裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。**级联**：概率落在模糊区间（0.3–0.7）的 pair 会再用 Pi 仲裁器复核一次（单次额外调用）——清晰的 case 永不付 LLM 的钱，模糊的拿到第二意见，Pi 失败则保留 Jev 结果。显式 `--consensus-model` 时全部走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。裁决发生时聚合 meta 带 `adjudicationEngine: "jev" | "pi"`，`/rv-config` 可查看当前生效值与 key 是否存在。三种裁决路径（纯 Jev、Pi 仲裁器、Jev + 边界升级级联）在单轮/多轮、单评委/3 评委下的实测对比记录在 [docs/research/jev-adjudication-case.md](docs/research/jev-adjudication-case.md)。
+**裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。
+
+- **完整链接聚类（Complete-Linkage）**：代码内置完整链接算法，确保组内两两达标才合并，**合并精度达到 100%**，彻底清除了旧版 Union-Find 在同函数多 Bug 场景下的链式误并隐患。
+- **跨轮状态连续性（Loop 记忆）**：在多轮复查（`loop`）中，Jev 能够穿透审查者的自然措辞漂移。标准靶场实测中，开启 Jev 达成了 **`=7 持续 · +0 新增 · -0 假解决`**（Gemini 3.8 Flash 实测）与 `=8~9 留存`（Flash 混合编队）；而关闭 Jev 的确定性匹配则遭遇彻底失忆（`=0 持续 · +6~11 新增`，将全部老 Bug 当成新 Bug）。
+- **零消耗评委 Token 额度**：裁决走独立的轻量 System One 通道，完全不占用评委主模型的 Token 配额与上下文窗口。
+- **级联仲裁（Cascade）**：概率落在模糊区间（0.3–0.7）的 pair 会再用 Pi 仲裁器复核一次（单次额外调用）——清晰的 case 永不付 LLM 的钱，模糊的拿到第二意见，Pi 失败则安全保留 Jev 结果。显式 `--consensus-model` 时全部走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。详细产品对比图见 [docs/research/jev-comparison-report.html](docs/research/jev-comparison-report.html)，实测评测报告见 [docs/research/jev-adjudication-case.md](docs/research/jev-adjudication-case.md)。
 
 **范围分类（`pi-review classify`）。** 同一个 Jev 后端还能把上一次评审的 actionable findings 对照冻结的任务基线分类——把 loop 收尾协议里的 scope governor 从 host 的主观判断变成 typed 决策：
 
@@ -207,6 +212,19 @@ pi-review screen src/order-service.ts     # 也支持 @file；有发现 exit 1�
 ### 成本与失败
 
 审查者运行数 = `--reviewers <n>` × `--max-rounds`（loop）；启用 `--consensus-model` 时每轮最多再跑一次仲裁。用 `--concurrency <n>` 限制并发（默认等于审查者数，不超过）。审查者运行时失败 → `blocked`；无法解析的脏输出或未决澄清 → `needs_human`；绝不悄悄 clean。面板审查 v1 不支持 `--keep-session`、`--continue`、`--name`（审查者用 `--no-session`）；宿主 Agent 仍是唯一可编辑者。
+
+### 各命令与 CLI 参数的使用时机
+
+- **`pi-review screen <paths>`**：**秒级门禁初筛**（~1.0–1.2s），完全跳过大模型散文生成。适合在 CI/CD 快速流水线、Git Pre-commit / Pre-push 钩子中第一时间拦截明显的已知模式缺陷。
+- **`pi-review review [options] -- <target>`**：**单评委常规审查**。适合本地日常开发、功能自查，获取单个大模型的详细推理与修改建议。
+- **`pi-review --reviewers <n>`（2–8）**：**多评委共识面板**。适合 PR 合并门禁、重大架构或核心安全模块变更，通过多数票（Quorum）过滤孤证误报。
+- **`pi-review loop [--until clean]`**：**多轮收敛循环**。适合 Agent 自动化闭环收尾，结合 Jev 的跨轮记忆能力，迭代修复并验证直到代码干净。
+- **`--reviewer-model <id=model[:thinking]>`**：在面板模式下为不同评委指定模型和思考深度（如 `r1=openai/gpt-5:high`、`r2=zenmux/deepseek/deepseek-v4.1-flash:low`），实现真正的跨模型家族交叉互审。
+- **`--concurrency <n>`**：限制评委并发执行数。**默认全并发**；仅当使用的模型提供商账户有极严格的并发调用限额时才需传入。
+- **`--consensus-model <model>`**：显式指定一个大模型进行裁决会诊（强制跳过 Jev System One），适用于需要保留全量大模型文本推理的裁决场景。
+- **`--consensus <policy>` / `--min-agree <n>`**：微调共识投票门槛。严格发布可用 `unanimous` 全票通过，排查探索可用 `any`。
+- **`--progress-log <path>`**：输出紧凑 JSON 进度流到文件，适用于 Claude Code、Codex、Cursor 等有缓冲输出的 Agent 宿主。
+- **`--ui web`**：启动本地回环网页看板，供 Agent 宿主用户实时可视化查看面板进度。
 
 面板结束后，CLI 会在 **stdout** 追加 panel ASCII footer：门禁 Status / Health、共识、确认与 advisory 计数、模型/thinking 不一致时的 `mixed`、聚合 token/cost、是否使用 adjudicator，以及每位 reviewer 一行摘要：
 
