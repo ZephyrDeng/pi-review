@@ -3,14 +3,15 @@
     "orcarouter": {
       "baseUrl": "https://api.orcarouter.ai/v1",
       "api": "openai-completions",
-      "apiKey": "ORCA_KEY",
-      "signupUrl": "https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36",
+      "apiKey": "$ORCA_KEY",
       "models": [
         {
           "id": "orcarouter/auto",
           "name": "OrcaRouter Auto",
           "reasoning": false,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 200000,
           "maxTokens": 8192
         },
@@ -18,7 +19,9 @@
           "id": "anthropic/claude-sonnet-4.6",
           "name": "Claude Sonnet 4.6",
           "reasoning": true,
-          "input": ["text"],
+          "input": [
+            "text"
+          ],
           "contextWindow": 200000,
           "maxTokens": 8192
         }

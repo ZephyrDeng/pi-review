@@ -14,6 +14,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "extensions/**/*.test.ts"],
+    setupFiles: ["./vitest.setup.ts"],
     // node:test's `test()` is replaced by vitest's via import rewrite; keep
     // reporters lean for CI.
     reporters: ["default"],

@@ -96,7 +96,12 @@ export function parseReviewConfig(text: string): ReviewConfigLoad {
 /** Load the config file; a missing file is the empty config with no warnings. */
 export function loadReviewConfigFile(file: string): ReviewConfigLoad {
   if (!fs.existsSync(file)) return { config: {}, warnings: [] };
-  return parseReviewConfig(fs.readFileSync(file, "utf8"));
+  // Advisory contract: a damaged/unreadable config must never brick the CLI.
+  try {
+    return parseReviewConfig(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    return { config: {}, warnings: [`cannot read config file ${file}: ${(error as Error).message}`] };
+  }
 }
 
 let cached: { file: string; load: ReviewConfigLoad } | undefined;

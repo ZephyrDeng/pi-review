@@ -32,11 +32,13 @@
    export ORCA_KEY="sk-orca-..."
    ```
 
-2. **注册服务商**——把 [`resources/providers/orcarouter.json`](./resources/providers/orcarouter.json) 合并进 `~/.pi/agent/models.json`（OpenAI 兼容）：
+2. **注册服务商**——把 [`resources/providers/orcarouter.json`](./resources/providers/orcarouter.json) 合并进 `~/.pi/agent/models.json`（OpenAI 兼容）。**已有 models.json 时必须合并而不是 `cp`**——`cp` 会覆盖掉你已配置的所有服务商：
 
    ```bash
-   # models.json 不存在时可以直接整个使用；已有内容时用 jq 或手工合并
+   # 全新机器（还没有 models.json）：
    cp resources/providers/orcarouter.json ~/.pi/agent/models.json
+   # 已有 models.json——合并（或手工编辑）：
+   jq -s '.[0] * .[1]' ~/.pi/agent/models.json resources/providers/orcarouter.json > /tmp/models.json && mv /tmp/models.json ~/.pi/agent/models.json
    ```
 
 ```json
@@ -45,7 +47,7 @@
     "orcarouter": {
       "baseUrl": "https://api.orcarouter.ai/v1",
       "api": "openai-completions",
-      "apiKey": "ORCA_KEY",
+      "apiKey": "$ORCA_KEY",
       "models": [
         {
           "id": "orcarouter/auto",

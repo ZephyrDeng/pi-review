@@ -88,3 +88,13 @@ test("rv-config renders Chinese labels for zh locale", () => {
   assert.match(text, /childExtensions: true \(配置文件\)/);
   assert.match(text, /生效环境/);
 });
+
+test("rv-config production path shows the missing-file note (not just the injected one)", () => {
+  const lines = buildRvConfigLines({
+    locale: "en",
+    env: {},
+    configPath: "/tmp/pi-review-definitely-missing-config-xyz/config.json",
+    resolved,
+  });
+  assert.match(lines.join("\n"), /\(missing — using defaults\)/);
+});

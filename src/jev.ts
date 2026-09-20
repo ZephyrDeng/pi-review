@@ -228,7 +228,9 @@ export async function evaluateChoices(
     if (
       answer?.type === "choice" &&
       typeof choice === "string" &&
-      choice in questions[id]!.criteria &&
+      // own-property check: `in` walks the prototype chain, so "constructor" /
+      // "__proto__" would pass validation and crash the downstream bucket map.
+      Object.hasOwn(questions[id]!.criteria, choice) &&
       typeof confidence === "number" &&
       Number.isFinite(confidence) &&
       confidence >= 0 &&

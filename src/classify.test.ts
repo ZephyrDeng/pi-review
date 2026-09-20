@@ -100,3 +100,22 @@ test("formatClassifyAscii groups by class and marks uncertainty", () => {
   assert.match(text, /Escalate\s+F2/);
   assert.match(text, /F2  STOP_AND_ESCALATE  0\.30 \(low confidence\)/);
 });
+
+test("parseMetaFindings takes the LAST meta line (loop output, one per round)", () => {
+  const round1 = `PI_REVIEW_META_JSON: ${JSON.stringify({ findings: [{ id: "F1", summary: "round one", actionable: true }] })}`;
+  const round2 = `PI_REVIEW_META_JSON: ${JSON.stringify({ findings: [{ id: "F9", summary: "final round", actionable: true }] })}`;
+  const findings = parseMetaFindings(`${round1}\n${round2}\n`);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0]!.id, "F9");
+});
+
+test("classifyFindings rejects prototype-chain choice names", async () => {
+  const badFetch = (async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ answers: { F1: { type: "choice", choice: "constructor", confidence: 0.99 } } }),
+  })) as unknown as typeof fetch;
+  const result = await classifyFindings(CONN, "baseline", [finding("F1", "x")], badFetch);
+  assert.equal(result.findings.length, 0);
+  assert.deepEqual(result.unclassified, ["F1"]);
+});

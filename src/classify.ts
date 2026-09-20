@@ -49,8 +49,10 @@ const CLASSIFY_CRITERIA: Record<ScopeClass, string> = {
 
 /** Parse a meta file/stdin payload: a PI_REVIEW_META_JSON line or a bare meta JSON object. */
 export function parseMetaFindings(text: string): ReviewFinding[] {
-  const metaLine = text.split("\n").find((line) => line.startsWith("PI_REVIEW_META_JSON: "));
-  const raw = metaLine ? metaLine.slice("PI_REVIEW_META_JSON: ".length) : text.trim();
+  // Loop runs emit one meta line per round — take the LAST one so classify
+  // sees the final round's findings, not the stale round-1 set.
+  const metaLines = text.split("\n").filter((line) => line.startsWith("PI_REVIEW_META_JSON: "));
+  const raw = metaLines.length > 0 ? metaLines[metaLines.length - 1]!.slice("PI_REVIEW_META_JSON: ".length) : text.trim();
   let meta: unknown;
   try {
     meta = JSON.parse(raw);

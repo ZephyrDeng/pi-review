@@ -91,7 +91,9 @@ test("buildReviewerArgs isolates children with --no-extensions by default", () =
     { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "xhigh" },
     undefined,
     "system",
-    {},
+    // Pin the config path too — an empty env alone still lets the machine's
+    // real ~/.pi/pi-review/config.json flip childExtensions on.
+    { PI_REVIEW_CONFIG: "/tmp/pi-review-test-no-such-dir/config.json" },
   );
   assert.ok(args.includes("--no-extensions"), `expected isolation flag in ${args.join(" ")}`);
   assert.ok(args.includes("--no-session"));

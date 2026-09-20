@@ -5,6 +5,8 @@
  * locale-aware like the other /rv* commands.
  */
 
+import fs from "node:fs";
+
 import {
   configFilePath,
   loadReviewConfigFile,
@@ -131,6 +133,11 @@ export function buildRvConfigLines(input: RvConfigViewInput): string[] {
     const load = loadReviewConfigFile(file);
     cfg = load.config;
     configNotes.push(...warnNotes(s, load.warnings));
+    // Production path must surface the same missing-file note as the injected
+    // test path — otherwise users can't tell "no config" from "empty config".
+    if (load.warnings.length === 0 && !fs.existsSync(file)) {
+      configNotes.push(s.configFileMissing);
+    }
   }
 
   const decision = resolveChildExtensions(env, cfg);

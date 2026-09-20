@@ -217,3 +217,16 @@ test("--progress-log writes slimmed events by default and verbatim with --progre
   assert.ok(rawUpdates.some((event) => Array.isArray(event.message?.content)));
   assert.ok(fs.statSync(rawLog).size > fs.statSync(slimLog).size);
 });
+
+test("classify argument errors print usage and exit 2", () => {
+  const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [...tsxLoaderArgs(), cliPath, "classify", "--bogus"],
+    { encoding: "utf8", timeout: 30_000 },
+  );
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /Usage:/);
+  assert.match(result.stderr, /unknown option --bogus/);
+});

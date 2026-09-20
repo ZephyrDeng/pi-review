@@ -373,11 +373,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (argv[0] === "update") {
     return { command: "update", mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
-  if (argv[0] === "classify") {
-    return parseClassifyCommand(argv.slice(1));
-  }
-
   try {
+    if (argv[0] === "classify") {
+      return parseClassifyCommand(argv.slice(1));
+    }
     return parseReviewCommand(argv);
   } catch (error) {
     if (!(error instanceof ArgsParseError)) throw error;

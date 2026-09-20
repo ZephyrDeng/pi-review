@@ -93,3 +93,10 @@ test("resolveChildExtensions: unset or empty env falls through to config, then d
   assert.deepEqual(resolveChildExtensions({ PI_REVIEW_CHILD_EXTENSIONS: "  " }, { childExtensions: true }), { enabled: true, source: "config" });
   assert.deepEqual(resolveChildExtensions({}, {}), { enabled: false, source: "default" });
 });
+
+test("loadReviewConfigFile never throws: a directory path warns and falls back", () => {
+  const load = loadReviewConfigFile(os.tmpdir());
+  assert.deepEqual(load.config, {});
+  assert.equal(load.warnings.length, 1);
+  assert.match(load.warnings[0]!, /cannot read config file/);
+});
