@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
+import { DeterministicMatcher } from "./matcher.js";
 import { REVIEW_META_VERSION } from "./types.js";
 import type { ReviewMeta, ReviewStatus, Verdict } from "./types.js";
 
@@ -127,4 +128,57 @@ test("loop until clean stops early when the clean goal is met", async () => {
   assert.equal(result.until, "clean");
   assert.equal(result.exitCode, 0);
   assert.equal(result.rounds.length, 1);
+});
+
+test("until-clean loop stops as non_converging when the actionable set is stable across two rounds", async () => {
+  const findingMeta = meta("has_findings", "request_changes");
+  const result = await runReviewLoop(
+    { maxRounds: 5, until: "clean", matcher: new DeterministicMatcher() },
+    async () => ({ meta: findingMeta, exitCode: 1 }),
+  );
+
+  assert.equal(result.stopReason, "non_converging");
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.rounds.length, 2);
+  assert.deepEqual(result.rounds[1]!.comparison, { persisting: 1, added: 0, resolved: 0 });
+});
+
+test("until-clean loop keeps going while the finding set is still moving", async () => {
+  const moving: ReviewMeta = {
+    ...meta("has_findings", "request_changes"),
+    findings: [{ id: "F1", summary: "Different bug", actionable: true }],
+  };
+  const sequence = [
+    { meta: meta("has_findings", "request_changes"), exitCode: 1 },
+    { meta: moving, exitCode: 1 },
+    { meta: meta("clean", "approve"), exitCode: 0 },
+  ];
+  const result = await runReviewLoop(
+    { maxRounds: 5, until: "clean", matcher: new DeterministicMatcher() },
+    async (roundIndex) => sequence[roundIndex - 1]!,
+  );
+
+  assert.equal(result.stopReason, "clean");
+  assert.equal(result.rounds.length, 3);
+  assert.deepEqual(result.rounds[1]!.comparison, { persisting: 0, added: 1, resolved: 1 });
+});
+
+test("a matcher failure degrades to no comparison and never kills the loop", async () => {
+  const broken = { match: async () => { throw new Error("boom"); } };
+  const result = await runReviewLoop(
+    { maxRounds: 2, matcher: broken },
+    async () => ({ meta: meta("has_findings", "request_changes"), exitCode: 1 }),
+  );
+  assert.equal(result.stopReason, "budget_exhausted");
+  assert.equal(result.rounds.length, 2);
+  assert.equal(result.rounds[1]!.comparison, undefined);
+});
+
+test("loop summary renders the cross-round comparison line", async () => {
+  const result = await runReviewLoop(
+    { maxRounds: 2, matcher: new DeterministicMatcher() },
+    async () => ({ meta: meta("has_findings", "request_changes"), exitCode: 1 }),
+  );
+  const text = formatLoopSummary(result);
+  assert.match(text, /=1 persisting · \+0 new · -0 resolved/);
 });

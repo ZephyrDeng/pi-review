@@ -11,6 +11,8 @@ import {
   parseReviewConfig,
   resolveChildExtensions,
   resolveConfig,
+  resolveJev,
+  hasJevApiKey,
 } from "@zephyrdeng/pi-review";
 import type { PiReviewConfig } from "@zephyrdeng/pi-review";
 import type { RvLocale } from "./rv-locale.js";
@@ -29,6 +31,9 @@ export interface RvConfigViewInput {
 type Strings = {
   header: string;
   childExtensions: string;
+  jev: string;
+  jevKeyPresent: string;
+  jevKeyMissing: string;
   configFileLabel: string;
   configFileMissing: string;
   envSection: string;
@@ -49,6 +54,9 @@ const STRINGS: Record<RvLocale, Strings> = {
     header: "Pi Review config",
     childExtensions:
       "Load host Pi extensions in review children so providers registered only by extensions (e.g. px:anthropic, zenmux) are usable; false keeps children isolated with --no-extensions (issue #8). Override one run: PI_REVIEW_CHILD_EXTENSIONS=1 or =0.",
+    jev: "Enhancement mode: route typed decision actions (panel consensus adjudication) to TypeSafe Jev instead of a review-only Pi child. An explicit --consensus-model keeps the Pi adjudicator. Override one run: PI_REVIEW_JEV=1 or =0.",
+    jevKeyPresent: "TYPESAFE_API_KEY: present",
+    jevKeyMissing: "TYPESAFE_API_KEY: missing — Jev stays off until a key is set",
     configFileLabel: "config file",
     configFileMissing: "(missing — using defaults)",
     envSection: "Resolved environment",
@@ -67,6 +75,9 @@ const STRINGS: Record<RvLocale, Strings> = {
     header: "Pi Review 配置",
     childExtensions:
       "是否让评审子进程加载宿主 Pi 扩展，以使用仅由扩展注册的 provider（如 px:anthropic、zenmux）；false 表示隔离运行（--no-extensions，issue #8）。单次覆盖：PI_REVIEW_CHILD_EXTENSIONS=1 或 =0。",
+    jev: "增强模式：把 typed 决策动作（面板共识裁决）交给 TypeSafe Jev，而不是一个 review-only 的 Pi 子进程。显式 --consensus-model 时仍走 Pi 裁决器。单次覆盖：PI_REVIEW_JEV=1 或 =0。",
+    jevKeyPresent: "TYPESAFE_API_KEY：已设置",
+    jevKeyMissing: "TYPESAFE_API_KEY：未设置——设置 key 前 Jev 保持关闭",
     configFileLabel: "配置文件",
     configFileMissing: "（不存在——使用默认值）",
     envSection: "生效环境",
@@ -125,6 +136,9 @@ export function buildRvConfigLines(input: RvConfigViewInput): string[] {
   const decision = resolveChildExtensions(env, cfg);
   const sourceLabel =
     decision.source === "env" ? s.sourceEnv : decision.source === "config" ? s.sourceConfig : s.sourceDefault;
+  const jevDecision = resolveJev(env, cfg);
+  const jevSourceLabel =
+    jevDecision.source === "env" ? s.sourceEnv : jevDecision.source === "config" ? s.sourceConfig : s.sourceDefault;
 
   const resolved = input.resolved ?? resolveConfig();
   const line = (key: string, value: string, description: string): string => {
@@ -136,6 +150,8 @@ export function buildRvConfigLines(input: RvConfigViewInput): string[] {
   lines.push(s.header);
   lines.push(`childExtensions: ${decision.enabled} (${sourceLabel})`);
   lines.push(`  ${s.childExtensions}`);
+  lines.push(`jev: ${jevDecision.enabled} (${jevSourceLabel}) — ${hasJevApiKey(env) ? s.jevKeyPresent : s.jevKeyMissing}`);
+  lines.push(`  ${s.jev}`);
   lines.push(`${s.configFileLabel}: ${file}`);
   for (const note of configNotes) lines.push(`  ${note}`);
   lines.push("");

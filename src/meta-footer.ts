@@ -140,7 +140,12 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
     lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)} · total ${formatTokens(meta.usage.totalTokens)}`);
     lines.push(`  ${padLabel("Cost", labelW)}  ${typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "n/a"}`);
   }
-  if (meta.adjudicationUsed) lines.push(`  ${padLabel("Adjudicator", labelW)}  used`);
+  if (meta.adjudicationUsed) {
+    lines.push(`  ${padLabel("Adjudicator", labelW)}  used${meta.adjudicationEngine ? ` (${meta.adjudicationEngine})` : ""}`);
+  }
+  if (meta.adjudicationFallbackNote) {
+    lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationFallbackNote}`);
+  }
   if (meta.adjudicationErrors?.length) {
     lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationErrors.join("; ")}`);
   }

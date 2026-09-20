@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { test, afterEach } from "vitest";
 
@@ -56,6 +57,8 @@ const scenario = process.env.FAKE_PANEL_SCENARIO || "agree-bug";
 const idMatch = prompt.match(/Reviewer ID:\\s*(\\S+)/);
 const reviewerId = idMatch ? idMatch[1] : "r1";
 const bug = "### F1: Off-by-one in loop\\n- Severity: high\\n- Path: src/cli.ts\\n- Lines: 12-40\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
+const ambiguousA = "### F1: Off-by-one in loop bound\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
+const ambiguousB = "### F1: Loop can iterate past the array end\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
 const longBug = "### F1: " + "x".repeat(700) + "\\n- Severity: high\\n- Path: src/cli.ts\\n- Actionable: yes\\n- Evidence: x\\n- Impact: y\\n- Recommendation: z";
 function emit(text) {
   function line(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
@@ -74,6 +77,13 @@ function out(verdict, findings) {
   emit("## Verdict\\n" + verdict + "\\n\\n## Summary\\n- Fixture.\\n\\n## Findings\\n" + findings + "\\n\\n## Risks and Blind Spots\\nNone.\\n\\n## Open Questions\\nNone.\\n");
 }
 const bugReporters = ["r1", "r2", "correctness", "security"];
+// The consensus adjudicator child answers with plain merge JSON: it runs
+// without --mode json, so the raw object must go straight to stdout (the
+// normal emit() JSONL stream would not parse as one JSON object).
+if (prompt.includes("consensus adjudicator")) {
+  process.stdout.write('{"merges":[{"sourceFindingIds":["r1#F1","r2#F1"],"confidence":0.9}]}');
+  process.exit(0);
+}
 if (scenario === "runtime-fail" && reviewerId === "r2") { process.stderr.write("child crashed\\n"); process.exit(9); }
 if (scenario === "agree-bug") {
   if (bugReporters.includes(reviewerId)) out("request_changes", bug);
@@ -85,6 +95,12 @@ if (scenario === "agree-bug") {
 } else if (scenario === "singleton") {
   if (reviewerId === "r1" || reviewerId === "correctness") out("request_changes", bug);
   else out("approve", "No material findings.");
+} else if (scenario === "ambiguous") {
+  // Same path, different wording: deterministic matching cannot merge, so the
+  // consensus adjudicator (Jev or Pi) decides.
+  if (reviewerId === "r1") out("request_changes", ambiguousA);
+  else if (reviewerId === "r2") out("request_changes", ambiguousB);
+  else out("approve", "No material findings.");
 }
 process.exit(0);
 `,
@@ -93,17 +109,58 @@ process.exit(0);
   return fakePi;
 }
 
-function runPanelCli(fakePi: string, scenario: string, extraArgs: string[]) {
+function runPanelCli(fakePi: string, scenario: string, extraArgs: string[], envExtra: Record<string, string> = {}) {
+  const env = { ...process.env };
+  // Tests are hermetic by default: machine-level Jev env must not leak in.
+  delete env.PI_REVIEW_JEV;
+  delete env.TYPESAFE_API_KEY;
+  delete env.TYPESAFE_BASE_URL;
+  Object.assign(env, { PI_BIN: fakePi, FAKE_PANEL_SCENARIO: scenario }, envExtra);
   return spawnSync(
     process.execPath,
     [...tsxLoaderArgs(), cliPath(), ...extraArgs, "--", "@src"],
     {
       cwd: repoRoot(),
-      env: { ...process.env, PI_BIN: fakePi, FAKE_PANEL_SCENARIO: scenario },
+      env,
       encoding: "utf8",
       timeout: 30_000,
     },
   );
+}
+
+interface CliResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Async variant of runPanelCli: the Jev integration tests run an in-process
+ * mock System One server, which can only answer while the event loop is free
+ * — spawnSync would starve it.
+ */
+function runPanelCliAsync(fakePi: string, scenario: string, extraArgs: string[], envExtra: Record<string, string> = {}): Promise<CliResult> {
+  const env = { ...process.env };
+  delete env.PI_REVIEW_JEV;
+  delete env.TYPESAFE_API_KEY;
+  delete env.TYPESAFE_BASE_URL;
+  Object.assign(env, { PI_BIN: fakePi, FAKE_PANEL_SCENARIO: scenario }, envExtra);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [...tsxLoaderArgs(), cliPath(), ...extraArgs, "--", "@src"], {
+      cwd: repoRoot(),
+      env,
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("panel cli timed out; stderr: " + stderr));
+    }, 30_000);
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (status) => { clearTimeout(timer); resolve({ status, stdout, stderr }); });
+  });
 }
 
 function metaRecord(result: { stderr: string; stdout: string }): Record<string, unknown> | undefined {
@@ -506,4 +563,115 @@ test("panel rejects disallowed tools before writing a partial event stream", () 
   assert.equal(result.status, 2);
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /panel reviewers only allow/);
+});
+
+interface MockJevServer {
+  url: string;
+  close: () => Promise<void>;
+  requests: Array<{ model: string; questionIds: string[] }>;
+}
+
+async function startMockJevServer(noulProbability: number): Promise<MockJevServer> {
+  const requests: MockJevServer["requests"] = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      const parsed = JSON.parse(body);
+      const questionIds = Object.keys(parsed.questions ?? {});
+      requests.push({ model: parsed.model, questionIds });
+      const answers = Object.fromEntries(questionIds.map((id) => [id, { type: "noul", noul: noulProbability }]));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ model: "jev-mock", answers, usage: { input_tokens: 50, output_tokens: 4 } }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("no address");
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve()))),
+  };
+}
+
+function jevEnv(url: string): Record<string, string> {
+  return { TYPESAFE_API_KEY: "test-key", TYPESAFE_BASE_URL: url };
+}
+
+test("panel adjudication routes to Jev when a key is present (enhancement mode)", async () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const server = await startMockJevServer(0.9);
+  try {
+    const result = await runPanelCliAsync(fakePi, "ambiguous", ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"], jevEnv(server.url));
+    assert.equal(result.status, 1, result.stderr);
+    const meta = metaRecord(result);
+    assert.ok(meta, result.stderr);
+    // Jev answered the pair question; the Pi adjudicator child never ran.
+    assert.equal(meta!.adjudicationUsed, true);
+    assert.equal(meta!.adjudicationEngine, "jev");
+    assert.equal(meta!.adjudicationFallbackNote, undefined);
+    assert.equal(server.requests.length, 1);
+    assert.equal(server.requests[0]!.questionIds.length, 1);
+    // The merged finding reaches quorum (r1+r2) and confirms.
+    assert.equal((meta!.confirmedClusters as unknown[]).length, 1);
+    assert.equal(meta!.status, "has_findings");
+  } finally {
+    await server.close();
+  }
+});
+
+test("panel adjudication falls back to the Pi adjudicator when Jev fails", async () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const server = await startMockJevServer(0.9);
+  await server.close(); // closed port -> connection refused -> JevError -> fallback
+  const result = await runPanelCliAsync(fakePi, "ambiguous", ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"], jevEnv(server.url));
+  assert.equal(result.status, 1, result.stderr);
+  const meta = metaRecord(result);
+  assert.ok(meta, result.stderr);
+  assert.equal(meta!.adjudicationUsed, true);
+  assert.equal(meta!.adjudicationEngine, "pi");
+  assert.match(String(meta!.adjudicationFallbackNote), /jev adjudication failed/);
+  // The fake Pi adjudicator merged r1#F1 + r2#F1, reaching quorum.
+  assert.equal((meta!.confirmedClusters as unknown[]).length, 1);
+});
+
+test("panel adjudication stays on Pi when Jev is disabled for the run", async () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const result = await runPanelCliAsync(
+    fakePi,
+    "ambiguous",
+    ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"],
+    { PI_REVIEW_JEV: "0" },
+  );
+  assert.equal(result.status, 1, result.stderr);
+  const meta = metaRecord(result);
+  assert.ok(meta, result.stderr);
+  assert.equal(meta!.adjudicationUsed, true);
+  assert.equal(meta!.adjudicationEngine, "pi");
+  assert.equal(meta!.adjudicationFallbackNote, undefined);
+});
+
+test("an explicit --consensus-model keeps the Pi adjudicator even with a Jev key", async () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const server = await startMockJevServer(0.9);
+  try {
+    const result = await runPanelCliAsync(
+      fakePi,
+      "ambiguous",
+      ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2", "--consensus-model", "fake/model"],
+      jevEnv(server.url),
+    );
+    assert.equal(result.status, 1, result.stderr);
+    const meta = metaRecord(result);
+    assert.ok(meta, result.stderr);
+    assert.equal(meta!.adjudicationEngine, "pi");
+    assert.equal(server.requests.length, 0);
+  } finally {
+    await server.close();
+  }
 });

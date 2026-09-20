@@ -36,11 +36,15 @@ export { createReviewEventEmitter, redactReviewEventPayload, redactReviewEventTe
 export type { ReviewEvent, ReviewEventListener, ReviewerIdentity } from "./review-events.js";
 export { formatLoopSummary, runReviewLoop } from "./loop.js";
 export type { LoopReviewResult, LoopRoundSummary, LoopRoundPanelSummary, LoopStopReason, LoopUntilGoal, RunOneReview, RunReviewLoopOptions } from "./loop.js";
+export { compareRoundFindings } from "./round-compare.js";
+export type { RoundComparison, RoundFindingRef } from "./round-compare.js";
 export { LOOP_CLEAN_GOAL } from "./loop.js";
 export { aggregatePanel, effectiveThreshold } from "./panel-aggregate.js";
 export type { PanelAggregationInput } from "./panel-aggregate.js";
 export { DeterministicMatcher, SemanticMatcher } from "./matcher.js";
 export type { FindingMatcher, MatchResult, SemanticAdjudicator, AdjudicationRequest, AdjudicationResponse, AdjudicationMerge, AdjudicationCandidate } from "./matcher.js";
+export { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback } from "./jev.js";
+export type { JevConnection, JevDecision } from "./jev.js";
 export { resolvePanelConfig } from "./panel-config.js";
 export type { ResolvedPanelConfig } from "./panel-config.js";
 export { makeRunSessionDir, newestJsonl } from "./session.js";

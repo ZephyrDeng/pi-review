@@ -6,6 +6,9 @@
 // IDs, drop source IDs, or act as another reviewer; low-confidence matches
 // are not merged so that uncertain similarity cannot manufacture quorum.
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { SEMANTIC_MATCH_CONFIDENCE_THRESHOLD, type SourceFinding } from "./types.js";
 
 /** Result of matching a set of source findings into clusters. */
@@ -27,13 +30,32 @@ export interface FindingMatcher {
 }
 
 /** Normalize a path anchor so reviewers that phrase paths slightly differently still match. */
-export function normalizePath(value: string | undefined): string {
+export interface MatcherOptions {
+  /**
+   * Base directory for resolving relative finding paths before comparison.
+   * Defaults to the process cwd; panel runs pass the single directory target
+   * when there is one, so a reviewer answering `calc.ts` corroborates one
+   * answering `/abs/target/calc.ts`.
+   */
+  baseDir?: string;
+}
+
+/** Normalize a path anchor so reviewers that phrase paths slightly differently still match. */
+export function normalizePath(value: string | undefined, baseDir: string = process.cwd()): string {
   if (!value) return "";
-  return value
-    .replace(/^['"`]|['"`]$/g, "")
-    .replace(/^\.\//, "")
-    .trim()
-    .toLowerCase();
+  const cleaned = value.replace(/^['"`]|['"`]$/g, "").trim();
+  if (!cleaned) return "";
+  // Resolve against baseDir so absolute and relative spellings of the same
+  // file share one anchor, then canonicalize symlinks so macOS's /tmp and
+  // /private/tmp (etc.) also converge — reviewers pick either spelling at
+  // random, and a split anchor strands an otherwise identical finding as a
+  // separate advisory. realpath fails on nonexistent paths → keep resolved.
+  const resolved = path.resolve(baseDir, cleaned);
+  try {
+    return fs.realpathSync(resolved).toLowerCase();
+  } catch {
+    return resolved.toLowerCase();
+  }
 }
 
 /** Normalize a finding summary for deterministic comparison. */
@@ -48,8 +70,8 @@ export function normalizeSummary(value: string | undefined): string {
 }
 
 /** Deterministic cluster key: shared path anchor plus normalized summary. */
-export function deterministicKey(finding: { path?: string; summary: string }): string {
-  return `${normalizePath(finding.path)}::${normalizeSummary(finding.summary)}`;
+export function deterministicKey(finding: { path?: string; summary: string }, baseDir?: string): string {
+  return `${normalizePath(finding.path, baseDir)}::${normalizeSummary(finding.summary)}`;
 }
 
 /**
@@ -59,11 +81,13 @@ export function deterministicKey(finding: { path?: string; summary: string }): s
  * candidates for semantic adjudication.
  */
 export class DeterministicMatcher implements FindingMatcher {
+  constructor(private readonly options: MatcherOptions = {}) {}
+
   match(findings: SourceFinding[]): MatchResult {
     const byKey = new Map<string, string[]>();
     const order: string[] = [];
     for (const sf of findings) {
-      const key = deterministicKey(sf.finding);
+      const key = deterministicKey(sf.finding, this.options.baseDir);
       const group = byKey.get(key);
       if (group) {
         group.push(sf.id);
@@ -119,8 +143,13 @@ export interface SemanticAdjudicator {
  * Invented or missing source IDs are reported as errors and never merged.
  */
 export class SemanticMatcher implements FindingMatcher {
-  private readonly deterministic = new DeterministicMatcher();
-  constructor(private readonly adjudicator: SemanticAdjudicator) {}
+  private readonly deterministic: DeterministicMatcher;
+  constructor(
+    private readonly adjudicator: SemanticAdjudicator,
+    private readonly options: MatcherOptions = {},
+  ) {
+    this.deterministic = new DeterministicMatcher(options);
+  }
 
   async match(findings: SourceFinding[]): Promise<MatchResult> {
     const det = this.deterministic.match(findings);
@@ -136,7 +165,7 @@ export class SemanticMatcher implements FindingMatcher {
     const clustersByPath = new Map<string, SourceFinding[][]>();
     for (const group of det.groups) {
       const first = byId.get(group[0]!)!;
-      const anchor = normalizePath(first.finding.path);
+      const anchor = normalizePath(first.finding.path, this.options.baseDir);
       const list = clustersByPath.get(anchor);
       if (list) list.push(group.map((id) => byId.get(id)!));
       else clustersByPath.set(anchor, [group.map((id) => byId.get(id)!)]);

@@ -4,6 +4,7 @@
 // the consensus adjudicator remain review-only (no write tools, --no-session).
 
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { Writable } from "node:stream";
 import { PANEL_READ_ONLY_TOOLS, REVIEW_META_VERSION } from "./types.js";
 import type {
@@ -30,6 +31,8 @@ import { resolvePanelConfig, resolveReviewerModelThinking, type ResolvedPanelCon
 import { aggregatePanel, resolvePanelEffectiveModel } from "./panel-aggregate.js";
 import { sumPanelUsage } from "./panel-usage.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
+import { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback } from "./jev.js";
+import { currentConfig } from "./pi-config.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
 import { launchPanelUi } from "./panel-ui.js";
@@ -508,12 +511,40 @@ export async function runPanelReviewOnce(
 
   // Semantic adjudication is on by default (issue #2 Decision 27): when
   // ambiguous same-path candidates exist, a constrained adjudicator clusters
-  // them. --consensus-model overrides the adjudicator model; otherwise fall
-  // back to the shared review model / Pi default. Exact matches never invoke
-  // the adjudicator, so this stays cheap when there is nothing ambiguous.
+  // them. Exact matches never invoke the adjudicator, so this stays cheap
+  // when there is nothing ambiguous.
+  //
+  // Engine selection: an explicit --consensus-model keeps the review-only Pi
+  // adjudicator (the operator asked for an LLM). Otherwise the Jev
+  // enhancement (enabled by config/key presence) turns adjudication into one
+  // typed System One call; any Jev failure degrades to the Pi adjudicator.
   const adjudicatorModel = resolved.consensusModel ?? parsed.model ?? preset.model ?? undefined;
   emit("aggregation.started", {});
-  const matcher = new SemanticMatcher(createAdjudicator(config, adjudicatorModel, options.signal));
+  const piAdjudicator = createAdjudicator(config, adjudicatorModel, options.signal);
+  const jevDecision = resolveJev(process.env, currentConfig(process.env).config);
+  const jevRequested = jevDecision.enabled && resolved.consensusModel === undefined;
+  const jevConnection = jevRequested ? resolveJevConnection(process.env) : undefined;
+  let adjudicator: SemanticAdjudicator = piAdjudicator;
+  let jevWrapper: ReturnType<typeof withAdjudicationFallback> | undefined;
+  let adjudicationFallbackNote: string | undefined;
+  if (jevRequested) {
+    if (jevConnection) {
+      jevWrapper = withAdjudicationFallback(createJevAdjudicator(jevConnection), piAdjudicator, (message) => {
+        adjudicationFallbackNote = message;
+        if (parsed.outputFormat !== "events-jsonl") process.stderr.write(`pi-review: warning: ${message}\n`);
+      });
+      adjudicator = jevWrapper.adjudicator;
+    } else {
+      adjudicationFallbackNote = "jev adjudication is enabled but TYPESAFE_API_KEY is not set; used the Pi adjudicator";
+    }
+  }
+  // Anchor base: with exactly one directory target, resolve relative finding
+  // paths against it so `calc.ts` and `/abs/target/calc.ts` corroborate.
+  const matcherBaseDir =
+    payload.pathTargets && payload.pathTargets.length === 1
+      ? path.resolve(payload.pathTargets[0]!)
+      : undefined;
+  const matcher = new SemanticMatcher(adjudicator, matcherBaseDir ? { baseDir: matcherBaseDir } : {});
 
   const aggregate = await aggregatePanel({
     reviewers: submissions,
@@ -554,6 +585,11 @@ export async function runPanelReviewOnce(
     usage: sumPanelUsage(submissions.map((s) => s.usage)),
     ...(extensionHints && extensionHints.length > 0 ? { extensionHints } : {}),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
+    // The engine is only meaningful when adjudication actually ran; read it
+    // back from the wrapper so a Jev failure that fell back to Pi is reported
+    // as "pi", not as the initially attempted "jev".
+    ...(aggregate.adjudicationUsed ? { adjudicationEngine: jevWrapper?.engine() ?? "pi" } : {}),
+    ...(aggregate.adjudicationUsed && adjudicationFallbackNote ? { adjudicationFallbackNote } : {}),
   };
 
   const eventPanelMeta = redactReviewEventPayload(panelMeta);

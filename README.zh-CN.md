@@ -131,6 +131,8 @@ pi-review loop --until clean --max-rounds 10 -- @src
 
 `--until clean` 声明成功目标（clean gate），但仍有硬预算：省略 `--max-rounds` 时默认为 10，**不是无限循环**。Clean 定义：单审查无 actionable finding；面板审查无 confirmed actionable cluster；advisories 可保留；`needs_human`/`blocked` 绝不算 clean。
 
+**跨轮对比。** 从第 2 轮起，每轮 actionable finding 会与上一轮做对比（loop 摘要里的 `vs prev: =persisting · +new · -resolved`）。匹配先走确定性匹配；启用 Jev 增强时，措辞漂移的对子由 Jev 裁决，与面板共识同一套机制。该对比只是记账，绝不参与门禁；匹配失败时静默降级为无对比。在 `--until clean` 下，若连续两轮的 actionable 集合完全一致（全部 persisting，无新增无消失），loop 会以 `Stop: non_converging` 提前停止——轮次之间代码树不变，继续掷骰没有意义，host 应先修复再重新调用。
+
 `loop` 复用普通审查的 mode/model/progress/target 参数；v1 明确不支持 `--keep-session`、`--continue`、`--name`。
 
 每轮审查各自在 stderr 输出一条 `PI_REVIEW_META_JSON`，即[输出格式](#输出格式)里的富化 finding schema（`metaVersion`、每条 finding 的 `details`/`recommendation`/`location`、panel 轮次的 `sourceFindings`）；消费者按输出顺序逐轮读取该行即可拿到完整 finding 数据，无需刮取 Markdown，逐轮摘要（`LoopRoundSummary`）保持只含计数。
@@ -164,6 +166,8 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 ### 聚合
 
 两阶段匹配：先用稳定锚点（路径 + 归一化摘要）做确定性匹配；只有路径相同、措辞不同的模糊候选才交给受限的**语义仲裁器**（用 `--consensus-model` 启用）。仲裁器只能聚类，不得发明 finding、丢弃 finding、补充证据或充当额外审查者，且没有写工具。低置信匹配保持为独立 advisory，避免靠"相似"制造虚假共识。
+
+**裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。显式 `--consensus-model` 时仍走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。裁决发生时聚合 meta 带 `adjudicationEngine: "jev" | "pi"`，`/rv-config` 可查看当前生效值与 key 是否存在。
 
 ### 成本与失败
 
@@ -261,8 +265,9 @@ CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/
 | 键 | 类型 | 默认 | 说明 |
 |-----|------|---------|-------------|
 | `childExtensions` | boolean | `false` | 是否让评审子进程加载宿主 Pi 扩展，以使用仅由扩展注册的 provider。等价于单次运行 `PI_REVIEW_CHILD_EXTENSIONS=1`；`false` 保持子进程隔离（`--no-extensions`，issue #8）。 |
+| `jev` | boolean | auto | 是否把面板共识裁决交给 TypeSafe Jev 而非 Pi 仲裁子进程。默认：检测到 `TYPESAFE_API_KEY` 即开启，否则关闭。单次覆盖：`PI_REVIEW_JEV=1` / `=0`。显式 `--consensus-model` 时始终走 Pi 仲裁器。 |
 
-环境变量提供单次进程级覆盖（env 优先于配置文件）：`PI_REVIEW_HOME`、`PI_REVIEW_PRESETS`、`PI_REVIEW_PANEL_PRESETS`、`PI_REVIEW_SYSTEM_PROMPT`、`PI_REVIEW_SESSION_DIR`、`PI_REVIEW_META_STDOUT`、`PI_REVIEW_CHILD_EXTENSIONS`（`1`/`true`/`keep` 开启、其它已设值如 `0` 强制隔离、空值视为未设置；持久化等价写法为配置文件里 `{ "childExtensions": true }`）、`PI_REVIEW_CONFIG`。预设与审查指令文件内容均为英文。
+环境变量提供单次进程级覆盖（env 优先于配置文件）：`PI_REVIEW_HOME`、`PI_REVIEW_PRESETS`、`PI_REVIEW_PANEL_PRESETS`、`PI_REVIEW_SYSTEM_PROMPT`、`PI_REVIEW_SESSION_DIR`、`PI_REVIEW_META_STDOUT`、`PI_REVIEW_JEV`（`1`/`true`/`on` 开启 Jev 裁决、其它已设值如 `0` 保持 Pi 仲裁；连接用 `TYPESAFE_API_KEY`，可选 `TYPESAFE_BASE_URL`、`PI_REVIEW_JEV_MODEL`）、`PI_REVIEW_CHILD_EXTENSIONS`（`1`/`true`/`keep` 开启、其它已设值如 `0` 强制隔离、空值视为未设置；持久化等价写法为配置文件里 `{ "childExtensions": true }`）、`PI_REVIEW_CONFIG`。预设与审查指令文件内容均为英文。
 
 ## 安全
 

@@ -124,8 +124,9 @@ Use this protocol when the host is closing out implementation work and may edit 
    - `has_findings` → classify, fix accepted in-scope blockers, and re-invoke within the agreed host-cycle budget.
    - `needs_human` or `blocked` → stop early and escalate with the review history.
    - budget exhausted → report remaining findings and ask for a decision; do not loop indefinitely.
+   - `non_converging` → two consecutive rounds produced an identical actionable set; the tree is frozen between rounds, so more rounds are dice rolls. Fix in the host and re-invoke; do not re-roll.
    - With `--until clean`, the host owns the fix→re-review cycle until clean or hard budget. Advisories alone do not block clean; confirmed actionable findings do.
-8. **Detect non-convergence.** After two non-converging patch cycles (the same finding persists, findings oscillate, or scope grows), pause and reclassify all remaining findings before any further edit.
+8. **Detect non-convergence.** After two non-converging patch cycles (the same finding persists, findings oscillate, or scope grows), pause and reclassify all remaining findings before any further edit. The loop's per-round `vs prev` comparison (persisting / new / resolved) is the machine signal for this; `--until clean` also stops early as `non_converging` when the actionable set is stable across two rounds.
 9. **Gate completion claims.** Never claim done, ship, commit-ready, or clean without a fresh `clean` result, unless the user gives explicit human acceptance of named remaining findings. Report accepted fixes, rejected findings with rationale, follow-ups, stop reason, and proof evidence.
 
 The shell exit policy is: `0` clean, `1` status is `has_findings`, `2` usage error, `3` needs human, `4` blocked/runtime failure. A non-zero loop result is a gate signal, not permission for the child reviewer to edit.

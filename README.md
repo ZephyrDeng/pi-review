@@ -199,6 +199,8 @@ Each round's `PI_REVIEW_META_JSON` line is the same enriched schema documented u
 
 This is a **host-driven gate**: if findings remain, the host or human fixes only accepted in-scope findings and invokes `loop` again. For patch-by-patch agent closeout, `--max-rounds 1` gives the host a fix point after each review. For an explicit clean goal with a hard ceiling, use `--until clean` (default budget 10 when `--max-rounds` is omitted; never unlimited). Clean means no gate-blocking findings (single: no actionable findings; panel: no confirmed actionable clusters; advisories may remain). `loop` accepts normal review target/model/progress options but rejects `--keep-session`, `--continue`, and `--name` in v1.
 
+**Cross-round comparison.** From round 2 onward each round is diffed against the previous round's actionable findings (`vs prev: =persisting · +new · -resolved` in the loop summary). Matching is deterministic first; with the Jev enhancement enabled, wording-drift pairs are adjudicated by Jev just like panel consensus. The comparison is advisory bookkeeping, never gate input, and a matcher failure degrades silently to no comparison. Under `--until clean`, when two consecutive rounds produce an identical actionable set (all persisting, nothing added or resolved), the loop stops early with `Stop: non_converging` — the tree does not change between rounds, so further rounds are dice rolls and the host should fix and re-invoke.
+
 ## Panel Review
 
 Panel review runs multiple **independent** reviewers in isolated child sessions and aggregates their findings into one gate result. Reviewers cannot see one another's findings, so agreement represents independent discovery.
@@ -228,6 +230,8 @@ Singleton (uncorroborated) findings remain visible as **advisories** but do not 
 ### Aggregation
 
 Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may not invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
+
+**Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call. Explicit `--consensus-model` keeps the Pi adjudicator; `PI_REVIEW_JEV=0` disables Jev for one run; any Jev failure falls back to the Pi adjudicator and is recorded as `adjudicationFallbackNote` in the meta. The aggregate meta carries `adjudicationEngine: "jev" | "pi"` whenever adjudication ran, and `/rv-config` shows the effective setting and key presence.
 
 ### Cost and failure
 
@@ -434,6 +438,7 @@ Persistent settings live in the review config file `~/.pi/pi-review/config.json`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `childExtensions` | boolean | `false` | Let review children load host Pi extensions so providers registered only through extensions are usable. Equivalent to per-run `PI_REVIEW_CHILD_EXTENSIONS=1`; `false` keeps children isolated with `--no-extensions` (issue #8). |
+| `jev` | boolean | auto | Route panel consensus adjudication to TypeSafe Jev instead of a Pi adjudicator child. Default: enabled when `TYPESAFE_API_KEY` is set, disabled otherwise. Per-run override: `PI_REVIEW_JEV=1` / `=0`. An explicit `--consensus-model` always keeps the Pi adjudicator. |
 
 Per-process overrides via environment variables (env wins over the config file):
 
@@ -446,6 +451,7 @@ Per-process overrides via environment variables (env wins over the config file):
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
 | `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |
+| `PI_REVIEW_JEV` | Per-run override for `jev`: `1`/`true`/`on` routes panel consensus adjudication to TypeSafe Jev, any other set value (e.g. `0`) keeps the Pi adjudicator. Connection: `TYPESAFE_API_KEY` (required), optional `TYPESAFE_BASE_URL` and `PI_REVIEW_JEV_MODEL` (default `jev-latest`) |
 | `PI_REVIEW_CHILD_EXTENSIONS` | Per-run override for `childExtensions`: `1`/`true`/`keep` enables host extensions for this process, any other set value (e.g. `0`) forces isolation; an empty value counts as unset. Persistent equivalent: `{ "childExtensions": true }` in the config file. With an explicit `--provider`, pi-review first probes the model catalog and blocks with a hint if the provider only exists via extensions |
 | `PI_REVIEW_CONFIG` | Path to the review config file (default: `~/.pi/pi-review/config.json`) |
 

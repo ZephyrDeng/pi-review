@@ -279,6 +279,12 @@ export interface PanelFields {
   advisories: FindingCluster[];
   reviewers: ReviewerOutcome[];
   adjudicationUsed: boolean;
+  /**
+   * Which engine ran semantic adjudication: a Jev (TypeSafe System One)
+   * typed-decision call, or a review-only Pi child. Present only when
+   * adjudicationUsed is true. Absent on metas written before Jev support.
+   */
+  adjudicationEngine?: "jev" | "pi";
   adjudicationErrors?: string[];
   /**
    * Every source finding a contributing reviewer produced during this
@@ -289,6 +295,12 @@ export interface PanelFields {
    * always populates it (possibly `[]`).
    */
   sourceFindings?: SourceFinding[];
+  /**
+   * Present when the Jev adjudication enhancement could not run (no API key,
+   * or the Jev call failed and the Pi adjudicator took over). Absent on a
+   * clean Jev or plain-Pi adjudication.
+   */
+  adjudicationFallbackNote?: string;
 }
 
 /** Pure aggregate panel result (no Pi, no I/O). */

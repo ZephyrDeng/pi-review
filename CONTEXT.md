@@ -27,7 +27,9 @@
 
 **Model catalog**: The model list returned by `pi --list-models`, exposed through `pi-review models [search]`.
 
-**Review config**: The persistent machine-level settings file (`~/.pi/pi-review/config.json`) that shapes review children — currently one key, `childExtensions`. It is the durable home for behavior defaults; per-process env overrides it, and `/rv-config` shows the effective value with its source.
+**Review config**: The persistent machine-level settings file (`~/.pi/pi-review/config.json`) that shapes review children — currently two keys: `childExtensions` and `jev`. It is the durable home for behavior defaults; per-process env overrides it, and `/rv-config` shows the effective value with its source.
+
+**Jev enhancement mode**: When `TYPESAFE_API_KEY` is present (or `jev: true` in the review config), typed decision actions route to TypeSafe Jev (System One) instead of a review-only Pi child. Currently that action is panel consensus adjudication: ambiguous same-path finding pairs become Noul questions fanned out in one call, and the probability is the merge confidence. Explicit `--consensus-model` keeps the Pi adjudicator; a Jev failure falls back to it and is recorded as `adjudicationFallbackNote` in the meta. The same matching machinery also powers the loop's cross-round finding comparison (persisting / added / resolved per round), where a Jev failure degrades to deterministic-only matching without spawning a Pi child.
 
 **Pi package**: The installable package shape that lets Pi load the `/rv` extension and the `pi-review` skill via `pi install`.
 

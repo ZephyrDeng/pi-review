@@ -1,8 +1,10 @@
 import { formatDurationMs, formatUsage } from "./meta-footer.js";
 import { reviewExitCode } from "./review-result.js";
+import { compareRoundFindings, type RoundComparison } from "./round-compare.js";
+import type { FindingMatcher } from "./matcher.js";
 import type { PanelReviewMeta, ReviewMeta, ReviewRunResult, ReviewStatus, Verdict } from "./types.js";
 
-export type LoopStopReason = "clean" | "budget_exhausted" | "needs_human" | "blocked";
+export type LoopStopReason = "clean" | "budget_exhausted" | "needs_human" | "blocked" | "non_converging";
 export type LoopUntilGoal = "clean";
 
 /**
@@ -49,6 +51,12 @@ export interface LoopRoundSummary {
   usage?: import("./types.js").TokenUsage;
   /** Present when the round evaluated a panel. */
   panel?: LoopRoundPanelSummary;
+  /**
+   * Cross-round comparison vs the previous round's actionable findings.
+   * Present from round 2 onward when a matcher was supplied and the previous
+   * round had actionable findings. Advisory bookkeeping; never gate input.
+   */
+  comparison?: RoundComparison;
 }
 
 export interface LoopReviewResult {
@@ -68,6 +76,15 @@ export interface RunReviewLoopOptions {
   maxRounds: number;
   /** When set to clean, the loop's declared goal is the clean gate (still hard-capped by maxRounds). */
   until?: LoopUntilGoal;
+  /**
+   * Matcher for cross-round finding comparison. When supplied, each round
+   * after the first is diffed against the previous round's actionable
+   * findings (persisting / added / resolved), and an until-clean loop stops
+   * early as non_converging once the actionable set is identical across two
+   * consecutive rounds — the tree does not change between rounds, so further
+   * rounds are dice rolls, not progress.
+   */
+  matcher?: FindingMatcher;
 }
 
 function displayEnum(value: string): string {
@@ -91,6 +108,11 @@ export function formatLoopSummary(result: LoopReviewResult): string {
     } else {
       lines.push(
         `  Round ${round.index}  ${displayEnum(round.status)} | ${displayEnum(round.verdict)} | ${round.actionableCount} actionable / ${round.findingCount} total${thinkBit}${tokenBit} | ${formatDurationMs(round.durationMs)}`,
+      );
+    }
+    if (round.comparison) {
+      lines.push(
+        `           vs prev: =${round.comparison.persisting} persisting · +${round.comparison.added} new · -${round.comparison.resolved} resolved`,
       );
     }
   }
@@ -123,6 +145,7 @@ export async function runReviewLoop(
   }
 
   const rounds: LoopRoundSummary[] = [];
+  let previousActionable: Array<{ id: string; summary: string; path?: string }> | undefined;
   for (let index = 1; index <= maxRounds; index += 1) {
     const run = await runOne(index);
     const { meta } = run;
@@ -137,6 +160,21 @@ export async function runReviewLoop(
           panelHealth: meta.panelHealth,
         }
       : undefined;
+    const actionable = meta.findings
+      .filter((finding) => finding.actionable)
+      .map((finding, i) => ({ id: finding.id ?? `F${i + 1}`, summary: finding.summary, ...(finding.path ? { path: finding.path } : {}) }));
+
+    // Cross-round comparison: advisory bookkeeping only. A matcher failure
+    // degrades to "no comparison" — it must never kill the loop.
+    let comparison: RoundComparison | undefined;
+    if (options.matcher && previousActionable !== undefined) {
+      try {
+        comparison = await compareRoundFindings(previousActionable, actionable, options.matcher);
+      } catch {
+        comparison = undefined;
+      }
+    }
+
     rounds.push({
       index,
       status: meta.status,
@@ -147,6 +185,7 @@ export async function runReviewLoop(
       ...(meta.thinking ? { thinking: meta.thinking } : {}),
       ...(meta.usage ? { usage: meta.usage } : {}),
       ...(panel ? { panel } : {}),
+      ...(comparison ? { comparison } : {}),
     });
 
     // Success goal or immediate escalation — never treat has_findings as clean.
@@ -160,6 +199,29 @@ export async function runReviewLoop(
         ...(until ? { until } : {}),
       };
     }
+
+    // Non-convergence: under --until clean, an actionable set identical to the
+    // previous round means the gate cannot move without host edits (the tree
+    // is frozen between rounds), so more rounds are dice rolls. Stop early and
+    // hand back to the host.
+    if (
+      until === "clean" &&
+      comparison &&
+      comparison.persisting > 0 &&
+      comparison.added === 0 &&
+      comparison.resolved === 0
+    ) {
+      return {
+        rounds,
+        finalStatus: "has_findings",
+        stopReason: "non_converging",
+        exitCode: reviewExitCode("has_findings"),
+        maxRounds,
+        until,
+      };
+    }
+
+    previousActionable = actionable;
   }
 
   return {

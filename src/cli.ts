@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 import { isInstallHelp, parseInstallCommand } from "./install-args.js";
 import { isPanelActive, parseArgs, usage } from "./args.js";
+import type { ParsedArgs } from "./types.js";
 import { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.js";
+import { normalizePayloadRefs, splitPayload } from "./prompt.js";
+import path from "node:path";
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
 import { runPanelReview, runPanelReviewOnce, runPanelReviewWithUi } from "./panel.js";
 import { resolveConfig } from "./config.js";
 import { currentConfig } from "./pi-config.js";
+import { DeterministicMatcher, SemanticMatcher, type FindingMatcher } from "./matcher.js";
+import { createJevAdjudicator, resolveJev, resolveJevConnection, withAdjudicationFallback } from "./jev.js";
 import { installSkill, uninstallSkill } from "./skill.js";
 import { runUpdate } from "./update.js";
 import { runInstall } from "./install.js";
@@ -18,6 +23,28 @@ if (isInstallHelp(parsed)) usage(0);
 // brick an older one.
 for (const warning of currentConfig().warnings) {
   process.stderr.write(`pi-review: config warning: ${warning}\n`);
+}
+
+/**
+ * Matcher for the loop's cross-round comparison. Jev when the enhancement is
+ * on and a key exists; a Jev failure degrades to deterministic-only matching
+ * (never an LLM adjudicator child — this is advisory bookkeeping, not a gate).
+ */
+function loopMatcher(parsed: ParsedArgs): FindingMatcher {
+  const payload = normalizePayloadRefs(splitPayload(parsed.payload));
+  const baseDir =
+    payload.pathTargets && payload.pathTargets.length === 1
+      ? path.resolve(payload.pathTargets[0]!)
+      : undefined;
+  const options = baseDir ? { baseDir } : {};
+  const jevOn = resolveJev(process.env, currentConfig(process.env).config).enabled;
+  const connection = jevOn ? resolveJevConnection(process.env) : undefined;
+  if (!connection) return new DeterministicMatcher(options);
+  const silentPiFallback = { adjudicate: async () => ({ merges: [] }) };
+  const wrapped = withAdjudicationFallback(createJevAdjudicator(connection), silentPiFallback, (message) => {
+    process.stderr.write(`pi-review: warning: ${message}\n`);
+  });
+  return new SemanticMatcher(wrapped.adjudicator, options);
 }
 
 if (parsed.command === "models") {
@@ -41,7 +68,11 @@ if (parsed.command === "models") {
     ? () => runPanelReviewOnce(parsed, stdinText)
     : () => runReviewOnce(parsed, stdinText);
   const result = await runReviewLoop(
-    { maxRounds: parsed.maxRounds!, ...(parsed.until ? { until: parsed.until } : {}) },
+    {
+      maxRounds: parsed.maxRounds!,
+      ...(parsed.until ? { until: parsed.until } : {}),
+      matcher: loopMatcher(parsed),
+    },
     runOne,
   );
   process.stdout.write(`${formatLoopSummary(result)}\n`);

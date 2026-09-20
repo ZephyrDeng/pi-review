@@ -22,6 +22,13 @@ export interface PiReviewConfig {
    * keeps children isolated with --no-extensions (issue #8).
    */
   childExtensions?: boolean;
+  /**
+   * Enhancement mode: route typed decision actions (panel consensus
+   * adjudication) to TypeSafe Jev instead of a review-only Pi child. Default
+   * auto-enables when TYPESAFE_API_KEY is present in the environment;
+   * PI_REVIEW_JEV=0 disables it for one process.
+   */
+  jev?: boolean;
 }
 
 /** Where the effective value came from. */
@@ -74,6 +81,13 @@ export function parseReviewConfig(text: string): ReviewConfigLoad {
       warnings.push(
         `"childExtensions" must be true or false, got ${JSON.stringify(record.childExtensions)}; ignoring it`,
       );
+    }
+  }
+  if (record.jev !== undefined && record.jev !== null) {
+    if (typeof record.jev === "boolean") {
+      config.jev = record.jev;
+    } else {
+      warnings.push(`"jev" must be true or false, got ${JSON.stringify(record.jev)}; ignoring it`);
     }
   }
   return { config, warnings };

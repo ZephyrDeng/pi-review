@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "vitest";
 import {
   DeterministicMatcher,
@@ -18,10 +19,18 @@ function finding(summary: string, opts: { path?: string; actionable?: boolean } 
   return { summary, actionable: opts.actionable ?? true, ...(opts.path ? { path: opts.path } : {}) };
 }
 
-test("normalizePath strips leading ./ and quotes and lowercases", () => {
-  assert.equal(normalizePath("`./src/cli.ts`"), "src/cli.ts");
-  assert.equal(normalizePath("SRC/CLI.TS"), "src/cli.ts");
-  assert.equal(normalizePath(undefined), "");
+test("normalizePath strips quotes, resolves against baseDir, and lowercases", () => {
+  const base = "/tmp/target";
+  assert.equal(normalizePath("`./src/cli.ts`", base), "/tmp/target/src/cli.ts");
+  assert.equal(normalizePath("SRC/CLI.TS", base), "/tmp/target/src/cli.ts");
+  assert.equal(normalizePath(undefined, base), "");
+  // Absolute spellings pass through untouched by baseDir.
+  assert.equal(normalizePath("/tmp/target/src/cli.ts", base), "/tmp/target/src/cli.ts");
+});
+
+test("normalizePath makes absolute and relative spellings of one file share an anchor", () => {
+  const base = "/tmp/jev-ab-target";
+  assert.equal(normalizePath("calc.ts", base), normalizePath("/tmp/jev-ab-target/calc.ts", base));
 });
 
 test("normalizeSummary collapses punctuation and whitespace", () => {
@@ -30,8 +39,11 @@ test("normalizeSummary collapses punctuation and whitespace", () => {
 });
 
 test("deterministicKey combines path and normalized summary", () => {
-  assert.equal(deterministicKey({ path: "src/cli.ts", summary: "Off-by-one" }), "src/cli.ts::off by one");
-  assert.equal(deterministicKey({ summary: "No path" }), "::no path");
+  assert.equal(
+    deterministicKey({ path: "src/cli.ts", summary: "Off-by-one" }, "/tmp/t"),
+    "/tmp/t/src/cli.ts::off by one",
+  );
+  assert.equal(deterministicKey({ summary: "No path" }, "/tmp/t"), "::no path");
 });
 
 test("DeterministicMatcher merges same path + same summary across reviewers", () => {
@@ -203,5 +215,24 @@ test("F6: a merge with non-array sourceFindingIds is reported as an error", asyn
   );
   const result = await matcher.match(findings);
   assert.ok(result.errors.some((e) => /non-array sourceFindingIds/.test(e)));
+  assert.equal(result.groups.length, 2);
+});
+
+test("DeterministicMatcher merges absolute and relative spellings of the same file (baseDir)", () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("eval on user input", { path: "/tmp/t/calc.ts" })),
+    sf("r2#F1", "r2", finding("eval on user input", { path: "calc.ts" })),
+  ];
+  const result = new DeterministicMatcher({ baseDir: "/tmp/t" }).match(findings);
+  assert.equal(result.groups.length, 1);
+  assert.deepEqual(result.groups[0]!.sort(), ["r1#F1", "r2#F1"]);
+});
+
+test("DeterministicMatcher without baseDir keeps relative spellings cwd-relative (no regression)", () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("same", { path: "a.ts" })),
+    sf("r2#F1", "r2", finding("same", { path: "/other/a.ts" })),
+  ];
+  const result = new DeterministicMatcher().match(findings);
   assert.equal(result.groups.length, 2);
 });
