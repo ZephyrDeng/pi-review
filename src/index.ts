@@ -43,7 +43,7 @@ export { aggregatePanel, effectiveThreshold } from "./panel-aggregate.js";
 export type { PanelAggregationInput } from "./panel-aggregate.js";
 export { DeterministicMatcher, SemanticMatcher } from "./matcher.js";
 export type { FindingMatcher, MatchResult, SemanticAdjudicator, AdjudicationRequest, AdjudicationResponse, AdjudicationMerge, AdjudicationCandidate } from "./matcher.js";
-export { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback, evaluateNouls, evaluateChoices } from "./jev.js";
+export { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback, withUncertaintyEscalation, JEV_ESCALATION_BAND, evaluateNouls, evaluateChoices } from "./jev.js";
 export type { JevConnection, JevDecision } from "./jev.js";
 export { classifyFindings, formatClassifyAscii, parseMetaFindings, resolveBaseline, SCOPE_CLASSES, CLASSIFY_CONFIDENCE_FLOOR } from "./classify.js";
 export type { ClassifiedFinding, ClassifyResult, ScopeClass } from "./classify.js";

@@ -7,6 +7,7 @@ import {
   resolveJev,
   resolveJevConnection,
   withAdjudicationFallback,
+  withUncertaintyEscalation,
   JevError,
   type JevConnection,
 } from "./jev.js";
@@ -178,4 +179,62 @@ test("withAdjudicationFallback keeps jev engine when the primary succeeds", asyn
   assert.equal(response.merges.length, 1);
   assert.equal(wrapped.engine(), "jev");
   assert.equal(wrapped.note(), undefined);
+});
+
+test("withUncertaintyEscalation re-judges only the borderline band with the strong tier", async () => {
+  const fast = {
+    async adjudicate() {
+      return {
+        merges: [
+          { sourceFindingIds: ["a", "b"], confidence: 0.95 }, // clear merge — untouched
+          { sourceFindingIds: ["c", "d"], confidence: 0.1 },  // clear distinct — untouched
+          { sourceFindingIds: ["e", "f"], confidence: 0.55 }, // borderline — escalated
+        ],
+      };
+    },
+  };
+  const strongCalls: string[][] = [];
+  const strong = {
+    async adjudicate(request: { candidates: Array<{ findings: Array<{ id: string }> }> }) {
+      strongCalls.push(request.candidates.flatMap((c) => c.findings.map((f) => f.id)));
+      return { merges: [{ sourceFindingIds: ["e", "f"], confidence: 0.9 }] };
+    },
+  };
+  let note: string | undefined;
+  const cascade = withUncertaintyEscalation(fast as never, strong as never, (m) => { note = m; });
+  const result = await cascade.adjudicate({
+    candidates: [{
+      anchorPath: "src/x.ts",
+      findings: ["a", "b", "c", "d", "e", "f"].map((id) => ({ id, reviewerId: "r1", finding: { summary: id, actionable: true } })),
+    }],
+  } as never);
+  // Strong tier saw ONLY the borderline findings
+  assert.deepEqual(strongCalls, [["e", "f"]]);
+  // Clear merges pass through; the borderline pair is replaced by the strong verdict
+  assert.deepEqual(
+    result.merges.map((m) => [m.sourceFindingIds, m.confidence]),
+    [[["a", "b"], 0.95], [["c", "d"], 0.1], [["e", "f"], 0.9]],
+  );
+  assert.match(note!, /escalated 1 borderline pair/);
+});
+
+test("withUncertaintyEscalation keeps fast-tier judgments when the strong tier fails", async () => {
+  const fast = { async adjudicate() { return { merges: [{ sourceFindingIds: ["a", "b"], confidence: 0.5 }] }; } };
+  const strong = { async adjudicate() { throw new Error("pi down"); } };
+  const cascade = withUncertaintyEscalation(fast as never, strong as never);
+  const result = await cascade.adjudicate({
+    candidates: [{ anchorPath: "x", findings: [{ id: "a", reviewerId: "r1", finding: { summary: "a", actionable: true } }, { id: "b", reviewerId: "r2", finding: { summary: "b", actionable: true } }] }],
+  } as never);
+  assert.deepEqual(result.merges, [{ sourceFindingIds: ["a", "b"], confidence: 0.5 }]);
+});
+
+test("withUncertaintyEscalation skips the strong tier when nothing is borderline", async () => {
+  const fast = { async adjudicate() { return { merges: [{ sourceFindingIds: ["a", "b"], confidence: 0.9 }] }; } };
+  let called = false;
+  const strong = { async adjudicate() { called = true; return { merges: [] }; } };
+  const cascade = withUncertaintyEscalation(fast as never, strong as never);
+  await cascade.adjudicate({
+    candidates: [{ anchorPath: "x", findings: [{ id: "a", reviewerId: "r1", finding: { summary: "a", actionable: true } }, { id: "b", reviewerId: "r2", finding: { summary: "b", actionable: true } }] }],
+  } as never);
+  assert.equal(called, false);
 });

@@ -31,7 +31,7 @@ import { resolvePanelConfig, resolveReviewerModelThinking, type ResolvedPanelCon
 import { aggregatePanel, resolvePanelEffectiveModel } from "./panel-aggregate.js";
 import { sumPanelUsage } from "./panel-usage.js";
 import { SemanticMatcher, type AdjudicationCandidate, type SemanticAdjudicator } from "./matcher.js";
-import { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback } from "./jev.js";
+import { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback, withUncertaintyEscalation } from "./jev.js";
 import { currentConfig } from "./pi-config.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
@@ -529,8 +529,15 @@ export async function runPanelReviewOnce(
   let adjudicationFallbackNote: string | undefined;
   if (jevRequested) {
     if (jevConnection) {
-      jevWrapper = withAdjudicationFallback(createJevAdjudicator(jevConnection), piAdjudicator, (message) => {
-        adjudicationFallbackNote = message;
+      // Cascade: Jev answers every pair in one typed call; only the borderline
+      // band (0.3-0.7) is re-judged by the Pi adjudicator in a single extra
+      // call. Clear cases never pay for an LLM; uncertain ones get a second
+      // opinion (guards the union-find chaining failure from review C9).
+      const cascaded = withUncertaintyEscalation(createJevAdjudicator(jevConnection), piAdjudicator, (message) => {
+        adjudicationFallbackNote = adjudicationFallbackNote ? `${adjudicationFallbackNote}; ${message}` : message;
+      });
+      jevWrapper = withAdjudicationFallback(cascaded, piAdjudicator, (message) => {
+        adjudicationFallbackNote = adjudicationFallbackNote ? `${adjudicationFallbackNote}; ${message}` : message;
         if (parsed.outputFormat !== "events-jsonl") process.stderr.write(`pi-review: warning: ${message}\n`);
       });
       adjudicator = jevWrapper.adjudicator;

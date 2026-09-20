@@ -307,6 +307,58 @@ export function createJevAdjudicator(
   };
 }
 
+/**
+ * Borderline band: Jev probabilities inside [low, high] are too close to the
+ * matcher's 0.6 merge threshold to trust blindly — a small calibration slip
+ * flips the decision. Those pairs get re-judged by the Pi adjudicator.
+ */
+export const JEV_ESCALATION_BAND = { low: 0.3, high: 0.7 } as const;
+
+function pairKey(ids: string[]): string {
+  return [...ids].sort().join("\u0000");
+}
+
+/**
+ * Cascade wrapper: run the fast Jev tier over every pair, then re-judge only
+ * the borderline band with the strong (Pi) tier in a single extra call.
+ * Clear cases never pay for an LLM; uncertain cases get a second opinion.
+ * A strong-tier failure keeps the fast tier's judgments — escalation is an
+ * accuracy upgrade, never a new failure mode.
+ */
+export function withUncertaintyEscalation(
+  fast: SemanticAdjudicator,
+  strong: SemanticAdjudicator,
+  onEscalation?: (message: string) => void,
+): SemanticAdjudicator {
+  return {
+    async adjudicate(request: AdjudicationRequest): Promise<AdjudicationResponse> {
+      const response = await fast.adjudicate(request);
+      const borderline = response.merges.filter(
+        (merge) => merge.confidence >= JEV_ESCALATION_BAND.low && merge.confidence <= JEV_ESCALATION_BAND.high,
+      );
+      if (borderline.length === 0) return response;
+
+      const escalatedIds = new Set(borderline.flatMap((merge) => merge.sourceFindingIds));
+      // Pairs never span candidate groups by construction, so filtering each
+      // group to the escalated findings preserves the no-cross-anchor rule.
+      const subCandidates = request.candidates
+        .map((candidate) => ({ ...candidate, findings: candidate.findings.filter((sf) => escalatedIds.has(sf.id)) }))
+        .filter((candidate) => candidate.findings.length > 0);
+      try {
+        const strongResponse = await strong.adjudicate({ candidates: subCandidates });
+        const replaced = new Set(borderline.map((merge) => pairKey(merge.sourceFindingIds)));
+        const kept = response.merges.filter((merge) => !replaced.has(pairKey(merge.sourceFindingIds)));
+        onEscalation?.(
+          `escalated ${borderline.length} borderline pair(s) (probability ${JEV_ESCALATION_BAND.low}-${JEV_ESCALATION_BAND.high}) to the Pi adjudicator`,
+        );
+        return { merges: [...kept, ...strongResponse.merges] };
+      } catch {
+        return response;
+      }
+    },
+  };
+}
+
 /** Adjudicator wrapper with its runtime-resolved engine and fallback note. */
 export interface AdjudicatorWithEngine {
   adjudicator: SemanticAdjudicator;
