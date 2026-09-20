@@ -218,6 +218,102 @@ test("F6: a merge with non-array sourceFindingIds is reported as an error", asyn
   assert.equal(result.groups.length, 2);
 });
 
+test("SemanticMatcher does not chain two separate confident merges into one cluster", async () => {
+  // A~B and B~C are confident but A~C was never proposed: union-find would
+  // fold all three into one cluster; complete linkage must refuse.
+  const findings = [
+    sf("r1#F1", "r1", finding("issue one", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("issue two", { path: "src/cli.ts" })),
+    sf("r3#F1", "r3", finding("issue three", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(
+      Promise.resolve({
+        merges: [
+          { sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 0.9 },
+          { sourceFindingIds: ["r2#F1", "r3#F1"], confidence: 0.9 },
+        ],
+      }),
+    ),
+  );
+  const result = await matcher.match(findings);
+  assert.equal(result.groups.length, 2);
+  assert.deepEqual(result.groups.flat().sort(), ["r1#F1", "r2#F1", "r3#F1"]);
+});
+
+test("SemanticMatcher merges three findings when every pair is confident", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("issue one", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("issue two", { path: "src/cli.ts" })),
+    sf("r3#F1", "r3", finding("issue three", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(
+      Promise.resolve({
+        merges: [
+          { sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 0.9 },
+          { sourceFindingIds: ["r2#F1", "r3#F1"], confidence: 0.9 },
+          { sourceFindingIds: ["r1#F1", "r3#F1"], confidence: 0.9 },
+        ],
+      }),
+    ),
+  );
+  const result = await matcher.match(findings);
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0]!.length, 3);
+});
+
+test("SemanticMatcher expands a multi-id merge into one cluster", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("issue one", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("issue two", { path: "src/cli.ts" })),
+    sf("r3#F1", "r3", finding("issue three", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(Promise.resolve({ merges: [{ sourceFindingIds: ["r1#F1", "r2#F1", "r3#F1"], confidence: 0.9 }] })),
+  );
+  const result = await matcher.match(findings);
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0]!.length, 3);
+});
+
+test("SemanticMatcher blocks a chain when one cross-cluster pair stays below the threshold", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("issue one", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("issue two", { path: "src/cli.ts" })),
+    sf("r3#F1", "r3", finding("issue three", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(
+      Promise.resolve({
+        merges: [
+          { sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 0.9 },
+          { sourceFindingIds: ["r2#F1", "r3#F1"], confidence: 0.9 },
+          { sourceFindingIds: ["r1#F1", "r3#F1"], confidence: 0.5 },
+        ],
+      }),
+    ),
+  );
+  const result = await matcher.match(findings);
+  assert.equal(result.groups.length, 2);
+});
+
+test("SemanticMatcher: deterministic duplicates share their group's semantic merges", async () => {
+  // r1#F1 and r2#F1 are exact path+summary duplicates (one deterministic
+  // group). A semantic merge naming only r1#F1 must pull r2#F1 along.
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r3#F1", "r3", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  const matcher = new SemanticMatcher(
+    adjudicator(Promise.resolve({ merges: [{ sourceFindingIds: ["r1#F1", "r3#F1"], confidence: 0.9 }] })),
+  );
+  const result = await matcher.match(findings);
+  assert.equal(result.groups.length, 1);
+  assert.deepEqual(result.groups[0]!.sort(), ["r1#F1", "r2#F1", "r3#F1"]);
+});
+
 test("DeterministicMatcher merges absolute and relative spellings of the same file (baseDir)", () => {
   const findings = [
     sf("r1#F1", "r1", finding("eval on user input", { path: "/tmp/t/calc.ts" })),

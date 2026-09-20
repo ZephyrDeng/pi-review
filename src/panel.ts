@@ -532,7 +532,7 @@ export async function runPanelReviewOnce(
       // Cascade: Jev answers every pair in one typed call; only the borderline
       // band (0.3-0.7) is re-judged by the Pi adjudicator in a single extra
       // call. Clear cases never pay for an LLM; uncertain ones get a second
-      // opinion (guards the union-find chaining failure from review C9).
+      // opinion (guards the transitive-merge chaining failure from review C9).
       const cascaded = withUncertaintyEscalation(createJevAdjudicator(jevConnection), piAdjudicator, (message) => {
         adjudicationFallbackNote = adjudicationFallbackNote ? `${adjudicationFallbackNote}; ${message}` : message;
       });

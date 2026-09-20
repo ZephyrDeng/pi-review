@@ -140,7 +140,10 @@ export interface SemanticAdjudicator {
 /**
  * Phase-two matcher: deterministic first, then an injected adjudicator may
  * merge ambiguous same-path candidates. Low-confidence matches are not merged.
- * Invented or missing source IDs are reported as errors and never merged.
+ * Clusters merge by complete linkage: every cross-cluster pair of
+ * deterministic groups must clear the confidence threshold, so one confident
+ * edge cannot chain distinct issues into a single cluster. Invented or
+ * missing source IDs are reported as errors and never merged.
  */
 export class SemanticMatcher implements FindingMatcher {
   private readonly deterministic: DeterministicMatcher;
@@ -206,24 +209,18 @@ export class SemanticMatcher implements FindingMatcher {
       };
     }
 
-    // Union-find over deterministic groups; only candidate IDs may merge.
+    // Deterministic-group level merge evidence. The adjudicator's merges are
+    // expanded to unordered pairs of deterministic-group indices: a 3-id
+    // merge (the Pi adjudicator's cluster form) marks every internal pair,
+    // while Jev's pairwise questions already arrive one pair per merge.
+    // Findings inside one deterministic group (exact path+summary duplicates)
+    // share the group's fate, so a merge naming one member links them all.
     const groupIndex = new Map<string, number>();
     det.groups.forEach((group, index) => {
       for (const id of group) groupIndex.set(id, index);
     });
-    const parent = det.groups.map((_, index) => index);
-    const find = (x: number): number => {
-      while (parent[x] !== x) {
-        parent[x] = parent[parent[x]!];
-        x = parent[x]!;
-      }
-      return x;
-    };
-    const union = (a: number, b: number) => {
-      const ra = find(a);
-      const rb = find(b);
-      if (ra !== rb) parent[ra] = rb;
-    };
+    const pairId = (a: number, b: number) => (a < b ? a * 65536 + b : b * 65536 + a);
+    const pairConfidence = new Map<number, number>();
 
     for (const merge of response.merges ?? []) {
       if (!merge || typeof merge !== "object" || Array.isArray(merge)) {
@@ -253,28 +250,51 @@ export class SemanticMatcher implements FindingMatcher {
         errors.push(`adjudicator returned invalid confidence for merge of ${ids.join(", ")}`);
         continue;
       }
-      if (confidence < SEMANTIC_MATCH_CONFIDENCE_THRESHOLD) continue;
-      const rootIndex = groupIndex.get(ids[0]!);
-      if (rootIndex === undefined) continue;
-      for (let i = 1; i < ids.length; i += 1) {
-        const idx = groupIndex.get(ids[i]!);
-        if (idx !== undefined) union(rootIndex, idx);
+      // Below-threshold confidence is recorded as evidence, never merges: it
+      // blocks a complete-linkage merge instead of silently chaining.
+      const indices = [...new Set(ids.map((id) => groupIndex.get(id)!))];
+      for (let i = 0; i < indices.length; i += 1) {
+        for (let j = i + 1; j < indices.length; j += 1) {
+          const key = pairId(indices[i]!, indices[j]!);
+          pairConfidence.set(key, Math.max(pairConfidence.get(key) ?? 0, confidence));
+        }
       }
     }
 
-    const merged = new Map<number, string[]>();
-    for (let index = 0; index < det.groups.length; index += 1) {
-      const root = find(index);
-      const list = merged.get(root);
-      if (list) list.push(...det.groups[index]!);
-      else merged.set(root, [...det.groups[index]!]);
+    // Complete-linkage merging, strongest link first: two clusters merge only
+    // when every cross-cluster pair clears the confidence threshold. A pair
+    // the adjudicator never proposed (or proposed below the threshold) blocks
+    // the merge, so transitive chains across distinct issues cannot form.
+    const clusters = det.groups.map((_, index) => [index]);
+    for (;;) {
+      let bestConfidence = Number.NEGATIVE_INFINITY;
+      let bestI = -1;
+      let bestJ = -1;
+      for (let i = 0; i < clusters.length; i += 1) {
+        for (let j = i + 1; j < clusters.length; j += 1) {
+          let min = Number.POSITIVE_INFINITY;
+          for (const a of clusters[i]!) {
+            for (const b of clusters[j]!) {
+              const confidence = pairConfidence.get(pairId(a, b)) ?? 0;
+              if (confidence < min) min = confidence;
+            }
+          }
+          if (min >= SEMANTIC_MATCH_CONFIDENCE_THRESHOLD && min > bestConfidence) {
+            bestConfidence = min;
+            bestI = i;
+            bestJ = j;
+          }
+        }
+      }
+      if (bestI === -1) break;
+      clusters[bestI]!.push(...clusters[bestJ]!);
+      clusters.splice(bestJ, 1);
     }
 
     // Preserve a stable order: by first source id within each merged group.
-    const groups = [...merged.values()].map((ids) => {
-      const sorted = [...ids].sort((a, b) => a.localeCompare(b));
-      return sorted;
-    });
+    const groups = clusters.map((cluster) =>
+      cluster.flatMap((index) => det.groups[index]!).sort((a, b) => a.localeCompare(b)),
+    );
     groups.sort((a, b) => a[0]!.localeCompare(b[0]!));
 
     return { groups, errors, adjudicationUsed: true };
