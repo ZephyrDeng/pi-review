@@ -30,6 +30,8 @@ Use `--pi-only` or `--agents-only` to run one side. For Pi-only use, **do not** 
 pi install npm:@zephyrdeng/pi-review
 ```
 
+This registers the `/rv*` extension and the agent skill — it does **not** put `pi-review` on PATH. Inside Pi that is fine: `/rv` and the `pi_review` tool spawn the package-local bin directly, and the skill falls back to `node <package>/bin/pi-review.js` for shell commands. If the same machine also drives the skill from Claude Code / Codex / Cursor / agy, install the CLI globally too (`npm i -g @zephyrdeng/pi-review`); otherwise agents resolve it through `npx -y @zephyrdeng/pi-review` on every call.
+
 ### Agent skill only (Claude Code, Codex, Cursor, agy, ...)
 
 ```bash
@@ -37,6 +39,8 @@ npx @zephyrdeng/pi-review install-skill
 ```
 
 This uses the [skills CLI](https://www.npmjs.com/package/skills) when available — it will prompt you to choose which agents to install to. Falls back to a direct copy into Claude Code (`~/.claude/skills`) and agy / Antigravity (`~/.gemini/config/skills`, discovered by AGY / AGY CLI / AGY IDE) if `skills` is not found.
+
+Skill-only installs copy just the `skills/pi-review/` tree — no CLI lands on PATH, and the installer prints a note when that is the case. Agents resolve the CLI in order: `pi-review` on PATH → package-local `bin/pi-review.js` → `npx -y @zephyrdeng/pi-review`. Global install is recommended for repeated use.
 
 You can also specify agents directly. `agy` is accepted as a shorthand for the skills CLI ids `antigravity` + `antigravity-cli`:
 

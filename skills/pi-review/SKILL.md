@@ -9,17 +9,22 @@ Use `pi-review` to run a fresh Pi review session and return only the review conc
 
 ## CLI resolution
 
-Prefer the shell command when it exists:
+Resolve the CLI in this order — try each until one works, then reuse it for the whole session:
 
 ```bash
-pi-review --help
-```
+# 1. Global install (npm i -g @zephyrdeng/pi-review)
+command -v pi-review && pi-review --help
 
-If `pi-review` is not on PATH but this skill came from the Pi package, use the package-local CLI relative to the actual directory that contains this `SKILL.md`:
-
-```bash
+# 2. Package-local CLI: when this SKILL.md lives inside the installed
+#    npm/Pi package, the bin sits two levels up (skills/pi-review/ → bin/)
 node ../../bin/pi-review.js --help
+
+# 3. Universal fallback: npx runs the published package without a global
+#    install (npm caches it — first run is slow, later runs ~0.3s)
+npx -y @zephyrdeng/pi-review --help
 ```
+
+Case 2 applies to `pi install` setups; case 3 covers skill-only installs (`~/.claude/skills/…`) where no package bin exists on disk. If the user runs pi-review often, recommend `npm i -g @zephyrdeng/pi-review` — it removes the npx startup overhead and version drift.
 
 ## Registered providers (explicit opt-in)
 

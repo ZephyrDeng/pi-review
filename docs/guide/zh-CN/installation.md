@@ -38,6 +38,8 @@ pi install npm:@zephyrdeng/pi-review
 
 装完在 Pi 里就有 `/rv`、`/rv-loop`、`/rv-models`、`/rv-config` 命令，见 [Pi `/rv` 命令](pi-package.md)。
 
+这条路径**不会**把 `pi-review` 放上 PATH：Pi 内 `/rv` 命令和 `pi_review` 工具直接 spawn 包内 bin，skill 里写的 shell 命令会回退到 `node <包目录>/bin/pi-review.js`，Pi 内都可用。但如果同一台机器还要从 Claude Code / Codex / Cursor / agy 用这套 skill，需要另外全局装 CLI（`npm i -g @zephyrdeng/pi-review`），否则 agent 每次都要走 `npx -y @zephyrdeng/pi-review` 兜底。
+
 ### 只装 agent skill（Claude Code、Codex、Cursor、agy……）
 
 ```bash
@@ -45,6 +47,8 @@ npx @zephyrdeng/pi-review install-skill
 ```
 
 有 [skills CLI](https://www.npmjs.com/package/skills) 时会用它，并让你选装到哪些 agent。找不到 `skills` 时退回直接拷贝到 Claude Code（`~/.claude/skills`）和 agy / Antigravity（`~/.gemini/config/skills`，AGY / AGY CLI / AGY IDE 都能发现）。
+
+只装 skill 只拷贝 `skills/pi-review/` 目录，CLI 不会进 PATH——装完安装器会打印提示。agent 按顺序解析 CLI：PATH 上的 `pi-review` → 包内 `bin/pi-review.js` → `npx -y @zephyrdeng/pi-review`。高频使用建议全局安装。
 
 也可以直接指定 agent。`agy` 是 skills CLI 里 `antigravity` + `antigravity-cli` 两个 id 的简写：
 

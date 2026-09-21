@@ -273,23 +273,54 @@ function uninstallDirect(extraArgs: string[] = []): SkillOpResult {
   return { ok: true, method: "direct", message: removed.join("; ") };
 }
 
+function resolvePiReviewBin(): string | undefined {
+  const isWin = process.platform === "win32";
+  const result = spawnSync(
+    isWin ? "where" : "sh",
+    isWin ? ["pi-review"] : ["-c", "command -v pi-review"],
+    { encoding: "utf8", timeout: 10_000, stdio: "pipe" },
+  );
+  if (result.status !== 0) return undefined;
+  return result.stdout?.split("\n")[0]?.trim() || undefined;
+}
+
+function hasPiReviewOnPath(): boolean {
+  const bin = resolvePiReviewBin();
+  // npx/pnpm dlx inject the package's transient cache bin into PATH while this
+  // process runs — it vanishes with the cache and must not count as installed.
+  return !!bin && !/(_npx|[/\\]dlx[/\\]|npm-cache)/.test(bin);
+}
+
+/**
+ * The copied skill tree carries no bin/ — without a global install the agent
+ * must fall back to npx. Surface that once at install/update time.
+ */
+function adviseIfCliMissing(result: SkillOpResult): SkillOpResult {
+  if (result.ok && !hasPiReviewOnPath()) {
+    process.stdout.write(
+      "Note: `pi-review` is not on PATH — agents will fall back to `npx -y @zephyrdeng/pi-review`. For faster runs: npm i -g @zephyrdeng/pi-review\n",
+    );
+  }
+  return result;
+}
+
 /**
  * Install agent skill content. Does not exit — callers decide process lifecycle.
  */
 export function runInstallSkill(extraArgs: string[] = []): SkillOpResult {
   if (hasSkillsCli()) {
     const ok = installViaSkillsCli(extraArgs);
-    return {
+    return adviseIfCliMissing({
       ok,
       method: "skills-cli",
       message: ok ? "Installed pi-review skill via skills CLI" : "skills CLI install failed",
-    };
+    });
   }
 
   process.stdout.write(
     "skills CLI not found, installing directly to Claude Code and/or agy (Antigravity)...\n",
   );
-  return installDirect(extraArgs);
+  return adviseIfCliMissing(installDirect(extraArgs));
 }
 
 /**
@@ -311,19 +342,19 @@ export function runUpdateSkill(extraArgs: string[] = []): SkillOpResult {
     process.stdout.write("Skill update missed; reinstalling pi-review skill...\n");
     const args = extraArgs.length > 0 ? extraArgs : DEFAULT_AGENT_SKILL_ARGS;
     const ok = installViaSkillsCli(args);
-    return {
+    return adviseIfCliMissing({
       ok,
       method: "skills-cli",
       message: ok
         ? "Reinstalled pi-review skill via skills CLI"
         : "skills CLI skill update/install failed",
-    };
+    });
   }
 
   process.stdout.write(
     "skills CLI not found, refreshing Claude Code and/or agy skills from package...\n",
   );
-  return installDirect(extraArgs);
+  return adviseIfCliMissing(installDirect(extraArgs));
 }
 
 /**
