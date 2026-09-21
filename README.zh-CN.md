@@ -1,335 +1,170 @@
+<div align="center">
+
 # pi-review
 
-[English README](./README.md)
+**隔离、多评审员的 AI 代码审查 —— 既是 CLI，也是 CI 门禁，也是 agent skill。**
 
-**在命令行中运行隔离的 AI 代码与方案审查。**
+[![npm version](https://img.shields.io/npm/v/@zephyrdeng/pi-review.svg)](https://www.npmjs.com/package/@zephyrdeng/pi-review)
+[![npm downloads](https://img.shields.io/npm/dm/@zephyrdeng/pi-review.svg)](https://www.npmjs.com/package/@zephyrdeng/pi-review)
+[![GitHub stars](https://img.shields.io/github/stars/ZephyrDeng/pi-review?style=flat&logo=github)](https://github.com/ZephyrDeng/pi-review/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`pi-review` 把审查工作交给一次全新的、隔离的 [Pi](https://github.com/anthropics/pi) 子会话，并返回结构化结论。子会话只读、只评，不改文件、不打补丁、不提交。
+[快速开始](#快速开始) · [特性](#为什么选-pi-review) · [Panel 审查](docs/guide/panel-review.md) · [CLI 参考](docs/guide/cli-reference.md) · [English](README.md)
 
-可作为独立 CLI、Pi 包（扩展 + skill），或接入 CI / 编辑器工作流。
+</div>
 
-## 语言约定
+---
 
-| 范围 | 语言 |
-|------|------|
-| 源码（CLI、扩展、`review-presets.json`、提示词、代码里的用户可见文案） | **仅英文** |
-| 文档（本页与英文 README） | **中英均可** |
-
-实现与对外协议（如 `PI_REVIEW_META_JSON`、Verdict 枚举）保持英文，便于自动化与跨工具一致。
-
-## 前置条件
-
-- 已安装并配置好 [Pi CLI](https://pi.dev)，且至少有一个可用模型
-
-## 用 OrcaRouter 运行审查
-
-`pi-review` 与模型无关——它运行在你 [Pi](https://pi.dev) 中配置的任意模型服务商之上。若要
-把 [OrcaRouter](https://www.orcarouter.ai) 作为审查背后的服务商：
-
-1. **获取 key**——还没有账号？**用我们的推荐链接注册** <https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36>（下方徽章亦可）。已有 key？直接下一步。
-
-   ```bash
-   export ORCA_KEY="sk-orca-..."
-   ```
-
-2. **注册服务商**——把 [`resources/providers/orcarouter.json`](./resources/providers/orcarouter.json) 合并进 `~/.pi/agent/models.json`（OpenAI 兼容）。**已有 models.json 时必须合并而不是 `cp`**——`cp` 会覆盖掉你已配置的所有服务商：
-
-   ```bash
-   # 全新机器（还没有 models.json）：
-   cp resources/providers/orcarouter.json ~/.pi/agent/models.json
-   # 已有 models.json——合并（或手工编辑）：
-   jq -s '.[0] * .[1]' ~/.pi/agent/models.json resources/providers/orcarouter.json > /tmp/models.json && mv /tmp/models.json ~/.pi/agent/models.json
-   ```
-
-```json
-{
-  "providers": {
-    "orcarouter": {
-      "baseUrl": "https://api.orcarouter.ai/v1",
-      "api": "openai-completions",
-      "apiKey": "$ORCA_KEY",
-      "models": [
-        {
-          "id": "orcarouter/auto",
-          "name": "OrcaRouter Auto",
-          "reasoning": false,
-          "input": ["text"],
-          "contextWindow": 200000,
-          "maxTokens": 8192
-        }
-      ]
-    }
-  }
-}
-```
-
-3. **选择模型**运行审查：
-
-```bash
-pi-review --model orcarouter/orcarouter/auto -- @src/foo.ts
-```
-
-[![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36)
-
-## 安装
+`pi-review` 把审查交给一个全新的、**只读**的 [Pi](https://pi.dev) 子会话，返回结构化结论：带严重度、证据、位置的 findings，以及稳定的退出码。可以跑单个评审员，也可以跑一个**互相隔离的评审员面板**，多人达成共识的 finding 才会卡门禁。你的 agent（Claude Code、Codex、Cursor、Pi）始终是唯一的编辑者。
 
 ```bash
 npm install -g @zephyrdeng/pi-review
-# 一键：Pi 包 + Claude Code / Codex / Cursor / agy 等 skill（推荐首次安装）
-npx @zephyrdeng/pi-review install
-# 仅 Pi 包
-pi install npm:@zephyrdeng/pi-review
-# 仅各 Agent skill
-npx @zephyrdeng/pi-review install-skill
-# 仅 agy（Google Antigravity）
-npx @zephyrdeng/pi-review install-skill --agent agy
+pi-review -- @src/foo.ts                                      # 单评审员
+pi-review --panel code-experts --consensus majority -- @src   # 三个视角，一个门禁
 ```
 
-`install` 会在有 Pi CLI 时执行 `pi install npm:@zephyrdeng/pi-review`，再通过 [skills CLI](https://www.npmjs.com/package/skills) 非交互安装 agent skill（默认含 Claude Code、Codex、Cursor、agy/`antigravity`+`antigravity-cli`）。`agy` 是 skills CLI 中 `antigravity` 与 `antigravity-cli` 的别名。只用 Pi 时**不要**再跑 `install-skill`，避免与 `pi.skills` 重复冲突。可用 `--pi-only` / `--agents-only` 拆分。
+<p align="center">
+  <img src="docs/assets/panel-live-pi.jpg" alt="Pi Review Panel：正确性、安全、测试三位评审员实时运行，显示模型、token 与费用" width="820">
+</p>
 
-升级全局包并同步 agent skill 内容：
+## 为什么选 pi-review
 
-```bash
-pi-review update
+| | |
+|---|---|
+| **隔离、只读的评审员** | 每次审查都是独立子进程，工具硬白名单 `read,grep,find,ls`。不会改文件、不会提交、不会带走主会话上下文。 |
+| **面板共识，而非一家之言** | 2–8 个互不可见的独立评审员。只有足够多人同意（`any` / `quorum` / `majority` / `unanimous`）的 finding 才卡门禁；孤证保留为 advisory。 |
+| **每个评审员可用不同模型** | `--reviewer-model r1=openai/gpt-5.6:high --reviewer-model r2=anthropic/claude-opus-4.8:xhigh`，跨厂商面板互补盲区。 |
+| **机器可读、宿主无关** | 一行带版本号的 `PI_REVIEW_META_JSON`、退出码 `0/1/3/4`、`events-jsonl` 事件流。直接接 CI、hook 或自研渲染器。 |
+| **给 agent 收尾用的 loop 门禁** | `pi-review loop --until clean` 每轮修复后重审、跨轮对比 findings、收敛即停，永不无限循环。 |
+| **约 1 秒的筛查** | `pi-review screen` 完全不跑 LLM 生成：确定性切片 + [Jev](https://typesafe.ai) 类型化判断对照缺陷目录。实测 **1.2s**，完整审查一轮需 30–50s。 |
+| **处处可见进度** | Pi 内原生实时行；Claude Code / Codex 用本地**网页看板**；纯终端用 stderr 里程碑。 |
+| **三种审查模式** | `code`（正确性、安全、测试）、`plan`（六个专家视角）、`challenge`（对抗式压测）。JSON 预设可扩展。 |
+
+## 效果一览
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/panel-cli-footer.jpg" alt="CLI 面板页脚：门禁状态、共识、确认 findings、advisories 与每位评审员状态"></td>
+<td width="50%"><img src="docs/assets/panel-web-dashboard.jpg" alt="网页看板：每位评审员实时卡片、token 与工具调用计数"></td>
+</tr>
+<tr>
+<td align="center"><sub>任意终端里的面板页脚：门禁、共识、费用、逐评审员状态</sub></td>
+<td align="center"><sub><code>--ui web</code>：给会缓冲 stdout 的宿主看的网页看板</sub></td>
+</tr>
+</table>
+
+每次审查以结构化报告和一眼可读的页脚收尾：
+
+```
+── pi-review ────────────────────────────
+  Verdict     ! REQUEST CHANGES
+  Status      HAS FINDINGS
+  Mode        code
+  Findings    1 actionable / 1 total
+  Model       provider/model
+  Tokens      in 17.6K · out 512 · cache 2.0K · total 18.2K
+  Cost        $0.05
+  Duration    42.3s
+──────────────────────────────────────────
 ```
 
-即使包已是最新，也会刷新 skill（`skills update pi-review`；无 skills CLI 时回退到 Claude Code + agy 通用路径的包内 skill 直拷）。
+脚本从 stderr 读 `PI_REVIEW_META_JSON:`，每条 finding 带 `severity`、`path`、`location`、`details`、`recommendation`，无需解析 Markdown。→ [输出与集成](docs/guide/output-and-integration.md)
 
 ## 快速开始
 
-```bash
-pi-review -- @src/foo.ts
-pi-review --model openai/gpt-5.5 -- @src/foo.ts
-pi-review --mode plan -- @docs/architecture.md
-pi-review --mode challenge -- @docs/design.md
-pi-review loop --max-rounds 3 -- @src
-pi-review models
-```
-
-在 Claude Code / Codex / Cursor / **agy（Antigravity）** 等 Agent 宿主中，先安装 skill，再让宿主发起审查（例如 `/pi-review -- @src/foo.ts`，或触发 skill 的自然语言）：
+**前置条件：** 已安装 [Pi CLI](https://pi.dev) 并配置至少一个模型 provider。
 
 ```bash
-npx @zephyrdeng/pi-review install-skill --agent agy
+# CLI
+npm install -g @zephyrdeng/pi-review
+
+# 或一键：Pi 包 + Claude Code / Codex / Cursor / Antigravity 的 skill
+npx @zephyrdeng/pi-review install
 ```
-
-## 审查模式
-
-| 模式 | 说明 |
-|------|------|
-| `code`（默认） | 代码、diff、MR、文件与仓库审查 |
-| `plan` | 多视角方案 / 架构审查 |
-| `challenge` | 对抗式审查，压测假设与证据缺口 |
-
-## Loop Review
-
-`pi-review loop` 会对当前工作树执行有上限的、彼此隔离的只读审查轮次：
 
 ```bash
-pi-review loop --max-rounds 3 -- @src
-pi-review loop --until clean --max-rounds 10 -- @src
+pi-review -- @src/foo.ts                                   # 单次审查
+pi-review --mode plan -- @docs/architecture.md             # 多视角方案审查
+pi-review --reviewers 3 --consensus quorum -- @src         # 面板
+pi-review loop --until clean --max-rounds 5 -- @src        # 有上限的修复/重审门禁
+pi-review screen src/order-service.ts                      # 约 1s 目录筛查
+pi-review models                                           # 我能用哪些模型？
 ```
 
-每轮都是完整 review run；命令不会编辑、打补丁、等待文件变化，也不会让子会话修复问题。遇到 `clean`、`needs_human`、`blocked` 会提前停止；仍有 actionable finding 时，在预算耗尽后以非零状态退出并输出逐轮摘要。宿主 Agent 或人工负责筛选并修复任务范围内的问题，再重新调用命令。需要在每次修复之间留出宿主处理点时，使用 `--max-rounds 1`。
+在 Pi 里：`/rv @src`、`/rv-loop fix until clean @src`、`/rv-models`。在其它 agent 宿主里装一次 skill，之后用自然语言要求审查即可。
 
-`--until clean` 声明成功目标（clean gate），但仍有硬预算：省略 `--max-rounds` 时默认为 10，**不是无限循环**。Clean 定义：单审查无 actionable finding；面板审查无 confirmed actionable cluster；advisories 可保留；`needs_human`/`blocked` 绝不算 clean。
+→ [安装方式](docs/guide/installation.md) · [Pi `/rv` 命令](docs/guide/pi-package.md)
 
-**跨轮对比。** 从第 2 轮起，每轮 actionable finding 会与上一轮做对比（loop 摘要里的 `vs prev: =persisting · +new · -resolved`）。匹配先走确定性匹配；启用 Jev 增强时，措辞漂移的对子由 Jev 裁决，与面板共识同一套机制。该对比只是记账，绝不参与门禁；匹配失败时静默降级为无对比。在 `--until clean` 下，若连续两轮的 actionable 集合完全一致（全部 persisting，无新增无消失），loop 会以 `Stop: non_converging` 提前停止——轮次之间代码树不变，继续掷骰没有意义，host 应先修复再重新调用。
-
-`loop` 复用普通审查的 mode/model/progress/target 参数；v1 明确不支持 `--keep-session`、`--continue`、`--name`。
-
-每轮审查各自在 stderr 输出一条 `PI_REVIEW_META_JSON`，即[输出格式](#输出格式)里的富化 finding schema（`metaVersion`、每条 finding 的 `details`/`recommendation`/`location`、panel 轮次的 `sourceFindings`）；消费者按输出顺序逐轮读取该行即可拿到完整 finding 数据，无需刮取 Markdown，逐轮摘要（`LoopRoundSummary`）保持只含计数。
-
-## Panel Review（面板审查）
-
-面板审查让多个**独立**审查者在隔离子会话中并行评审，再聚合为同一个门禁结论。审查者看不到彼此的发现，因此一致代表独立发现。
-
-```bash
-# 单次面板审查
-pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
-# 专家预设（正确性 / 安全 / 测试三视角）
-pi-review --panel code-experts --consensus majority -- @src
-# 面板 loop（最多 reviewer 数 × max-rounds 次审查 + 仲裁）
-pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
-```
-
-### 共识（Consensus）
-
-只有当足够多的独立审查者把同一问题标为 **actionable** 时，该 finding 才成为 **confirmed finding**（参与门禁）；否则保留为非阻塞的 **advisory**（建议）。多审查者面板默认 **quorum**，最低同意数 **2**，避免面板模式悄悄退化为"任一发现即 fail-closed"；单审查仍为阈值 1。
-
-| 策略 | 阈值 |
-|------|------|
-| `any` | 1 个 actionable 审查者即确认 |
-| `quorum`（默认） | 配置的最低同意数（默认 2，用 `--min-agree`） |
-| `majority` | `floor(审查者数 / 2) + 1` |
-| `unanimous` | 全体审查者 |
-
-单条（未被交叉印证的）发现作为 **advisory** 可见，但不改变 clean 状态、不会让门禁失败。确认的可操作簇产生 `has_findings`；无确认簇则产生 `clean`。
-
-### 聚合
-
-两阶段匹配：先用稳定锚点（路径 + 归一化摘要）做确定性匹配；只有路径相同、措辞不同的模糊候选才交给受限的**语义仲裁器**（用 `--consensus-model` 启用）。仲裁器只能聚类，不得发明 finding、丢弃 finding、补充证据或充当额外审查者，且没有写工具。低置信匹配保持为独立 advisory，避免靠"相似"制造虚假共识。
-
-**裁决引擎（Jev 增强模式）。** 当环境里存在 `TYPESAFE_API_KEY`（或配置文件里设置 `{ "jev": true }`）时，共识裁决交给 [TypeSafe Jev](https://typesafe.ai)——返回 typed 概率的 System One 模型——而不再 spawn 一个 review-only 的 Pi 子进程。每对模糊 finding 变成一个 Noul 问题（"是否同一问题？"），在单次调用里并行 fan-out；概率直接作为合并置信度，走与 LLM 裁决相同的阈值与溯源校验。这把一次完整子会话换成了一次约 100ms 的 typed 调用。
-
-- **完整链接聚类（Complete-Linkage）**：代码内置完整链接算法，确保组内两两达标才合并，**合并精度达到 100%**，彻底清除了旧版 Union-Find 在同函数多 Bug 场景下的链式误并隐患。
-- **跨轮状态连续性（Loop 记忆）**：在多轮复查（`loop`）中，Jev 能够穿透审查者的自然措辞漂移。标准靶场实测中，开启 Jev 达成了 **`=7 持续 · +0 新增 · -0 假解决`**（Gemini 3.8 Flash 实测）与 `=8~9 留存`（Flash 混合编队）；而关闭 Jev 的确定性匹配则遭遇彻底失忆（`=0 持续 · +6~11 新增`，将全部老 Bug 当成新 Bug）。
-- **零消耗评委 Token 额度**：裁决走独立的轻量 System One 通道，完全不占用评委主模型的 Token 配额与上下文窗口。
-- **级联仲裁（Cascade）**：概率落在模糊区间（0.3–0.7）的 pair 会再用 Pi 仲裁器复核一次（单次额外调用）——清晰的 case 永不付 LLM 的钱，模糊的拿到第二意见，Pi 失败则安全保留 Jev 结果。显式 `--consensus-model` 时全部走 Pi 仲裁器；`PI_REVIEW_JEV=0` 可单次关闭；Jev 失败会自动回退 Pi 仲裁器并在 meta 里记录 `adjudicationFallbackNote`。详细产品对比图见 [docs/research/jev-comparison-report.html](docs/research/jev-comparison-report.html)，实测评测报告见 [docs/research/jev-adjudication-case.md](docs/research/jev-adjudication-case.md)。
-
-**范围分类（`pi-review classify`）。** 同一个 Jev 后端还能把上一次评审的 actionable findings 对照冻结的任务基线分类——把 loop 收尾协议里的 scope governor 从 host 的主观判断变成 typed 决策：
-
-```bash
-pi-review classify --baseline "修登录崩溃；UI 调优不在本次范围" --meta /tmp/last-review-meta.txt
-# 或直接管道：
-pi-review -- @src 2>&1 | pi-review classify --baseline "..."
-```
-
-每个 actionable finding 对应一个 Choice 问题（`in_scope_blocker` | `follow_up` | `stop_and_escalate`），单次调用并行 fan-out。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_CLASSIFY_JSON` 机器行；置信度低于 0.5 的标记为 low-confidence。classify 是 advisory、由 host 主动调用——不改文件、不单独卡门禁，且必须有 `TYPESAFE_API_KEY`（缺失时 exit 4）。
-
-**门禁级筛查（`pi-review screen`）。** screen 把 Jev 推到流水线最左侧：不再先让 LLM 评委生成 findings（每轮 30s+）再做裁决，而是对确定性切片的代码 hunk 直接问 Jev typed 问题，命中后从缺陷模式目录模板组装 finding——关键路径上完全没有 LLM 散文生成。在[筛查 fixture](docs/research/jev-screening-case.md) 上的实测：**端到端约 1.2s**（106 行服务、12 个 hunk、108 个问题、一次调用），同文件完整评审一轮要 32–53s。
-
-```bash
-pi-review screen src/order-service.ts     # 也支持 @file；有发现 exit 1，干净 exit 0
-```
-
-完整架构：
+## 面板如何裁决
 
 ```
-文件 ─► 1. 确定性切片              （本地，ms 级——按声明边界切 hunk）
-           │
-           ├─► 2. 一次 Jev 调用     （约 1s——每 hunk：1 个兜底 Noul
-           │     「有可拦缺陷吗？」    + 每个目录模式各 1 个 Noul；
-           │     并行 fan-out，超过 480 问自动分批）
-           │
-           └─► 3. 模板组装 + 门禁   （本地，ms 级——命中模式 ⇒ 从目录
-                的 severity/标题/修复建议组装 finding；
-                兜底命中但无模式命中 ⇒ 「未匹配信号」finding，
-                照样拦截——绝不静默丢弃）
+评审员（隔离、只读）──► findings ──► 确定性匹配（路径 + 摘要）
+                                          │
+                              歧义配对 ────┴─► Jev 类型化裁决（约 100 ms）
+                                                  │  0.3–0.7 边界区 → Pi 复判一次
+                                                  ▼
+                                    共识阈值 ──► confirmed（卡门禁）/ advisory
 ```
 
-`ReviewFinding` 各字段的产出方：`id`/`path`/`location` 来自切片器（确定性），`severity`/`summary`/`recommendation` 来自命中模式的目录模板，`actionable` 是阈值化后的概率——LLM 的散文角色收缩到目录外的新缺陷与跨 hunk 推理，这两类由「未匹配信号」finding 交回给完整 `pi-review`。目录（`src/screen.ts` 的 `SCREEN_PATTERNS`）是覆盖率旋钮：目前内置八个模式（循环越界、fire-and-forget 异步、SQL 注入、slice 越界、float 金额、float 精确比较、缓存别名、缺失输入校验）；历史里反复出现未匹配信号时就往里加。输出为 ASCII 摘要 + stderr 上的 `PI_REVIEW_SCREEN_JSON` 机器行（status、findings、逐 hunk 概率、usage）；退出码与 review 一致（0 clean、1 has_findings、4 blocked/无 key）。screen 是快速门禁与分诊层，不替代带证据链的完整评审——详见 [交互式视觉报告 (docs/research/jev-screening-report.html)](docs/research/jev-screening-report.html)、[深度落地场景指南 (docs/research/jev-screening-guide.md)](docs/research/jev-screening-guide.md) 与 [实测数据与边界 (docs/research/jev-screening-case.md)](docs/research/jev-screening-case.md)。
+评审员运行失败 → `blocked`；输出无法解析 → `needs_human`；绝不静默放行。裁决器只能聚类，不能新增、删除或改写 finding。→ [Panel 审查详解](docs/guide/panel-review.md) · [Loop 审查](docs/guide/loop-review.md)
 
-### 成本与失败
+## 合作伙伴
 
-审查者运行数 = `--reviewers <n>` × `--max-rounds`（loop）；启用 `--consensus-model` 时每轮最多再跑一次仲裁。用 `--concurrency <n>` 限制并发（默认等于审查者数，不超过）。审查者运行时失败 → `blocked`；无法解析的脏输出或未决澄清 → `needs_human`；绝不悄悄 clean。面板审查 v1 不支持 `--keep-session`、`--continue`、`--name`（审查者用 `--no-session`）；宿主 Agent 仍是唯一可编辑者。
+<table>
+<tr>
+<td width="50%" valign="top">
 
-### 各命令与 CLI 参数的使用时机
+### [OrcaRouter](https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36)
 
-- **`pi-review screen <paths>`**：**秒级门禁初筛**（~1.0–1.2s），完全跳过大模型散文生成。适合在 CI/CD 快速流水线、Git Pre-commit / Pre-push 钩子中第一时间拦截明显的已知模式缺陷。
-- **`pi-review review [options] -- <target>`**：**单评委常规审查**。适合本地日常开发、功能自查，获取单个大模型的详细推理与修改建议。
-- **`pi-review --reviewers <n>`（2–8）**：**多评委共识面板**。适合 PR 合并门禁、重大架构或核心安全模块变更，通过多数票（Quorum）过滤孤证误报。
-- **`pi-review loop [--until clean]`**：**多轮收敛循环**。适合 Agent 自动化闭环收尾，结合 Jev 的跨轮记忆能力，迭代修复并验证直到代码干净。
-- **`--reviewer-model <id=model[:thinking]>`**：在面板模式下为不同评委指定模型和思考深度（如 `r1=openai/gpt-5:high`、`r2=zenmux/deepseek/deepseek-v4.1-flash:low`），实现真正的跨模型家族交叉互审。
-- **`--concurrency <n>`**：限制评委并发执行数。**默认全并发**；仅当使用的模型提供商账户有极严格的并发调用限额时才需传入。
-- **`--consensus-model <model>`**：显式指定一个大模型进行裁决会诊（强制跳过 Jev System One），适用于需要保留全量大模型文本推理的裁决场景。
-- **`--consensus <policy>` / `--min-agree <n>`**：微调共识投票门槛。严格发布可用 `unanimous` 全票通过，排查探索可用 `any`。
-- **`--progress-log <path>`**：输出紧凑 JSON 进度流到文件，适用于 Claude Code、Codex、Cursor 等有缓冲输出的 Agent 宿主。
-- **`--ui web`**：启动本地回环网页看板，供 Agent 宿主用户实时可视化查看面板进度。
+一把 key 用遍前沿模型。`pi-review` 自带 provider 配置文件，放进 Pi 就能跑跨厂商面板，不用维护一堆账号。
 
-面板结束后，CLI 会在 **stdout** 追加 panel ASCII footer：门禁 Status / Health、共识、确认与 advisory 计数、模型/thinking 不一致时的 `mixed`、聚合 token/cost、是否使用 adjudicator，以及每位 reviewer 一行摘要：
+[![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36)
 
-![CLI panel footer：NEEDS HUMAN 门禁、2/3 reviewer 成功、quorum 共识、confirmed/advisory、mixed 模型与逐 reviewer 状态](docs/assets/panel-cli-footer.jpg)
+→ [接入指南](docs/guide/providers.md)
 
-### 机器输出
+</td>
+<td width="50%" valign="top">
 
-一次面板评估只输出**一条**聚合 `PI_REVIEW_META_JSON`，新增字段：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories` 以及每个 `reviewers` 的结果。顶层 `findings` 只含确认簇；advisory 单独存放。旧字段保留，老消费者可安全忽略新字段。面板级 `model` 取各审查者的有效模型（显式配置优先，否则取 provider 上报的 `responseModel`）：全员一致时为该值，不一致时为字面量 `"mixed"` —— 解析 `model` 字段的机器消费方需要识别这个哨兵值；每个 reviewer 条目仍各自携带 `model`/`responseModel`。
+### [TypeSafe Jev](https://typesafe.ai)
 
-面板机器元数据另携带 `sourceFindings`：每位贡献 reviewer 的原始 finding，各自带全局唯一 `id`（如 `"r1#F1"`）与 `reviewerId`，可把 `confirmedClusters[].sourceFindingIds` / `advisories[].sourceFindingIds` 引用的每个 id 解析回完整富化 finding（含 `details`/`recommendation`/`location`，见[输出格式](#输出格式)）；簇级摘要保持现状，只含 `summary`/`severity`/`path`，不携带富化字段。
+约 100 ms 返回概率的 System One 模型。驱动共识裁决、跨轮 finding 记忆、范围 `classify`，以及 1 秒级 `screen` 门禁。
 
-### Pi 实时进度与事件回放
+设置 `TYPESAFE_API_KEY` 即自动启用。
 
-Pi 中执行 `/rv @target` 会调用原生 **Pi Review Panel** 工具（API 标识仍为 `pi_review`，界面不再直接展示下划线名称）。每位 reviewer 都有独立实时行，明确展示 `queued/running/completed/failed/cancelled` 状态、当前工具、耗时和 token 用量；按 `Ctrl+O` 可展开查看有界活动记录、最终发现、溯源、总耗时、token 总量和 cost。
+→ [对比报告](docs/research/jev-comparison-report.html) · [筛查研究](docs/research/jev-screening-case.md)
 
-![Pi Review Panel 实时进度：code-experts 面板下 correctness / security / testing 三位 reviewer 的状态、模型、thinking、token 与 cost](docs/assets/panel-live-pi.jpg)
+</td>
+</tr>
+</table>
 
-对应命令示例：`pi-review --panel code-experts -- @src`（Pi 内 `/rv` 走同一 panel 策略）。
+## 文档
 
-一轮结束后，宿主侧常见汇总如下（多模型一致 `request_changes`、总耗时 / token / 成本）：
+| 指南 | 内容 |
+|---|---|
+| [安装](docs/guide/installation.md) | CLI、Pi 包、agent skill（Claude Code / Codex / Cursor / agy）、更新、源码安装 |
+| [CLI 参考](docs/guide/cli-reference.md) | 全部参数、审查模式、各命令使用时机 |
+| [Panel 审查](docs/guide/panel-review.md) | 共识策略、聚合、Jev、`classify`、`screen`、实时 UI、网页看板 |
+| [Loop 审查](docs/guide/loop-review.md) | 有限轮次、`--until clean`、跨轮对比、收敛停止 |
+| [输出与集成](docs/guide/output-and-integration.md) | Markdown 结构、`PI_REVIEW_META_JSON` schema、退出码、会话、进度日志 |
+| [配置](docs/guide/configuration.md) | 配置文件、环境变量、安全模型 |
+| [Provider](docs/guide/providers.md) | OrcaRouter 等 provider 接入 |
+| [研究](docs/research/) | Jev 架构、筛查测量、裁决案例 |
 
-![pi-review 第一轮面板结论：三位 reviewer 全部 request_changes，含模型、耗时与聚合成本](docs/assets/panel-round-summary.png)
+详细指南目前为英文。
 
-渲染器可直接消费版本化事件流：
+## 参与贡献
 
-```bash
-pi-review --panel code-experts --output-format events-jsonl -- @src
-```
+欢迎 issue 与 PR。源码仅用英文；文档可双语。提交经 Husky 走 `ai-commit`（`npm install` 会装好 hook）。见 [安装 → 语言约定](docs/guide/installation.md#contributing-language-policy)。
 
-该模式只向 stdout 输出 `ReviewEvent v1` JSONL。每次运行拥有一个 `runId` 和单调递增的 `seq`，活动文本会脱敏和截断，结尾固定为一条携带 `PanelReviewMeta` 的 `panel.completed` 事件。`createPanelViewState()` 与 `reducePanelEvent()` 支持确定性的实时归约和回放。
+## Star
 
-Panel reviewer 固定使用 `read,grep,find,ls` 白名单；shell 与可变更工具会在启动前被拒绝。`Ctrl+C` 会取消 reviewer 与 adjudicator 进程树，输出取消事件并生成一条 blocked 最终事件。
+如果 `pi-review` 抢在人工评审前抓到过 bug，点个 ⭐ 能让更多人发现它。
 
-### 本地网页看板
+[![Star History Chart](https://api.star-history.com/svg?repos=ZephyrDeng/pi-review&type=Date)](https://star-history.com/#ZephyrDeng/pi-review&Date)
 
-`--ui web` 启动一个可选的、仅回环访问的看板，供没有原生 Pi 渲染器的宿主（Claude Code、Codex、纯终端）使用：
+## 致谢
 
-```bash
-pi-review --reviewers 3 --consensus quorum --ui web -- @src
-```
-
-![网页看板运行中：总 reviewer/耗时/token/工具计数，以及每位 reviewer 的 RUNNING 状态、模型、thinking 与实时活动](docs/assets/panel-web-dashboard.jpg)
-
-CLI 会在 reviewer 启动前把 `PI_REVIEW_UI_URL: http://127.0.0.1:<port>/run/<token>` 打印到 stderr，并自动在默认浏览器中打开该地址（`--no-ui-open` 可关闭自动打开）。看板实时展示每位 reviewer 的状态、流式活动、带滚动动效的 token/工具调用计数；运行结束后展示门禁结果、确认发现/advisory，以及每位 reviewer 由 markdown 渲染的完整报告。`--ui-url-file <path>` 会额外把该 URL 原子化写入文件，供会缓冲 stdout/stderr 的宿主使用。审查进程本身仍在运行结束后立即以原有 panel 退出码退出。
-
-运行完成后页面显示 60 秒倒计时，倒计时结束自动关闭页面并停止看板服务；任何交互（滚动、点击、按键或 "Keep open" 按钮）都会取消倒计时，此后关闭标签页同样会停止服务。作为兜底，服务会在有界空闲 TTL（默认 900 秒，可用 `--ui-ttl <秒数>` 覆盖）后自行退出，以便浏览器刷新后重连。
-
-看板仅绑定 `127.0.0.1`/`::1`，每次运行都用高熵能力令牌保护，发送不含远程资源或 CORS 的严格 CSP，所有 reviewer/发现文本均通过安全 DOM 写入渲染（markdown 由内置渲染器解析；链接仅允许 http/https，全程不经过 innerHTML）。看板仅用于查看：取消操作仍由发起的终端/agent 宿主负责（`Ctrl+C`）。`--ui web` 必须配合活跃的 panel 使用，且不能与 `loop` 组合。
-
-## Pi 包：`/rv` 命令
-
-安装 Pi 包后可在 Pi 里使用 `/rv`：
-
-```
-/rv-models
-/rv @src
-/rv review the auth changes
-/rv-loop fix until clean @src
-/rv --mode challenge @docs/design.md
-/rv --continue <handle> --mode challenge --model provider/model "expand finding 2"
-```
-
-跟进审查时，`--continue` 与首次 `/rv` 一样可**选填** `--mode`、`--model`（以及后续 CLI 支持的其它选项由 skill 直接调用 CLI 时传入）。
-
-斜杠命令只选策略：`/rv` panel、`/rv-loop` loop closeout、`/rv-models` 模型目录；后面一律是自然语言 target。模式/模型/panel/路径处理等其余策略匹配放在 skill 与 CLI。普通 `/rv @src`、`/rv review the auth changes`、`/rv-loop fix until clean @src` 无需额外参数；`--continue`、`--keep-session`、loop 与显式 `--no-stream` 走 shell CLI 路径。
-
-**Claude Code / Codex 等 Agent 宿主**：`pi-review` 默认把可读文本增量流到 stdout，把**语义化里程碑**写到 stderr（`pi-review: review started` / `pi-review: tool <name> started/finished` / `pi-review: review finished`）；token 用量默认就能拿到，无需 `--progress-log`。`--progress-log` 退化为可选的调试用事件日志，默认写入**瘦身**后的事件流：每条 `message_update` 会把随增量重复携带的累积消息快照（`assistantMessageEvent.partial` 与顶层 `message` 两份）缩减为其中的 `usage` 字段——原始流每个增量都重复整条消息内容与 provider 元数据，文件随消息长度平方级增长，实测约 1600 倍字节放大；增量本身与 `message_end`/`turn_end`/`agent_end` 仍保留完整记录，瘦身日志可用 pi-review 自身解析器无损回放。需要逐字节原始流时加 `--progress-log-raw`。详见 `skills/pi-review/SKILL.md`、`skills/pi-review/references/codex-tools.md` 与英文 README。
-
-## 输出格式
-
-审查结果包含 `## Verdict`、`## Summary`、`## Findings` 等章节。每条 finding 使用 `F1 + Severity + Path + Lines + Side + Actionable + Evidence + Impact + Recommendation` 结构；`Lines`/`Side` 可选，只在有可靠行号时给出（单行 `42` 或闭区间 `42-58`），`Side` 标注行号属于 diff 的哪一侧（`base` 改动前 / `working` 改动后，省略即 `working`）。ASCII 页脚会显示 Verdict、`Status`、finding 数量、Mode、总 token、cost、Duration/Session；Pi 面板展开结果也会包含同一组运行指标。
-
-机器可读 JSON 仍在 **stderr** 的单行 `PI_REVIEW_META_JSON:` 中，并以新增字段提供：
-
-- `metaVersion`: schema 版本判别字段（当前为 `1`）；更早版本的输出没有此键，缺失即视为富化前的原始契约
-- `status`: `clean | has_findings | needs_human | blocked`
-- `findings`: `{ id?, severity?, path?, summary, actionable, details?, recommendation?, location? }[]` — `details` 把 reviewer 的 Evidence/Impact 以 `Evidence: ...`、`Impact: ...` 段落（空行分隔）原样保留，只有其一时仅含该段；`recommendation` 单独保留修复建议；`location` 为 `{ startLine, endLine?, side? }`，仅在行号可解析时出现，畸形值（非数字、零/负数、倒置区间）一律省略而非编造，`side` 缺省即 `working`
-- `actionableCount`: 可操作问题数量
-- `usage.totalTokens`: token 总量；`usage.costTotal`: provider 报告的 cost（若有）
-
-该机器 finding schema（连同 panel 的 `sourceFindings` 与 loop 每轮的 meta 行）是**受支持的集成面**：渲染器直接读 `PI_REVIEW_META_JSON` 即可，无需刮取审查 Markdown；完整字段表见英文 README 的 "Machine finding schema" 一节。旧字段不删除；需改为写入 stdout 时设 `PI_REVIEW_META_STDOUT=1`。解析器优先识别上述 `### F1` 格式，也兼容旧的三级标题和顶层列表；缺少 `Actionable` 时，`request_changes` 下默认可操作，其它 verdict 默认不可操作。无法识别 verdict 时会回退到 `needs_human` 并附带 `parseError`，运行时失败始终保持 `blocked`。
-
-退出码：`0` clean、`1` 最终状态为 `has_findings` / loop 预算耗尽、`2` 参数错误、`3` needs human、`4` blocked / 运行时失败。
-
-## 配置
-
-提交代码：`npm install` 后会启用 **Husky** 钩子（`.husky/` → `ai-commit` 的 prepare-commit-msg / commit-msg / pre-commit）。也可 `git add` 后直接 `ai-commit commit`。配置见 `.ai-commit.yaml`（英文、`ai_footer: off`，需本机安装 ai-commit ≥ v0.1.45）。
-
-持久化设置在评审配置文件 `~/.pi/pi-review/config.json`（可用 `PI_REVIEW_CONFIG` 覆盖其位置）中。配置是建议性的、向前兼容的：未知键被忽略，`null` 视为未设置，其它任何问题（类型错误、无效 JSON）只打印警告并回落——配置绝不阻塞核心功能，新版本写的配置不会弄坏旧版本。在 Pi 中用 `/rv-config` 查看生效配置（取值、来源、警告、解析路径）。刻意不提供 `/rv-config set` 命令——推荐的编辑器是你的 agent（走 pi-review skill）：它知道配置 schema、保留未知键、坏 JSON 不覆盖，且绝不写入机密（API key 只走环境变量，如 `TYPESAFE_API_KEY`；配置文件只放开关）。
-
-| 键 | 类型 | 默认 | 说明 |
-|-----|------|---------|-------------|
-| `childExtensions` | boolean | `false` | 是否让评审子进程加载宿主 Pi 扩展，以使用仅由扩展注册的 provider。等价于单次运行 `PI_REVIEW_CHILD_EXTENSIONS=1`；`false` 保持子进程隔离（`--no-extensions`，issue #8）。 |
-| `jev` | boolean | auto | 是否把面板共识裁决交给 TypeSafe Jev 而非 Pi 仲裁子进程。默认：检测到 `TYPESAFE_API_KEY` 即开启，否则关闭。单次覆盖：`PI_REVIEW_JEV=1` / `=0`。显式 `--consensus-model` 时始终走 Pi 仲裁器。 |
-
-环境变量提供单次进程级覆盖（env 优先于配置文件）：`PI_REVIEW_HOME`、`PI_REVIEW_PRESETS`、`PI_REVIEW_PANEL_PRESETS`、`PI_REVIEW_SYSTEM_PROMPT`、`PI_REVIEW_SESSION_DIR`、`PI_REVIEW_META_STDOUT`、`PI_REVIEW_JEV`（`1`/`true`/`on` 开启 Jev 裁决、其它已设值如 `0` 保持 Pi 仲裁；连接用 `TYPESAFE_API_KEY`，可选 `TYPESAFE_BASE_URL`、`PI_REVIEW_JEV_MODEL`）、`PI_REVIEW_CHILD_EXTENSIONS`（`1`/`true`/`keep` 开启、其它已设值如 `0` 强制隔离、空值视为未设置；持久化等价写法为配置文件里 `{ "childExtensions": true }`）、`PI_REVIEW_CONFIG`。预设与审查指令文件内容均为英文。
-
-## 安全
-
-- 每次审查在隔离子进程中运行
-- 默认不保留子会话；`--keep-session` 仅用于显式跟进
-- 默认子进程以 `--no-extensions` 隔离运行，避免宿主 usage HUD / reload bridge 在 dispose 后触 stale extension ctx 搞崩 reviewer（见 issue #8）。需要自定义 provider 在子进程内注册时，可在 `~/.pi/pi-review/config.json` 里持久化 `{ "childExtensions": true }`，或单次运行用 `PI_REVIEW_CHILD_EXTENSIONS=1`
-- 显式指定 provider（`--provider` 或 `--model` 的 `provider/` 前缀）时，spawn 前会先探测 Pi 模型目录：若该 provider 仅在加载宿主扩展后才存在，则直接以可执行的提示阻塞运行（`verdictSource: "config_error"`，meta 带 `extensionHint`；panel 运行会把所有受影响的 provider 聚合到 `extensionHints`），而不是抛一个令人困惑的 unknown-provider 错误——在配置文件中设置 `childExtensions: true` 或重跑时加 `PI_REVIEW_CHILD_EXTENSIONS=1`。目录探测仅在成功时缓存，瞬时探测失败不会阻塞审查
-- reviewer 运行时失败时，panel footer 与 `reviewers[].runtimeError` 会保留子进程 stderr/stack 尾部便于诊断
-- 审查会话只读，不编辑、不部署
+系统提示词结构参考 [Codex-5.5-codex-instruct-5.5](https://github.com/yynxxxxx/Codex-5.5-codex-instruct-5.5)（MIT）。
 
 ## 许可
 
