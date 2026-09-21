@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { test } from "vitest";
 import {
   sliceHunks,
   screenHunks,
   formatScreenAscii,
+  effectiveScreenPatterns,
+  collectFlaggedHunks,
   SCREEN_PATTERNS,
   SCREEN_THRESHOLD,
   MAX_HUNKS_PER_FILE,
@@ -72,6 +77,19 @@ test("sliceHunks skips control-flow keywords and empty headers", () => {
   assert.deepEqual(hunks.map((h) => h.id), ["main"]);
 });
 
+test("sliceHunks slices Python def/class and Go func/method declarations", () => {
+  const py = `import os\n\n\ndef helper(x=[]):\n    x.append(1)\n\n\nclass Service:\n    def handle(self, req):\n        return req\n\n\nasync def fetch(url):\n    pass\n`;
+  assert.deepEqual(sliceHunks("svc.py", py).map((h) => h.id), ["header", "helper", "Service", "handle", "fetch"]);
+
+  const go = `package svc\n\nfunc placeOrder(items []Item) error {\n\treturn nil\n}\n\nfunc (s *Service) List(ctx context.Context) {\n}\n`;
+  assert.deepEqual(sliceHunks("svc.go", go).map((h) => h.id), ["header", "placeOrder", "List"]);
+});
+
+test("sliceHunks does not split on with/except/case compound statements or bare calls", () => {
+  const py = `def run():\n    with open(f) as fh:\n        data = fh.read()\n    try:\n        parse(data)\n    except (ValueError, KeyError):\n        pass\n`;
+  assert.deepEqual(sliceHunks("run.py", py).map((h) => h.id), ["run"]);
+});
+
 test("sliceHunks falls back to one file hunk when no boundary matches", () => {
   const hunks = sliceHunks("plain.txt", "alpha\nbeta\ngamma\n");
   assert.equal(hunks.length, 1);
@@ -136,6 +154,70 @@ test("screenHunks chunks question volumes past the per-call cap", async () => {
   const result = await screenHunks(CONN, many, { fetchImpl: noulFetch({}) });
   assert.ok(result.calls >= 2);
   assert.equal(result.status, "clean");
+});
+
+test("screenHunks screens against a caller-supplied catalog", async () => {
+  const hunks = sliceHunks("order-service.ts", FIXTURE);
+  const placeIdx = hunks.findIndex((h) => h.id === "placeOrder");
+  const custom = {
+    my_rule: {
+      title: "A custom defect rule",
+      severity: "minor" as const,
+      category: "correctness" as const,
+      recommendation: "Fix it.",
+    },
+  };
+  const result = await screenHunks(CONN, hunks, {
+    patterns: custom,
+    fetchImpl: noulFetch({ [`p${placeIdx}_0`]: 0.9 }),
+  });
+  assert.equal(result.questions, hunks.length * 2); // catch-all + 1 custom pattern
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0]!.summary, "A custom defect rule");
+  assert.ok(result.findings[0]!.details!.includes("my_rule"));
+});
+
+test("effectiveScreenPatterns merges user files and honors disabled ids", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-screen-"));
+  const configPath = path.join(dir, "config.json");
+  fs.writeFileSync(
+    path.join(dir, "screen-patterns.json"),
+    JSON.stringify({
+      patterns: {
+        team_rule: { title: "Team rule", severity: "minor", category: "correctness", recommendation: "Do it." },
+        off_by_one_loop: { title: "Team override of off-by-one", severity: "minor", category: "correctness", recommendation: "Fix." },
+      },
+      disabled: ["missing_validation", "nonexistent_id"],
+    }),
+  );
+  const env = { PI_REVIEW_CONFIG: configPath } as NodeJS.ProcessEnv;
+  const { patterns, warnings } = effectiveScreenPatterns(env);
+  assert.equal(patterns.team_rule!.title, "Team rule");
+  assert.equal(patterns.off_by_one_loop!.title, "Team override of off-by-one");
+  assert.equal(patterns.missing_validation, undefined);
+  assert.ok(warnings.some((w) => w.includes("nonexistent_id")));
+  // builtin count: 21 shipped patterns; override replaced one, disable removed one
+  assert.equal(Object.keys(patterns).length, Object.keys(SCREEN_PATTERNS).length + 1 - 1);
+});
+
+test("collectFlaggedHunks pairs flagged reports with their code", () => {
+  const hunks = sliceHunks("order-service.ts", FIXTURE);
+  const reports = hunks.map((h, i) => ({
+    id: h.id,
+    path: h.path,
+    startLine: h.startLine,
+    endLine: h.endLine,
+    defectProbability: i === 0 ? 0.9 : 0.1,
+    patterns: i === 1 ? ["string_sort"] : [],
+  }));
+  const flagged = collectFlaggedHunks(
+    { status: "has_findings", findings: [], hunkReports: reports, questions: 0, calls: 1, durationMs: 1 },
+    hunks,
+  );
+  assert.equal(flagged.length, 2);
+  assert.equal(flagged[0]!.hunk, hunks[0]!.id);
+  assert.equal(flagged[0]!.code, hunks[0]!.code);
+  assert.deepEqual(flagged[1]!.patterns, ["string_sort"]);
 });
 
 test("screenHunks treats missing answers as no-signal", async () => {

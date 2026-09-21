@@ -112,9 +112,11 @@ assembly, and the gate decision are local milliseconds.
 - **Not review-grade.** No cross-hunk reasoning, no codebase-convention-aware
   fixes, no prose evidence. The unmatched-signal finding routes those to a
   full `pi-review` run instead of guessing.
-- **Coverage is the catalog.** Eight patterns ship today; off-catalog defects
+- **Coverage is the catalog.** Eight patterns shipped at launch (since grown —
+  see the screening guide); off-catalog defects
   rely on the catch-all, whose recall beyond this fixture is unmeasured. Add
-  patterns when history shows repeated unmatched signals.
+  patterns when history shows repeated unmatched signals — `screen-memory.jsonl`
+  now records them automatically.
 - **One fixture, one model (`jev-1.13.0`), one run per row.** Thresholds
   (0.6) and hunk slicing heuristics need per-task calibration before trusting
   the gate on a new codebase shape — the same advice the Jev skills give for

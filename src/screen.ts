@@ -8,6 +8,11 @@
 // findings, so the gate never silently drops a strong catch-all signal —
 // deeper review (full `pi-review`) is the escape hatch, not silent loss.
 // Mechanism and measurements: docs/research/jev-screening-case.md.
+//
+// The catalog grows from use: user pattern files (screen-patterns.json) merge
+// over the builtin set, and flagged hunks append to screen-memory.jsonl so
+// recurring unmatched signals can be promoted into patterns — see
+// screen-memory.ts and `pi-review screen-memory`.
 
 import fs from "node:fs";
 
@@ -19,6 +24,17 @@ import {
   type JevFetch,
   type JevUsage,
 } from "./jev.js";
+import {
+  aggregateScreenMemory,
+  formatScreenMemoryAscii,
+  loadUserPatterns,
+  readScreenMemory,
+  recordScreenMemory,
+  screenMemoryEnabled,
+  screenMemoryFilePath,
+  screenPatternsFilePath,
+  type FlaggedScreenHunk,
+} from "./screen-memory.js";
 import { expandMaybeHome, fail } from "./utils.js";
 import type { ParsedArgs, ReviewFinding } from "./types.js";
 
@@ -92,9 +108,88 @@ export const SCREEN_PATTERNS: Record<string, ScreenPattern> = {
     category: "correctness",
     recommendation: "Validate arguments at the trust boundary.",
   },
+  // --- Extended catalog: patterns distilled from community rule sets
+  // (Semgrep registry, ESLint/typescript-eslint, SonarSource, CWE Top 25).
+  // All are hunk-local yes/no judgments — cross-hunk taint stays with full review.
+  hardcoded_secret: {
+    title: "Hardcoded credential, API key, or private key embedded in source",
+    severity: "critical",
+    category: "security",
+    recommendation: "Move secrets to environment or a secret store; rotate the exposed value.",
+  },
+  command_injection: {
+    title: "OS command built by interpolating user-controlled input",
+    severity: "critical",
+    category: "security",
+    recommendation: "Use execFile/spawn with an argv array or validate input against an allowlist.",
+  },
+  xss_inner_html: {
+    title: "Unescaped data written to innerHTML or dangerouslySetInnerHTML",
+    severity: "critical",
+    category: "security",
+    recommendation: "Render with textContent or sanitize through a vetted library.",
+  },
+  path_traversal: {
+    title: "User-controlled input joined into a filesystem path without normalization",
+    severity: "critical",
+    category: "security",
+    recommendation: "Confine to a base directory and reject .. segments after resolve().",
+  },
+  weak_random: {
+    title: "Weak RNG (Math.random or equivalent) used for a security-sensitive value",
+    severity: "major",
+    category: "security",
+    recommendation: "Use crypto.randomBytes/randomUUID or another CSPRNG for tokens and ids.",
+  },
+  regex_redos: {
+    title: "Regex with nested quantifiers can backtrack catastrophically (ReDoS)",
+    severity: "major",
+    category: "security",
+    recommendation: "Rewrite without nested quantifiers over overlapping classes, or cap input length.",
+  },
+  truthy_default: {
+    title: "`value || fallback` treats valid falsy values (0, \"\", false) as missing",
+    severity: "major",
+    category: "correctness",
+    recommendation: "Use `value ?? fallback` or an explicit null/undefined check.",
+  },
+  string_sort: {
+    title: "Array .sort() without a comparator orders numbers lexicographically",
+    severity: "major",
+    category: "correctness",
+    recommendation: "Pass a comparator, e.g. `arr.sort((a, b) => a - b)`.",
+  },
+  ignored_error: {
+    title: "Error return value or promise rejection left unhandled",
+    severity: "major",
+    category: "correctness",
+    recommendation: "Check the error result or attach .catch; silent failure hides corruption.",
+  },
+  mutable_default_arg: {
+    title: "Mutable default argument shared across calls (e.g. def f(items=[]))",
+    severity: "major",
+    category: "correctness",
+    recommendation: "Default to None/null and allocate a fresh object inside the body.",
+  },
+  bare_except: {
+    title: "Catch-all exception handler swallows errors silently",
+    severity: "minor",
+    category: "correctness",
+    recommendation: "Catch specific exceptions and log or re-raise unexpected ones.",
+  },
+  unclosed_resource: {
+    title: "Opened resource (file, response body, connection) not closed on every path",
+    severity: "major",
+    category: "data-loss",
+    recommendation: "Use try/finally, defer, or a context manager to guarantee close.",
+  },
+  await_in_loop: {
+    title: "await inside a loop serializes independent async work",
+    severity: "minor",
+    category: "performance",
+    recommendation: "Batch with bounded Promise.all unless ordering is required.",
+  },
 };
-
-const PATTERN_IDS = Object.keys(SCREEN_PATTERNS);
 
 export interface ScreenHunk {
   id: string;
@@ -104,15 +199,24 @@ export interface ScreenHunk {
   code: string;
 }
 
-const CONTROL_KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "else", "do", "return", "new"]);
+const CONTROL_KEYWORDS = new Set([
+  "if", "for", "while", "switch", "catch", "else", "do", "return", "new",
+  // Compound statements / keywords that could otherwise capture as a name:
+  // `with open(...)`, `except (A, B)`, `match (a, b)`, `case (1, 2)`,
+  // `assert (x, y)`, `elif (cond)`, `func`/`def` anonymous-style lines.
+  "with", "except", "match", "case", "assert", "elif", "func", "def",
+]);
 
 /**
  * Declaration-boundary heuristic: function/class/interface/type/arrow
- * declarations and method signatures. Language-agnostic enough for TS/JS/Go-
- * style sources; a file with no recognizable boundaries becomes one hunk.
+ * declarations, method signatures, Python `def`, and Go `func` (including
+ * methods with a receiver). The method-signature tail requires a `:`/`{`
+ * (type annotation, return type, or body open) so a bare call like `foo()`
+ * never becomes a boundary. Language-agnostic enough for TS/JS/Python/Go-style
+ * sources; a file with no recognizable boundaries becomes one hunk.
  */
 const BOUNDARY =
-  /^\s*(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:abstract\s+)?class\s+(\w+)|(?:export\s+)?interface\s+(\w+)|(?:export\s+)?type\s+(\w+)\s*=|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>|(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*[:\w\[\]<>|, ]*\{?\s*$)/;
+  /^\s*(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:abstract\s+)?class\s+(\w+)|(?:export\s+)?interface\s+(\w+)|(?:export\s+)?type\s+(\w+)\s*=|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>|(?:async\s+)?def\s+(\w+)\s*\(|func\s+(?:\([^)]*\)\s*)?(\w+)\s*\(|(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*(?:\{|[:\w\[\]<>|, ]+\{?)\s*$)/;
 
 export function sliceHunks(path: string, text: string, maxHunks: number = MAX_HUNKS_PER_FILE): ScreenHunk[] {
   const lines = text.split("\n");
@@ -218,16 +322,18 @@ async function evaluateChunked(
 export async function screenHunks(
   connection: JevConnection,
   hunks: ScreenHunk[],
-  options: { fetchImpl?: JevFetch } = {},
+  options: { fetchImpl?: JevFetch; patterns?: Record<string, ScreenPattern> } = {},
 ): Promise<ScreenResult> {
   const startedAt = Date.now();
+  const catalog = options.patterns ?? SCREEN_PATTERNS;
+  const patternIds = Object.keys(catalog);
   const questions: Record<string, string> = {};
   hunks.forEach((hunk, i) => {
     questions[`d${i}`] =
       `Does hunk "${hunk.id}" contain a real correctness, security, or data-loss defect that should block merge? ` +
       "Ignore style and hypothetical concerns.";
-    PATTERN_IDS.forEach((patternId, p) => {
-      questions[`p${i}_${p}`] = `Does hunk "${hunk.id}" contain this defect: ${SCREEN_PATTERNS[patternId]!.title}?`;
+    patternIds.forEach((patternId, p) => {
+      questions[`p${i}_${p}`] = `Does hunk "${hunk.id}" contain this defect: ${catalog[patternId]!.title}?`;
     });
   });
 
@@ -246,12 +352,12 @@ export async function screenHunks(
   const hunkReports: ScreenHunkReport[] = [];
   hunks.forEach((hunk, i) => {
     const catchAll = result.probabilities[`d${i}`];
-    const hits = PATTERN_IDS.map((patternId, p) => ({ patternId, probability: result.probabilities[`p${i}_${p}`] }))
+    const hits = patternIds.map((patternId, p) => ({ patternId, probability: result.probabilities[`p${i}_${p}`] }))
       .filter((hit): hit is { patternId: string; probability: number } => hit.probability !== undefined && hit.probability >= SCREEN_THRESHOLD)
       .sort((a, b) => b.probability - a.probability);
 
     for (const hit of hits) {
-      const pattern = SCREEN_PATTERNS[hit.patternId]!;
+      const pattern = catalog[hit.patternId]!;
       findings.push({
         id: `S${findings.length + 1}`,
         severity: pattern.severity,
@@ -301,9 +407,62 @@ export async function screenHunks(
   };
 }
 
+/** The flag rule shared by the ASCII report and memory capture. */
+function isFlaggedReport(report: ScreenHunkReport): boolean {
+  return (report.defectProbability ?? 0) >= SCREEN_THRESHOLD || report.patterns.length > 0;
+}
+
+/**
+ * Flagged hunks paired back with their code, in the shape the memory log
+ * stores. hunkReports and hunks share order and length by construction.
+ */
+export function collectFlaggedHunks(result: ScreenResult, hunks: ScreenHunk[]): FlaggedScreenHunk[] {
+  const flagged: FlaggedScreenHunk[] = [];
+  result.hunkReports.forEach((report, i) => {
+    if (!isFlaggedReport(report)) return;
+    const hunk = hunks[i]!;
+    flagged.push({
+      path: report.path,
+      hunk: report.id,
+      startLine: report.startLine,
+      endLine: report.endLine,
+      catchAll: report.defectProbability,
+      patterns: report.patterns,
+      code: hunk.code,
+    });
+  });
+  return flagged;
+}
+
+/**
+ * Builtin catalog + user pattern files − disabled ids. The effective catalog
+ * is rebuilt per run so edits to screen-patterns.json take effect immediately.
+ */
+export function effectiveScreenPatterns(env: NodeJS.ProcessEnv): {
+  patterns: Record<string, ScreenPattern>;
+  warnings: string[];
+} {
+  const user = loadUserPatterns(env);
+  const patterns: Record<string, ScreenPattern> = { ...SCREEN_PATTERNS, ...user.patterns };
+  for (const id of user.disabled) {
+    if (id in patterns) {
+      // A patterns file committed to a repo can silently weaken a CI gate —
+      // make every builtin removal audible, louder for critical severity.
+      const severityNote = SCREEN_PATTERNS[id]?.severity === "critical" ? " (critical severity)" : "";
+      if (id in SCREEN_PATTERNS) {
+        user.warnings.push(`disabled pattern "${id}" removes a builtin${severityNote} entry`);
+      }
+      delete patterns[id];
+    } else {
+      user.warnings.push(`disabled pattern "${id}" is not in the catalog; ignoring it`);
+    }
+  }
+  return { patterns, warnings: user.warnings };
+}
+
 export function formatScreenAscii(result: ScreenResult): string {
   const lines = ["── pi-review screen " + "─".repeat(20)];
-  const flagged = result.hunkReports.filter((h) => (h.defectProbability ?? 0) >= SCREEN_THRESHOLD || h.patterns.length > 0);
+  const flagged = result.hunkReports.filter(isFlaggedReport);
   lines.push(`  Status     ${result.status}`);
   lines.push(
     `  Hunks      ${result.hunkReports.length} screened, ${flagged.length} flagged ` +
@@ -335,6 +494,11 @@ export async function runScreen(parsed: ParsedArgs): Promise<never> {
     process.exit(4);
   }
 
+  const catalog = effectiveScreenPatterns(process.env);
+  for (const warning of catalog.warnings) {
+    process.stderr.write(`pi-review: screen patterns: ${warning}\n`);
+  }
+
   const hunks: ScreenHunk[] = [];
   for (const raw of paths) {
     const file = expandMaybeHome(raw.startsWith("@") ? raw.slice(1) : raw)!;
@@ -352,13 +516,41 @@ export async function runScreen(parsed: ParsedArgs): Promise<never> {
 
   let result: ScreenResult;
   try {
-    result = await screenHunks(connection, hunks);
+    result = await screenHunks(connection, hunks, { patterns: catalog.patterns });
   } catch (error) {
     process.stderr.write(`pi-review: screen failed: ${(error as Error).message}\n`);
     process.exit(4);
   }
 
+  recordScreenMemory(collectFlaggedHunks(result, hunks), process.env);
+
   process.stdout.write(`${formatScreenAscii(result)}\n`);
   process.stderr.write(`PI_REVIEW_SCREEN_JSON: ${JSON.stringify(result)}\n`);
   process.exit(result.status === "clean" ? 0 : 1);
+}
+
+/** `pi-review screen-memory`: report the accumulated signal log and catalog state. */
+export function runScreenMemory(env: NodeJS.ProcessEnv = process.env): never {
+  const file = screenMemoryFilePath(env);
+  const entries = readScreenMemory(file);
+  const user = loadUserPatterns(env);
+  for (const warning of user.warnings) {
+    process.stderr.write(`pi-review: screen patterns: ${warning}\n`);
+  }
+  const stats = aggregateScreenMemory(entries);
+  const overrides = Object.keys(user.patterns).filter((id) => id in SCREEN_PATTERNS).length;
+  const catalogMeta = {
+    builtin: Object.keys(SCREEN_PATTERNS).length,
+    custom: Object.keys(user.patterns).length,
+    overrides,
+    disabled: user.disabled.length,
+    recording: screenMemoryEnabled(env),
+  };
+  process.stdout.write(
+    `${formatScreenMemoryAscii(stats, { file, patternsFile: screenPatternsFilePath(env), catalog: catalogMeta })}\n`,
+  );
+  process.stderr.write(
+    `PI_REVIEW_SCREEN_MEMORY_JSON: ${JSON.stringify({ file, catalog: catalogMeta, ...stats })}\n`,
+  );
+  process.exit(0);
 }

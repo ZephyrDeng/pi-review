@@ -9,7 +9,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/ZephyrDeng/pi-review?style=flat&logo=github)](https://github.com/ZephyrDeng/pi-review/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[快速开始](#快速开始) · [特性](#为什么选-pi-review) · [Panel 审查](docs/guide/zh-CN/panel-review.md) · [CLI 参考](docs/guide/zh-CN/cli-reference.md) · [English](README.md)
+[快速开始](#快速开始) · [特性](#为什么选-pi-review) · [筛查流程](docs/guide/zh-CN/screening.md) · [Panel 审查](docs/guide/zh-CN/panel-review.md) · [CLI 参考](docs/guide/zh-CN/cli-reference.md) · [English](README.md)
 
 </div>
 
@@ -143,6 +143,7 @@ pi-review models                                           # 我能用哪些模�
 |---|---|
 | [安装](docs/guide/zh-CN/installation.md) | CLI、Pi 包、agent skill（Claude Code / Codex / Cursor / agy）、更新、源码安装 |
 | [CLI 参考](docs/guide/zh-CN/cli-reference.md) | 全部参数、审查模式、各命令使用时机 |
+| [筛查流程](docs/guide/zh-CN/screening.md) | `screen` 的中文流程图、门禁结果、退出码与流水线位置 |
 | [Panel 审查](docs/guide/zh-CN/panel-review.md) | 共识策略、聚合、Jev、`classify`、`screen`、实时 UI、网页看板 |
 | [Loop 审查](docs/guide/zh-CN/loop-review.md) | 有限轮次、`--until clean`、跨轮对比、收敛停止 |
 | [输出与集成](docs/guide/zh-CN/output-and-integration.md) | Markdown 结构、`PI_REVIEW_META_JSON` schema、退出码、会话、进度日志 |

@@ -25,6 +25,9 @@
 | `PI_REVIEW_JEV` | `jev` 的单次覆盖：`1`/`true`/`on` 把面板共识裁决交给 TypeSafe Jev，其它任何已设置的值（如 `0`）保留 Pi 裁决器。连接：`TYPESAFE_API_KEY`（必需），可选 `TYPESAFE_BASE_URL` 和 `PI_REVIEW_JEV_MODEL`（默认 `jev-latest`） |
 | `PI_REVIEW_CHILD_EXTENSIONS` | `childExtensions` 的单次覆盖：`1`/`true`/`keep` 为本进程启用宿主扩展，其它任何已设置的值（如 `0`）强制隔离；空值视为未设置。持久等价写法：配置文件里 `{ "childExtensions": true }`。带显式 `--provider` 时，pi-review 先探测模型目录，若该 provider 只存在于扩展中则带提示阻塞 |
 | `PI_REVIEW_CONFIG` | 审查配置文件路径（默认 `~/.pi/pi-review/config.json`） |
+| `PI_REVIEW_SCREEN_PATTERNS` | 额外的 screen 模式目录 JSON 路径，在 `screen-patterns.json` 之后加载并在 id 冲突时胜出——指向仓库内提交的文件即可共享团队模式 |
+| `PI_REVIEW_SCREEN_MEMORY` | `0`/`false`/`off` 关闭被标记 hunk 到 `screen-memory.jsonl` 的记录（默认开启） |
+| `PI_REVIEW_SCREEN_MEMORY_FILE` | screen memory 日志路径覆盖（默认在配置文件同级的 `screen-memory.jsonl`） |
 
 ## 安全模型
 

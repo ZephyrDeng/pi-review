@@ -9,6 +9,7 @@ export function usage(exitCode = 0): never {
   pi-review loop [options] -- <@files|text...>
   pi-review classify --baseline <text|@file> [--meta <path>]   Classify a previous review's findings against the frozen baseline (Jev required)
   pi-review screen <@files|paths...>           Gate-grade Jev screening: typed defect judgments, no LLM generation (Jev required)
+  pi-review screen-memory                     Show accumulated screen signals and the effective pattern catalog
   pi-review update                      Update package + agent skill content
   pi-review install [options]           Pi package + agent skills (one-shot)
   pi-review install-skill [options]     Install skill to AI agents only
@@ -382,6 +383,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const screenPaths = argv.slice(1);
       if (screenPaths.some((arg) => arg === "-h" || arg === "--help")) usage(0);
       return { command: "screen", screenPaths, mode: "code", skills: [], payload: [], keepSession: false, stream: true };
+    }
+    if (argv[0] === "screen-memory") {
+      if (argv.slice(1).some((arg) => arg === "-h" || arg === "--help")) usage(0);
+      return { command: "screen-memory", mode: "code", skills: [], payload: [], keepSession: false, stream: true };
     }
     return parseReviewCommand(argv);
   } catch (error) {

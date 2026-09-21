@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20-green.svg)](https://nodejs.org)
 
-[Quick start](#quick-start) · [Features](#why-pi-review) · [Panel review](docs/guide/panel-review.md) · [CLI reference](docs/guide/cli-reference.md) · [中文说明](README.zh-CN.md)
+[Quick start](#quick-start) · [Features](#why-pi-review) · [Screening workflow](docs/guide/screening.md) · [Panel review](docs/guide/panel-review.md) · [CLI reference](docs/guide/cli-reference.md) · [中文说明](README.zh-CN.md)
 
 </div>
 
@@ -37,7 +37,7 @@ pi-review --panel code-experts --consensus majority -- @src   # three lenses, on
 | **Mix models per reviewer** | `--reviewer-model r1=openai/gpt-5.6:high --reviewer-model r2=anthropic/claude-opus-4.8:xhigh` — cross-family panels catch what one vendor misses. |
 | **Machine-readable, host-agnostic** | One versioned `PI_REVIEW_META_JSON` line, exit codes `0/1/3/4`, and an `events-jsonl` stream. Drop into CI, hooks, or your own renderer. |
 | **Loop gate for agent closeout** | `pi-review loop --until clean` re-reviews after each fix round, diffs findings across rounds, and stops on convergence — never unbounded. |
-| **~1s screening** | `pi-review screen` skips LLM generation entirely: deterministic slicing + typed [Jev](https://typesafe.ai) judgments against a defect catalog. Measured **1.2s** vs 30–50s for a full round. |
+| **~1s screening** | `pi-review screen` skips LLM generation entirely: deterministic slicing + typed [Jev](https://typesafe.ai) judgments against a defect catalog. Measured **1.2s** vs 30–50s for a full round. The catalog grows from use — custom patterns + a signal log via `pi-review screen-memory`. |
 | **Live everywhere** | Native live rows in Pi, a loopback **web dashboard** for Claude Code / Codex, streamed milestones on stderr for plain terminals. |
 | **Three review modes** | `code` (correctness, security, tests), `plan` (six expert lenses), `challenge` (adversarial pressure test). Extend via JSON presets. |
 
@@ -144,6 +144,7 @@ Set `TYPESAFE_API_KEY` and it switches on.
 |---|---|
 | [Installation](docs/guide/installation.md) | CLI, Pi package, agent skills (Claude Code / Codex / Cursor / agy), updates, from source |
 | [CLI reference](docs/guide/cli-reference.md) | Every flag, review modes, when to use which command |
+| [Fast screening](docs/guide/screening.md) | The `screen` workflow, gate outcomes, machine output, and CI placement |
 | [Panel review](docs/guide/panel-review.md) | Consensus policies, aggregation, Jev, `classify`, `screen`, live UI, web dashboard |
 | [Loop review](docs/guide/loop-review.md) | Bounded rounds, `--until clean`, cross-round comparison, convergence stop |
 | [Output & integration](docs/guide/output-and-integration.md) | Markdown shape, `PI_REVIEW_META_JSON` schema, exit codes, sessions, progress logs |

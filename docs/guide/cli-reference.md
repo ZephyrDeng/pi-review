@@ -6,6 +6,7 @@
 pi-review [review] [options] -- <@files|text...>
 pi-review loop [options] -- <@files|text...>
 pi-review screen <@files|paths...>
+pi-review screen-memory
 pi-review classify --baseline <text|@file> [--meta <path>]
 pi-review models [search]
 ```
@@ -38,6 +39,7 @@ pi-review models [search]
 ### When to use each command & argument
 
 - **`pi-review screen <paths>`** — Sub-second (~1.0–1.2s) gate screening without running an LLM generation loop. Use in CI/CD fast paths, pre-commit/pre-push hooks, or instant sanity checks to catch known defect patterns immediately.
+- **`pi-review screen-memory`** — Aggregates the accumulated screen signal log (`screen-memory.jsonl`): per-pattern hit frequencies and recurring unmatched signals to promote into `screen-patterns.json`. See [Screening](screening.md#screen-memory--the-catalog-grows-from-use).
 - **`pi-review review [options] -- <target>`** — Single-reviewer code review. Use for routine local development and self-review where one model's prose recommendations are sufficient.
 - **`pi-review --reviewers <n>` (2–8)** — Multi-reviewer panel review. Use for PR merge gates, security-sensitive changes, or cross-model verification where independent agreement matters.
 - **`pi-review loop [--until clean]`** — Multi-round review loop. Use during automated agentic fix-verify loops to iteratively patch code and re-review until clean.

@@ -23,6 +23,9 @@ Per-process overrides via environment variables (env wins over the config file):
 | `PI_REVIEW_JEV` | Per-run override for `jev`: `1`/`true`/`on` routes panel consensus adjudication to TypeSafe Jev, any other set value (e.g. `0`) keeps the Pi adjudicator. Connection: `TYPESAFE_API_KEY` (required), optional `TYPESAFE_BASE_URL` and `PI_REVIEW_JEV_MODEL` (default `jev-latest`) |
 | `PI_REVIEW_CHILD_EXTENSIONS` | Per-run override for `childExtensions`: `1`/`true`/`keep` enables host extensions for this process, any other set value (e.g. `0`) forces isolation; an empty value counts as unset. Persistent equivalent: `{ "childExtensions": true }` in the config file. With an explicit `--provider`, pi-review first probes the model catalog and blocks with a hint if the provider only exists via extensions |
 | `PI_REVIEW_CONFIG` | Path to the review config file (default: `~/.pi/pi-review/config.json`) |
+| `PI_REVIEW_SCREEN_PATTERNS` | Path to an extra screen pattern catalog JSON, loaded after `screen-patterns.json` and winning id conflicts — point it at a repo-committed file to share team patterns |
+| `PI_REVIEW_SCREEN_MEMORY` | `0`/`false`/`off` disables recording flagged hunks to `screen-memory.jsonl` (default: on) |
+| `PI_REVIEW_SCREEN_MEMORY_FILE` | Path override for the screen memory log (default: `screen-memory.jsonl` next to the config file) |
 
 
 ## Security model

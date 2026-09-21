@@ -18,6 +18,7 @@
 pi-review [review] [options] -- <@files|text...>
 pi-review loop [options] -- <@files|text...>
 pi-review screen <@files|paths...>
+pi-review screen-memory
 pi-review classify --baseline <text|@file> [--meta <path>]
 pi-review models [search]
 ```
@@ -52,6 +53,7 @@ pi-review models [search]
 ## 各命令与参数的使用时机
 
 - **`pi-review screen <paths>`**——亚秒级（约 1.0–1.2 s）门禁筛查，不跑 LLM 生成循环。用在 CI/CD 快速路径、pre-commit / pre-push hook，或即时 sanity check，立刻抓已知缺陷模式。
+- **`pi-review screen-memory`**——聚合累积的筛查信号日志（`screen-memory.jsonl`）：每个模式的命中频次，以及可以晋升进 `screen-patterns.json` 的重复未匹配信号。见[筛查流程](screening.md)。
 - **`pi-review review [options] -- <target>`**——单评审员代码审查。用于日常本地开发和自审，一个模型的文字建议就足够的场景。
 - **`pi-review --reviewers <n>`（2–8）**——多评审员面板审查。用于 PR 合并门禁、安全敏感改动，或需要独立一致性的跨模型验证。
 - **`pi-review loop [--until clean]`**——多轮审查循环。用于自动化的 agent 修复—验证循环，反复打补丁再审直到干净。

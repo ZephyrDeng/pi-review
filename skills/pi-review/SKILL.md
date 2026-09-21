@@ -159,11 +159,19 @@ pi-review screen @src/order-service.ts
 - **Use `panel`** (`--reviewers N`) for PR merge gates, security-sensitive changes, or cross-model verification where independent agreement matters.
 - **Use `loop`** (`loop [--until clean]`) during automated implementation closeout where an agent iteratively patches code and re-verifies until clean.
 
+### Screen memory (catalog that grows from use)
+
+Screening accumulates two kinds of state under the pi-review dir (siblings of `config.json`):
+
+- **`screen-patterns.json`** — user-declared patterns merged over the builtin catalog: `{ "patterns": { "<id>": { "title", "severity" (critical|major|minor), "category" (correctness|security|data-loss|performance), "recommendation" } }, "disabled": ["<id>"] }`. An id matching a builtin overrides it; `disabled` retires entries that misfire on this codebase. `PI_REVIEW_SCREEN_PATTERNS=<path>` loads one extra file last (e.g. a project catalog committed to the repo — that is how a team shares patterns).
+- **`screen-memory.jsonl`** — every flagged hunk is appended with a code hash; `pi-review screen-memory` aggregates it into hit frequencies and recurring **unmatched signals** (catch-all fired, no catalog hit). Those are the evidence for new patterns — promotion is a human/agent edit of `screen-patterns.json`, screen never rewrites its own catalog. `PI_REVIEW_SCREEN_MEMORY=0` disables recording; `PI_REVIEW_SCREEN_MEMORY_FILE` moves the log.
+
 ## CLI arguments: when to use each
 
 | Argument | When to use |
 |---|---|
 | `screen <paths>` | Instant (~1s) gate screening; no LLM child session spawned. Requires `TYPESAFE_API_KEY`. |
+| `screen-memory` | Read the accumulated signal log: pattern hit frequencies + recurring unmatched signals to promote into `screen-patterns.json`. |
 | `--reviewer-model <id=model[:thinking]>` | In panel mode, to assign specific models or thinking levels to individual reviewers (e.g. `r1=openai/gpt-5:high`, `r2=zenmux/deepseek/deepseek-v4.1-flash:low`). Essential for cross-family heterogeneous panels. |
 | `--concurrency <n>` | Bounds parallel reviewer execution. **Omit for full speed** (all reviewers run concurrently by default). Only pass `<n>` if the provider account has strict concurrent request limits. |
 | `--consensus-model <model>` | Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters. |
