@@ -85,6 +85,12 @@ export interface ParsedArgs {
   provider?: string;
   thinking?: string;
   tools?: string;
+  /**
+   * When true, reviewer children do not load the `.claude/rules` extension.
+   * Optional so existing ParsedArgs literals stay valid; only an explicit
+   * `--no-rules` sets it. `PI_REVIEW_RULES=0` is read at argv-assembly time.
+   */
+  noRules?: boolean;
   name?: string;
   search?: string[];
   /** Panel: number of independent reviewers (generic same-model panel). */

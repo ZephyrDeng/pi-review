@@ -137,6 +137,12 @@ pi-review models                                           # 我能用哪些模�
 </tr>
 </table>
 
+## 项目规则
+
+评审子进程同样会读取 `.claude/rules/`，语义与 Claude Code 一致：从子进程工作目录逐级向上发现用户级 `~/.claude/rules/` 与项目级 `<dir>/.claude/rules/`。没有 `paths` frontmatter 的规则追加到子进程 system prompt；带 `paths` 的规则只在 `read` 命中对应 glob 时注入到该次 tool result。`write`、`edit` 不会触发。
+
+评审子进程仍然隔离运行（`--no-extensions`，issue #8）；rules loader 是我们自己的扩展，用显式 `--extension` 加载。单次关闭用 `--no-rules` 或 `PI_REVIEW_RULES=0`（也接受 `false` / `off` / `no`）。共识裁决器、`screen`、`classify` 都不加载规则——裁决器只做聚类。
+
 ## 文档
 
 | 指南 | 内容 |

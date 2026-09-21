@@ -37,6 +37,12 @@ Review children stay isolated (`--no-extensions`) unless the persistent review c
 
 Before writing, tell the user the config is machine-level: every later pi-review on this machine (including bare CLI) inherits it. Write it only on acceptance; when editing an existing file, keep every unknown key and never overwrite a value the user set (invalid JSON — stop, do not overwrite). Verify on Pi with `/rv-config`, elsewhere with `cat ~/.pi/pi-review/config.json`. Isolate one run with `PI_REVIEW_CHILD_EXTENSIONS=0` (env overrides config). If a child exits with stale extension ctx after dispose/reload (issue #8), retry that one run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
 
+## Claude rules
+
+Reviewer children load `.claude/rules/` by default, with Claude Code semantics — user-level `~/.claude/rules/` plus project-level `<dir>/.claude/rules/` from the child's working directory upward. Rules without a `paths` frontmatter key are appended to the child system prompt; rules with `paths` are injected into a `read` result only when the read file matches the glob (`write`/`edit` never trigger).
+
+This loader is **our own extension, explicitly passed with `--extension`** — it is not host-extension discovery. Review children still run isolated (`--no-extensions`) by default, so host extensions stay off unless the user opts in above. Disable rules for one run with `--no-rules` or `PI_REVIEW_RULES=0` (also accepts `false` / `off` / `no`). The consensus adjudicator, `screen`, and `classify` never load rules.
+
 ### Setting config via the agent (preferred path)
 
 There is no `/rv-config set` command — the agent is the config editor. When the user asks to change a pi-review setting, edit `~/.pi/pi-review/config.json` directly, with these rules:

@@ -138,6 +138,12 @@ Set `TYPESAFE_API_KEY` and it switches on.
 </tr>
 </table>
 
+## Project rules
+
+Reviewer children also read `.claude/rules/`, with Claude Code semantics: user-level `~/.claude/rules/` plus project-level `<dir>/.claude/rules/` discovered from the child's working directory upward. Rules without a `paths` frontmatter key are appended to the child's system prompt; rules with `paths` are injected into the `read` result only when the read file matches the glob. `write` and `edit` never trigger them.
+
+Review children still run isolated (`--no-extensions`, issue #8); the rules loader is our own extension, loaded explicitly with `--extension`. Turn it off for one run with `--no-rules` or `PI_REVIEW_RULES=0` (also accepts `false` / `off` / `no`). The consensus adjudicator, `screen`, and `classify` never load rules — the adjudicator only clusters findings.
+
 ## Documentation
 
 | Guide | What's inside |
