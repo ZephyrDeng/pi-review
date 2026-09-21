@@ -24,6 +24,7 @@ Options:
   --thinking <level>                          off|minimal|low|medium|high|xhigh
   --skill <path>                              Load an extra pi skill (repeatable)
   --tools <csv>                               Override allowed tools
+  --no-rules                                  Do not load .claude/rules into reviewer children (env: PI_REVIEW_RULES=0)
   --no-stream                                 Buffer child output until exit (default: stream live)
   --progress-log <path>                       Stream compact child --mode json events to this file (cannot combine with --no-stream)
   --progress-log-raw                          With --progress-log: tee the verbatim event stream (full snapshots; much larger)
@@ -163,6 +164,9 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
         break;
       case "--tools":
         options.tools = requireValue(arg, argv);
+        break;
+      case "--no-rules":
+        options.noRules = true;
         break;
       case "--name":
         options.name = requireValue(arg, argv);

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Writable } from "node:stream";
 import { spawnSync } from "node:child_process";
 import { REVIEW_META_VERSION } from "./types.js";
@@ -198,6 +199,51 @@ export function childIsolationArgs(env: NodeJS.ProcessEnv = process.env, cfg?: P
   return decision.enabled ? [] : ["--no-extensions"];
 }
 
+/** Env values that turn the Claude rules loader off (case-insensitive). */
+const RULES_DISABLED_VALUES = new Set(["0", "false", "off", "no"]);
+
+/**
+ * Whether reviewer children load the `.claude/rules` extension. On by default;
+ * `--no-rules` or `PI_REVIEW_RULES` set to 0/false/off/no disables it for one run.
+ */
+export function rulesEnabled(env: NodeJS.ProcessEnv = process.env, noRules?: boolean): boolean {
+  if (noRules) return false;
+  const raw = env.PI_REVIEW_RULES?.trim().toLowerCase();
+  return !(raw !== undefined && raw !== "" && RULES_DISABLED_VALUES.has(raw));
+}
+
+/**
+ * Absolute path of the rules extension shipped next to this module. Prefers the
+ * compiled `rules-extension.js`, falling back to `rules-extension.ts` (vitest
+ * runs src directly). Returns undefined when neither exists.
+ */
+export function rulesExtensionPath(metaUrl: string = import.meta.url): string | undefined {
+  const dir = path.dirname(fileURLToPath(metaUrl));
+  for (const name of ["rules-extension.js", "rules-extension.ts"]) {
+    const candidate = path.join(dir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Reviewer-child argv for loading our rules extension explicitly. Pi's
+ * `--no-extensions` only disables discovery — an explicit `--extension <path>`
+ * still loads — so rules work while host extensions stay off (issue #8).
+ * Returns [] when disabled or the file is missing (see assertRulesExtension).
+ */
+export function rulesExtensionArgs(env: NodeJS.ProcessEnv = process.env, noRules?: boolean): string[] {
+  if (!rulesEnabled(env, noRules)) return [];
+  const extensionPath = rulesExtensionPath();
+  return extensionPath ? ["--extension", extensionPath] : [];
+}
+
+/** Fail before spawning when rules are enabled but the extension file is missing. */
+export function assertRulesExtension(env: NodeJS.ProcessEnv = process.env, noRules?: boolean): void {
+  if (!rulesEnabled(env, noRules)) return;
+  if (!rulesExtensionPath()) fail("rules extension not found: expected rules-extension.js or rules-extension.ts next to the CLI");
+}
+
 /**
  * Build the catalog command args so the models command shows the same catalog
  * an actual review child would see: the effective isolation config applies
@@ -248,6 +294,7 @@ export function runModels(piBin: string, args: string[]): never {
 
 export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewStdin()): Promise<ReviewRunResult> {
   const config = resolveConfig();
+  assertRulesExtension(process.env, parsed.noRules);
   const presets = loadPresets(config.presetsFile);
   const preset = presets[parsed.mode];
 
@@ -290,8 +337,10 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     args.push("--no-session");
   }
 
-  // Isolate single-review children from host extension side effects (issue #8).
+  // Isolate single-review children from host extension side effects (issue #8),
+  // then load our own rules extension explicitly (allowed under --no-extensions).
   args.push(...childIsolationArgs());
+  args.push(...rulesExtensionArgs(process.env, parsed.noRules));
 
   // Block before spawning when the requested provider only exists via host
   // extensions (issue #8): the isolated child would otherwise die with a

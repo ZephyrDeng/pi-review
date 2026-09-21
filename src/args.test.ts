@@ -36,6 +36,12 @@ test("loop uses a small default review budget", () => {
   assert.equal(parsed.until, undefined);
 });
 
+test("--no-rules parses as an optional flag, absent by default", () => {
+  assert.equal(parseReviewCommand(["--", "@src"]).noRules, undefined);
+  assert.equal(parseReviewCommand(["--no-rules", "--", "@src"]).noRules, true);
+  assert.equal(parseReviewCommand(["loop", "--no-rules", "--", "@src"]).noRules, true);
+});
+
 test("loop --until clean sets goal and a hard default budget of 10", () => {
   const parsed = parseReviewCommand(["loop", "--until", "clean", "--", "@src"]);
   assert.equal(parsed.until, "clean");

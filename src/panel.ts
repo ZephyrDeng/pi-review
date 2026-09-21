@@ -17,7 +17,7 @@ import type {
 } from "./types.js";
 export { PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { spawnStreamingChild } from "./child-process.js";
-import { childEnv, childIsolationArgs, childRuntimeError, configBlockForProvider, formatChildRuntimeDetail, readReviewStdin } from "./review.js";
+import { childEnv, childIsolationArgs, childRuntimeError, configBlockForProvider, formatChildRuntimeDetail, readReviewStdin, assertRulesExtension, rulesExtensionArgs } from "./review.js";
 import { loadPanelPresets, loadPresets, loadSystemPrompt } from "./presets.js";
 import { splitPayload, normalizePayloadRefs, buildReviewerPrompt, buildAdjudicatorPrompt } from "./prompt.js";
 import { parseVerdict } from "./verdict.js";
@@ -106,8 +106,11 @@ export function buildReviewerArgs(
   }
 
   // Host extensions can crash the child via stale extension ctx after dispose
-  // (issue #8). Keep reviewers isolated unless the operator opts out.
+  // (issue #8). Keep reviewers isolated unless the operator opts out. Our own
+  // rules loader is an explicit --extension, which --no-extensions still allows.
+  assertRulesExtension(env, parsed.noRules);
   args.push(...childIsolationArgs(env));
+  args.push(...rulesExtensionArgs(env, parsed.noRules));
   args.push("--no-session");
   args.push(...fileRefs, prompt);
   return args;
@@ -297,6 +300,29 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Adjudicator argv (consensus clustering only): no rules extension, isolated
+ * from host extensions, no session, no tools. Pure so tests never spawn pi.
+ */
+export function adjudicatorArgs(
+  consensusModel: string | undefined,
+  adjudicatorSystemPrompt: string,
+  prompt: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const args: string[] = [
+    "-p",
+    ...childIsolationArgs(env),
+    "--no-session",
+    "--no-tools",
+    "--append-system-prompt",
+    adjudicatorSystemPrompt,
+  ];
+  if (consensusModel) args.push("--model", consensusModel);
+  args.push(prompt);
+  return args;
+}
+
 /** Real semantic adjudicator: spawns a review-only Pi session with the consensus model. */
 function createAdjudicator(
   config: Config,
@@ -321,16 +347,8 @@ function createAdjudicator(
       // and run with no session — it returns JSON purely from the structured
       // findings embedded in the prompt. Also isolate from host extensions
       // (issue #8) so a usage HUD / reload bridge cannot crash adjudication.
-      const args: string[] = [
-        "-p",
-        ...childIsolationArgs(),
-        "--no-session",
-        "--no-tools",
-        "--append-system-prompt",
-        adjudicatorSystemPrompt,
-      ];
-      if (consensusModel) args.push("--model", consensusModel);
-      args.push(prompt);
+      // It never loads the rules extension (`rules-extension` absent from argv).
+      const args = adjudicatorArgs(consensusModel, adjudicatorSystemPrompt, prompt);
 
       const sink = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
       const child = await spawnStreamingChild(config.piBin, args, {

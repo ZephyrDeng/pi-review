@@ -19,6 +19,7 @@ pi-review models [search]
 | `--thinking <level>` | Thinking level: `off\|minimal\|low\|medium\|high\|xhigh` |
 | `--skill <path>` | Load an extra Pi skill (repeatable) |
 | `--tools <csv>` | Override allowed tools |
+| `--no-rules` | Do not load `.claude/rules` into reviewer children (env: `PI_REVIEW_RULES=0`; also accepts `false` / `off` / `no`) |
 | `--keep-session` | Persist session for follow-up |
 | `--continue <handle>` | Continue an existing session |
 | `--name <name>` | Session name (with `--keep-session`) |

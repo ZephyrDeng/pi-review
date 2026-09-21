@@ -33,6 +33,7 @@ pi-review models [search]
 | `--thinking <level>` | 思考等级：`off\|minimal\|low\|medium\|high\|xhigh` |
 | `--skill <path>` | 额外加载一个 Pi skill（可重复） |
 | `--tools <csv>` | 覆盖允许的工具 |
+| `--no-rules` | 不向评审子进程加载 `.claude/rules`（环境变量 `PI_REVIEW_RULES=0`；也接受 `false` / `off` / `no`） |
 | `--keep-session` | 保留会话以便追问 |
 | `--continue <handle>` | 继续已有会话 |
 | `--name <name>` | 会话名（配合 `--keep-session`） |
