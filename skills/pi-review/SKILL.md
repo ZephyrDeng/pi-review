@@ -1,6 +1,6 @@
 ---
 name: pi-review
-description: Use pi-review to delegate isolated code, diff, repository, architecture, or plan reviews to fresh Pi sessions and return review conclusions. Also use for loop review, review-fix-re-review closeout, panel review gates, and review status/progress questions.
+description: "Use pi-review only when the user explicitly requests an independent review or review workflow: code review, review of a diff or MR, loop review, review-fix-re-review closeout, panel review gates, or review status/progress questions. Do not use it for repository inspection, spec-driven evaluation or optimization (for example, checking whether X can be optimized against a specification), implementation-oriented analysis, diagnosis, migration, or conformance fixes (for example, checking compliance and correcting the implementation) unless the user separately asks for an independent review."
 ---
 
 # Pi Review
