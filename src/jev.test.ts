@@ -107,6 +107,54 @@ test("evaluateNouls throws JevError on http failure and missing answers object",
   await assert.rejects(evaluateNouls(CONN, {}, { q: "x" }, boom), /socket hangup/);
 });
 
+test("evaluateNouls retries transient 503/502/network failures then succeeds", async () => {
+  const sequence: Array<{ status: number; body?: unknown; error?: Error }> = [
+    { status: 503 },
+    { status: 502 },
+    { status: 200, body: { answers: { q: { type: "noul", noul: 0.7 } } } },
+  ];
+  let calls = 0;
+  const fetchImpl = (async () => {
+    const step = sequence[Math.min(calls++, sequence.length - 1)]!;
+    if (step.error) throw step.error;
+    return { ok: step.status >= 200 && step.status < 300, status: step.status, json: async () => step.body };
+  }) as unknown as typeof fetch;
+  const result = await evaluateNouls(CONN, {}, { q: "a" }, fetchImpl);
+  assert.equal(calls, 3);
+  assert.deepEqual(result.probabilities, { q: 0.7 });
+});
+
+test("evaluateNouls retries network errors then succeeds", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    if (calls++ === 0) throw new Error("socket hangup");
+    return { ok: true, status: 200, json: async () => ({ answers: { q: { type: "noul", noul: 0.3 } } }) };
+  }) as unknown as typeof fetch;
+  const result = await evaluateNouls(CONN, {}, { q: "a" }, fetchImpl);
+  assert.equal(calls, 2);
+  assert.deepEqual(result.probabilities, { q: 0.3 });
+});
+
+test("evaluateNouls does not retry non-transient http errors", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return { ok: false, status: 403, json: async () => ({}) };
+  }) as unknown as typeof fetch;
+  await assert.rejects(evaluateNouls(CONN, {}, { q: "x" }, fetchImpl), /http 403/);
+  assert.equal(calls, 1);
+});
+
+test("evaluateNouls gives up after MAX_ATTEMPTS on persistent 503", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return { ok: false, status: 503, json: async () => ({}) };
+  }) as unknown as typeof fetch;
+  await assert.rejects(evaluateNouls(CONN, {}, { q: "x" }, fetchImpl), /http 503/);
+  assert.equal(calls, 3);
+});
+
 function candidate(anchorPath: string, ids: string[]): { anchorPath: string; findings: SourceFinding[] } {
   return {
     anchorPath,

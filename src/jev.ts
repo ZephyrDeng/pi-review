@@ -108,6 +108,12 @@ interface SystemOneEnvelope {
   model?: string;
 }
 
+const RETRYABLE_HTTP = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = [400, 1200];
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Shared transport: one POST to /v1/systemone with the given typed questions. */
 async function callSystemOne(
   connection: JevConnection,
@@ -115,19 +121,31 @@ async function callSystemOne(
   questionBody: Record<string, unknown>,
   fetchImpl: JevFetch,
 ): Promise<SystemOneEnvelope> {
-  let response: Response;
-  try {
-    response = await fetchImpl(`${connection.baseUrl}/v1/systemone`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${connection.apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ model: connection.model, state, questions: questionBody }),
-      signal: AbortSignal.timeout(JEV_TIMEOUT_MS),
-    });
-  } catch (error) {
-    throw new JevError(`typesafe api request failed: ${(error as Error).message}`);
+  const payload = JSON.stringify({ model: connection.model, state, questions: questionBody });
+  let response: Response | undefined;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      response = await fetchImpl(`${connection.baseUrl}/v1/systemone`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${connection.apiKey}`,
+          "content-type": "application/json",
+        },
+        body: payload,
+        signal: AbortSignal.timeout(JEV_TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (attempt + 1 < MAX_ATTEMPTS) {
+        await sleep(RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1]!);
+        continue;
+      }
+      throw new JevError(`typesafe api request failed: ${(error as Error).message}`);
+    }
+    if (!response.ok && RETRYABLE_HTTP.has(response.status) && attempt + 1 < MAX_ATTEMPTS) {
+      await sleep(RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1]!);
+      continue;
+    }
+    break;
   }
   if (!response.ok) {
     throw new JevError(`typesafe api http ${response.status}`);
