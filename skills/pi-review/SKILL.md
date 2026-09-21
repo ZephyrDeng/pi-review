@@ -171,6 +171,12 @@ Screening accumulates two kinds of state under the pi-review dir (siblings of `c
 - **`screen-patterns.json`** — user-declared patterns merged over the builtin catalog: `{ "patterns": { "<id>": { "title", "severity" (critical|major|minor), "category" (correctness|security|data-loss|performance), "recommendation" } }, "disabled": ["<id>"] }`. An id matching a builtin overrides it; `disabled` retires entries that misfire on this codebase. `PI_REVIEW_SCREEN_PATTERNS=<path>` loads one extra file last (e.g. a project catalog committed to the repo — that is how a team shares patterns).
 - **`screen-memory.jsonl`** — every flagged hunk is appended with a code hash; `pi-review screen-memory` aggregates it into hit frequencies and recurring **unmatched signals** (catch-all fired, no catalog hit). Those are the evidence for new patterns — promotion is a human/agent edit of `screen-patterns.json`, screen never rewrites its own catalog. `PI_REVIEW_SCREEN_MEMORY=0` disables recording; `PI_REVIEW_SCREEN_MEMORY_FILE` moves the log.
 
+A finding whose summary ends `matched no known pattern` is an unmatched signal: escalate that file to a full `pi-review` run, and the hunk is already in `screen-memory.jsonl`. Reach for `pi-review screen-memory` when:
+
+- The same unmatched signal recurs (`seen` ≥ 2) — promote it into `screen-patterns.json`.
+- The user reports screen missing a defect class — check `Unmatched` for the accumulated candidates.
+- A pattern misfires on this codebase — retire it via `disabled` instead of deleting history.
+
 ## CLI arguments: when to use each
 
 | Argument | When to use |
