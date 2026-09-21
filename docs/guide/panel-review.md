@@ -1,5 +1,7 @@
 # Panel Review
 
+[中文版](zh-CN/panel-review.md)
+
 Panel review runs multiple **independent** reviewers in isolated child sessions and aggregates their findings into one gate result. Reviewers cannot see one another's findings, so agreement represents independent discovery.
 
 ```bash

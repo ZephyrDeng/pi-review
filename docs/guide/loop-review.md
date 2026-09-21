@@ -1,5 +1,7 @@
 # Loop Review
 
+[中文版](zh-CN/loop-review.md)
+
 `pi-review loop` runs a bounded sequence of full, isolated review runs against the current working tree:
 
 ```bash

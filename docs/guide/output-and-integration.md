@@ -1,5 +1,7 @@
 # Output format and integration
 
+[中文版](zh-CN/output-and-integration.md)
+
 Every review produces Markdown with these sections:
 
 ```

@@ -1,5 +1,7 @@
 # Model providers
 
+[中文版](zh-CN/providers.md)
+
 `pi-review` runs on any provider configured in Pi (`pi-review models` lists them). This page covers partner-specific setup.
 
 ## OrcaRouter

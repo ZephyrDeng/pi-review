@@ -1,5 +1,7 @@
 # Installation
 
+[中文版](zh-CN/installation.md)
+
 ## Prerequisites
 
 - [Pi CLI](https://pi.dev) installed and configured with at least one model provider

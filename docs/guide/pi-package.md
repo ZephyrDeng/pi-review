@@ -1,5 +1,7 @@
 # Pi package: `/rv` commands
 
+[中文版](zh-CN/pi-package.md)
+
 After installing as a Pi package, use the `/rv` slash command:
 
 ```

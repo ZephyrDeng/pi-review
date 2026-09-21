@@ -9,7 +9,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/ZephyrDeng/pi-review?style=flat&logo=github)](https://github.com/ZephyrDeng/pi-review/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[快速开始](#快速开始) · [特性](#为什么选-pi-review) · [Panel 审查](docs/guide/panel-review.md) · [CLI 参考](docs/guide/cli-reference.md) · [English](README.md)
+[快速开始](#快速开始) · [特性](#为什么选-pi-review) · [Panel 审查](docs/guide/zh-CN/panel-review.md) · [CLI 参考](docs/guide/zh-CN/cli-reference.md) · [English](README.md)
 
 </div>
 
@@ -68,7 +68,7 @@ pi-review --panel code-experts --consensus majority -- @src   # 三个视角，�
 ──────────────────────────────────────────
 ```
 
-脚本从 stderr 读 `PI_REVIEW_META_JSON:`，每条 finding 带 `severity`、`path`、`location`、`details`、`recommendation`，无需解析 Markdown。→ [输出与集成](docs/guide/output-and-integration.md)
+脚本从 stderr 读 `PI_REVIEW_META_JSON:`，每条 finding 带 `severity`、`path`、`location`、`details`、`recommendation`，无需解析 Markdown。→ [输出与集成](docs/guide/zh-CN/output-and-integration.md)
 
 ## 快速开始
 
@@ -93,7 +93,7 @@ pi-review models                                           # 我能用哪些模�
 
 在 Pi 里：`/rv @src`、`/rv-loop fix until clean @src`、`/rv-models`。在其它 agent 宿主里装一次 skill，之后用自然语言要求审查即可。
 
-→ [安装方式](docs/guide/installation.md) · [Pi `/rv` 命令](docs/guide/pi-package.md)
+→ [安装方式](docs/guide/zh-CN/installation.md) · [Pi `/rv` 命令](docs/guide/zh-CN/pi-package.md)
 
 ## 面板如何裁决
 
@@ -106,7 +106,7 @@ pi-review models                                           # 我能用哪些模�
                                     共识阈值 ──► confirmed（卡门禁）/ advisory
 ```
 
-评审员运行失败 → `blocked`；输出无法解析 → `needs_human`；绝不静默放行。裁决器只能聚类，不能新增、删除或改写 finding。→ [Panel 审查详解](docs/guide/panel-review.md) · [Loop 审查](docs/guide/loop-review.md)
+评审员运行失败 → `blocked`；输出无法解析 → `needs_human`；绝不静默放行。裁决器只能聚类，不能新增、删除或改写 finding。→ [Panel 审查详解](docs/guide/zh-CN/panel-review.md) · [Loop 审查](docs/guide/zh-CN/loop-review.md)
 
 ## 合作伙伴
 
@@ -120,7 +120,7 @@ pi-review models                                           # 我能用哪些模�
 
 [![Powered by OrcaRouter](https://img.shields.io/badge/Powered_by-OrcaRouter-2563eb)](https://www.orcarouter.ai/ref/ref_07ca74b3e41670e5ff36)
 
-→ [接入指南](docs/guide/providers.md)
+→ [接入指南](docs/guide/zh-CN/providers.md)
 
 </td>
 <td width="50%" valign="top">
@@ -141,20 +141,18 @@ pi-review models                                           # 我能用哪些模�
 
 | 指南 | 内容 |
 |---|---|
-| [安装](docs/guide/installation.md) | CLI、Pi 包、agent skill（Claude Code / Codex / Cursor / agy）、更新、源码安装 |
-| [CLI 参考](docs/guide/cli-reference.md) | 全部参数、审查模式、各命令使用时机 |
-| [Panel 审查](docs/guide/panel-review.md) | 共识策略、聚合、Jev、`classify`、`screen`、实时 UI、网页看板 |
-| [Loop 审查](docs/guide/loop-review.md) | 有限轮次、`--until clean`、跨轮对比、收敛停止 |
-| [输出与集成](docs/guide/output-and-integration.md) | Markdown 结构、`PI_REVIEW_META_JSON` schema、退出码、会话、进度日志 |
-| [配置](docs/guide/configuration.md) | 配置文件、环境变量、安全模型 |
-| [Provider](docs/guide/providers.md) | OrcaRouter 等 provider 接入 |
+| [安装](docs/guide/zh-CN/installation.md) | CLI、Pi 包、agent skill（Claude Code / Codex / Cursor / agy）、更新、源码安装 |
+| [CLI 参考](docs/guide/zh-CN/cli-reference.md) | 全部参数、审查模式、各命令使用时机 |
+| [Panel 审查](docs/guide/zh-CN/panel-review.md) | 共识策略、聚合、Jev、`classify`、`screen`、实时 UI、网页看板 |
+| [Loop 审查](docs/guide/zh-CN/loop-review.md) | 有限轮次、`--until clean`、跨轮对比、收敛停止 |
+| [输出与集成](docs/guide/zh-CN/output-and-integration.md) | Markdown 结构、`PI_REVIEW_META_JSON` schema、退出码、会话、进度日志 |
+| [配置](docs/guide/zh-CN/configuration.md) | 配置文件、环境变量、安全模型 |
+| [Provider](docs/guide/zh-CN/providers.md) | OrcaRouter 等 provider 接入 |
 | [研究](docs/research/) | Jev 架构、筛查测量、裁决案例 |
-
-详细指南目前为英文。
 
 ## 参与贡献
 
-欢迎 issue 与 PR。源码仅用英文；文档可双语。提交经 Husky 走 `ai-commit`（`npm install` 会装好 hook）。见 [安装 → 语言约定](docs/guide/installation.md#contributing-language-policy)。
+欢迎 issue 与 PR。源码仅用英文；文档可双语。提交经 Husky 走 `ai-commit`（`npm install` 会装好 hook）。见 [安装 → 语言约定](docs/guide/zh-CN/installation.md#参与贡献语言约定)。
 
 ## Star
 

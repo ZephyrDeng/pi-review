@@ -1,5 +1,7 @@
 # CLI Reference
 
+[中文版](zh-CN/cli-reference.md)
+
 ```
 pi-review [review] [options] -- <@files|text...>
 pi-review loop [options] -- <@files|text...>
