@@ -31,12 +31,13 @@ flowchart TD
     M -- 否 --> N[clean\n退出码 0: 继续后续测试或深度审查]
     M -- 是 --> O[has_findings\n退出码 1: 修复后重新筛查]
     F -. 请求失败或未配置 key .-> P[blocked\n退出码 4: 不得当作通过]
+    M -- 否但有未筛查代码 --> Q[incomplete\n退出码 4: 不得当作通过]
 ```
 
 ## 四个阶段
 
 1. **确定性切片**：本地读取文件，按声明边界拆成带有稳定路径和行号的 hunk。
-2. **Jev 判断**：每个 hunk 同时接受一个兜底问题和多个目录模式问题；不启动 Pi 子会话，也不生成 Markdown 长文。
+2. **Jev 判断**：每个 hunk 同时接受一个兜底问题和多个目录模式问题；不启动 Pi 子会话，也不生成 Markdown 长文。hunk 按 Jev 的 token 上限分批（单次请求 64k、state 加最长问题 32k，各留 25% 余量），每次请求只携带本批问到的 hunk；单个 hunk 过大时按行切成带独立行号的片段。服务端仍返回 `max_tokens_exceeded` 时先对半拆批、再对半拆片段，持续失败的片段列入 `unscreened`。详见 [token 预算研究](../../research/jev-screen-token-budget.md)。
 3. **模板组装**：概率达到 `0.6` 时命中。已知模式使用固定模板；未知但被兜底问题命中的风险会生成“未匹配缺陷信号”，不会静默放行。
 4. **门禁返回**：标准输出给人看，stderr 输出 `PI_REVIEW_SCREEN_JSON` 供脚本读取。
 
@@ -73,6 +74,7 @@ pi-review 状态目录（`config.json` 同级，默认 `~/.pi/pi-review/`）下�
 |---|---|---|
 | `clean` / `0` | 没有筛出的阻断问题 | 继续测试、构建或完整审查 |
 | `has_findings` / `1` | 发现阻断问题 | 修复后重新运行；未匹配信号应进入完整审查 |
+| `incomplete` / `4` | 没有发现，但有代码超出 Jev token 上限未被筛查 | 单独筛查列出的行范围或改用完整审查，不能当作通过；有发现时状态仍为 `has_findings` 并附带 `unscreened` |
 | `blocked` / `4` | 筛查无法可靠运行 | 配置 `TYPESAFE_API_KEY` 或改用完整审查，不能当作通过 |
 
 推荐流水线：

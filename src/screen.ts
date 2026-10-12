@@ -1,10 +1,11 @@
 // pi-review screen: gate-grade Jev screening — typed judgments only, no LLM
 // prose generation on this path.
 //
-// Each file is sliced into declaration-level hunks deterministically; one
-// System One call fans out a catch-all Noul plus one Noul per catalog defect
-// pattern per hunk; hits assemble ReviewFinding-shaped results from pattern
-// templates. Catalog misses still surface as "unmatched defect signal"
+// Each file is sliced into declaration-level hunks deterministically; System
+// One calls fan out a catch-all Noul plus one Noul per catalog defect pattern
+// per hunk, batched under Jev token budgets with only each batch's hunks in
+// state (docs/research/jev-screen-token-budget.md); hits assemble
+// ReviewFinding-shaped results from pattern templates. Catalog misses still surface as "unmatched defect signal"
 // findings, so the gate never silently drops a strong catch-all signal —
 // deeper review (full `pi-review`) is the escape hatch, not silent loss.
 // Mechanism and measurements: docs/research/jev-screening-case.md.
@@ -20,6 +21,7 @@ import {
   evaluateNouls,
   resolveJevConnection,
   GENERIC_NOUL_CRITERIA,
+  JevError,
   type JevConnection,
   type JevFetch,
   type JevUsage,
@@ -46,6 +48,35 @@ export const MAX_HUNKS_PER_FILE = 40;
 
 /** The screening API accepted 561 Nouls in one call; chunk with headroom below that. */
 export const MAX_QUESTIONS_PER_CALL = 480;
+
+/**
+ * Per-request token budgets at 75% of jev-1.13's documented limits
+ * (docs.typesafe.ai/models): 64k for state + all questions, 32k for state +
+ * the longest question. See docs/research/jev-screen-token-budget.md.
+ */
+export const BATCH_TOKEN_BUDGET = 48_000;
+export const STATE_TOKEN_BUDGET = 24_000;
+
+/** Line-halving levels per piece after the server still reports max_tokens_exceeded. */
+export const MAX_REACTIVE_SPLITS = 3;
+
+const SCREEN_TASK =
+  "Screen code hunks for real defects worth blocking a merge on. Judge each hunk independently against the supplied code.";
+
+/**
+ * shortcut: chars-per-token heuristic (ASCII/3, other UTF-16 units 1:1) — the API has no
+ * token-count endpoint and reactive halving covers underestimates; calibrate from
+ * usage.input_tokens if it proves too conservative.
+ */
+export function estimateTokens(text: string): number {
+  let ascii = 0;
+  let other = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) < 128) ascii++;
+    else other++;
+  }
+  return Math.ceil(ascii / 3) + other;
+}
 
 export interface ScreenPattern {
   title: string;
@@ -276,10 +307,22 @@ export interface ScreenHunkReport {
   patterns: string[];
 }
 
+/** A hunk piece the API kept rejecting as too large; its coverage is missing. */
+export interface ScreenUnscreened {
+  id: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  reason: string;
+}
+
 export interface ScreenResult {
-  status: "clean" | "has_findings";
+  /** `incomplete`: no findings, but some code went unscreened — never a pass. */
+  status: "clean" | "has_findings" | "incomplete";
   findings: ReviewFinding[];
+  /** One report per input hunk; pieces of a split hunk merge into it. */
   hunkReports: ScreenHunkReport[];
+  unscreened?: ScreenUnscreened[];
   questions: number;
   calls: number;
   durationMs: number;
@@ -287,35 +330,107 @@ export interface ScreenResult {
   usage?: JevUsage;
 }
 
+/** A screenable slice of one input hunk: the whole hunk unless it had to be split to fit. */
+interface ScreenPiece {
+  hunkIndex: number;
+  id: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  code: string;
+  /** Reactive (server-rejected) halvings so far. */
+  splits: number;
+}
+
+/** A piece plus its questions, keyed `d{key}` / `p{key}_{pattern}` within any request. */
+interface ScreenUnit {
+  piece: ScreenPiece;
+  key: number;
+  questions: Array<{ id: string; text: string; tokens: number }>;
+  stateTokens: number;
+}
+
+function pieceStateEntry(piece: ScreenPiece) {
+  return { id: piece.id, path: piece.path, lines: `${piece.startLine}-${piece.endLine}`, code: piece.code };
+}
+
+/** Halve by lines, or by characters for a single line; undefined when it cannot shrink. Whitespace-only halves drop. */
+function halvePiece(piece: ScreenPiece): ScreenPiece[] | undefined {
+  const lines = piece.code.split("\n");
+  let halves: ScreenPiece[];
+  if (lines.length > 1) {
+    const mid = Math.ceil(lines.length / 2);
+    halves = [
+      { ...piece, id: `${piece.id}/1`, endLine: piece.startLine + mid - 1, code: lines.slice(0, mid).join("\n") },
+      { ...piece, id: `${piece.id}/2`, startLine: piece.startLine + mid, code: lines.slice(mid).join("\n") },
+    ];
+  } else {
+    const chars = Array.from(piece.code);
+    if (chars.length < 2) return undefined;
+    const mid = Math.ceil(chars.length / 2);
+    halves = [
+      { ...piece, id: `${piece.id}/1`, code: chars.slice(0, mid).join("") },
+      { ...piece, id: `${piece.id}/2`, code: chars.slice(mid).join("") },
+    ];
+  }
+  return halves.filter((half) => half.code.trim());
+}
+
+interface ScreenTotals {
+  probabilities: Record<string, number>;
+  calls: number;
+  questions: number;
+  usage?: JevUsage;
+  model?: string;
+}
+
 /**
- * Fan out every question in one call, chunking sequentially past
- * MAX_QUESTIONS_PER_CALL. Missing answers read as "no" (conservative).
+ * One batch: state carries only this batch's pieces; questions chunk past
+ * MAX_QUESTIONS_PER_CALL or the token budget left after state. Probabilities
+ * commit only when every chunk succeeds, so a rejected batch leaves no partial
+ * answers behind; usage and calls count as they happen. Missing answers read as
+ * "no" (conservative).
  */
-async function evaluateChunked(
+async function evaluateBatch(
   connection: JevConnection,
-  state: unknown,
-  questions: Record<string, string>,
-  fetchImpl?: JevFetch,
-): Promise<{ probabilities: Record<string, number>; calls: number; usage?: JevUsage; model?: string }> {
-  const entries = Object.entries(questions);
+  batch: ScreenUnit[],
+  taskTokens: number,
+  totals: ScreenTotals,
+  fetchImpl: JevFetch,
+): Promise<void> {
+  const state = { task: SCREEN_TASK, hunks: batch.map((unit) => pieceStateEntry(unit.piece)) };
+  const questionBudget = BATCH_TOKEN_BUDGET - (taskTokens + batch.reduce((sum, unit) => sum + unit.stateTokens, 0));
+  const all = batch.flatMap((unit) => unit.questions);
+  const chunks: Array<typeof all> = [];
+  let chunk: typeof all = [];
+  let chunkTokens = 0;
+  for (const question of all) {
+    if (chunk.length > 0 && (chunk.length >= MAX_QUESTIONS_PER_CALL || chunkTokens + question.tokens > questionBudget)) {
+      chunks.push(chunk);
+      chunk = [];
+      chunkTokens = 0;
+    }
+    chunk.push(question);
+    chunkTokens += question.tokens;
+  }
+  if (chunk.length > 0) chunks.push(chunk);
+
   const probabilities: Record<string, number> = {};
-  let calls = 0;
-  let usage: JevUsage | undefined;
-  let model: string | undefined;
-  for (let offset = 0; offset < entries.length; offset += MAX_QUESTIONS_PER_CALL) {
-    const chunk = Object.fromEntries(entries.slice(offset, offset + MAX_QUESTIONS_PER_CALL));
-    const result = await evaluateNouls(connection, state, chunk, fetchImpl ?? fetch, GENERIC_NOUL_CRITERIA);
+  for (const part of chunks) {
+    const questions = Object.fromEntries(part.map((question) => [question.id, question.text]));
+    const result = await evaluateNouls(connection, state, questions, fetchImpl, GENERIC_NOUL_CRITERIA);
     Object.assign(probabilities, result.probabilities);
-    calls += 1;
+    totals.calls += 1;
     if (result.usage) {
-      usage = {
-        inputTokens: (usage?.inputTokens ?? 0) + result.usage.inputTokens,
-        outputTokens: (usage?.outputTokens ?? 0) + result.usage.outputTokens,
+      totals.usage = {
+        inputTokens: (totals.usage?.inputTokens ?? 0) + result.usage.inputTokens,
+        outputTokens: (totals.usage?.outputTokens ?? 0) + result.usage.outputTokens,
       };
     }
-    model = result.model ?? model;
+    totals.model = result.model ?? totals.model;
   }
-  return { probabilities, calls, ...(usage ? { usage } : {}), ...(model ? { model } : {}) };
+  Object.assign(totals.probabilities, probabilities);
+  totals.questions += all.length;
 }
 
 /** Screen pre-sliced hunks; pure of filesystem and process exit so tests drive it with a mocked fetch. */
@@ -325,34 +440,125 @@ export async function screenHunks(
   options: { fetchImpl?: JevFetch; patterns?: Record<string, ScreenPattern> } = {},
 ): Promise<ScreenResult> {
   const startedAt = Date.now();
+  const fetchImpl = options.fetchImpl ?? fetch;
   const catalog = options.patterns ?? SCREEN_PATTERNS;
   const patternIds = Object.keys(catalog);
-  const questions: Record<string, string> = {};
-  hunks.forEach((hunk, i) => {
-    questions[`d${i}`] =
-      `Does hunk "${hunk.id}" contain a real correctness, security, or data-loss defect that should block merge? ` +
-      "Ignore style and hypothetical concerns.";
-    patternIds.forEach((patternId, p) => {
-      questions[`p${i}_${p}`] = `Does hunk "${hunk.id}" contain this defect: ${catalog[patternId]!.title}?`;
-    });
-  });
+  const taskTokens = estimateTokens(JSON.stringify({ task: SCREEN_TASK, hunks: [] }));
+  const questionTokens = (text: string) =>
+    estimateTokens(JSON.stringify({ type: "noul", instructions: text, criteria: GENERIC_NOUL_CRITERIA })) + 4;
 
-  const state = {
-    task: "Screen code hunks for real defects worth blocking a merge on. Judge each hunk independently against the supplied code.",
-    hunks: hunks.map((hunk) => ({
-      id: hunk.id,
-      path: hunk.path,
-      lines: `${hunk.startLine}-${hunk.endLine}`,
-      code: hunk.code,
-    })),
+  let nextKey = 0;
+  const toUnit = (piece: ScreenPiece, key = nextKey++): ScreenUnit => {
+    const texts: Array<[string, string]> = [
+      [
+        `d${key}`,
+        `Does hunk "${piece.id}" contain a real correctness, security, or data-loss defect that should block merge? ` +
+          "Ignore style and hypothetical concerns.",
+      ],
+      ...patternIds.map((patternId, p): [string, string] => [
+        `p${key}_${p}`,
+        `Does hunk "${piece.id}" contain this defect: ${catalog[patternId]!.title}?`,
+      ]),
+    ];
+    return {
+      piece,
+      key,
+      questions: texts.map(([id, text]) => ({ id, text, tokens: questionTokens(text) })),
+      stateTokens: estimateTokens(JSON.stringify(pieceStateEntry(piece))) + 1,
+    };
   };
-  const result = await evaluateChunked(connection, state, questions, options.fetchImpl);
+  const maxQuestion = (unit: ScreenUnit) => Math.max(...unit.questions.map((question) => question.tokens));
+  const fitsAlone = (unit: ScreenUnit) => taskTokens + unit.stateTokens + maxQuestion(unit) <= STATE_TOKEN_BUDGET;
 
+  // Pre-split hunks whose code alone breaks the state budget; keys stay sequential so
+  // inputs that fit produce exactly the pre-batching request.
+  const preSplit = (piece: ScreenPiece): ScreenPiece[] => {
+    if (fitsAlone(toUnit(piece, -1))) return [piece];
+    const halves = halvePiece(piece);
+    return halves ? halves.flatMap(preSplit) : [piece];
+  };
+  const units = hunks
+    .flatMap((hunk, hunkIndex) =>
+      preSplit({ hunkIndex, id: hunk.id, path: hunk.path, startLine: hunk.startLine, endLine: hunk.endLine, code: hunk.code, splits: 0 }),
+    )
+    .map((piece) => toUnit(piece));
+
+  // Greedy source-order packing under both token budgets and the question cap.
+  const batches: ScreenUnit[][] = [];
+  let current: ScreenUnit[] = [];
+  let stateTokens = taskTokens;
+  let questionTotal = 0;
+  let questionCount = 0;
+  let longest = 0;
+  for (const unit of units) {
+    const unitQuestions = unit.questions.reduce((sum, question) => sum + question.tokens, 0);
+    const unitLongest = maxQuestion(unit);
+    if (
+      current.length > 0 &&
+      (stateTokens + unit.stateTokens + Math.max(longest, unitLongest) > STATE_TOKEN_BUDGET ||
+        stateTokens + unit.stateTokens + questionTotal + unitQuestions > BATCH_TOKEN_BUDGET ||
+        questionCount + unit.questions.length > MAX_QUESTIONS_PER_CALL)
+    ) {
+      batches.push(current);
+      current = [];
+      stateTokens = taskTokens;
+      questionTotal = 0;
+      questionCount = 0;
+      longest = 0;
+    }
+    current.push(unit);
+    stateTokens += unit.stateTokens;
+    questionTotal += unitQuestions;
+    questionCount += unit.questions.length;
+    longest = Math.max(longest, unitLongest);
+  }
+  if (current.length > 0) batches.push(current);
+
+  // Degrade on max_tokens_exceeded only: halve the batch, then halve the piece by lines;
+  // never resend an identical request. Any other error aborts the screen.
+  const totals: ScreenTotals = { probabilities: {}, calls: 0, questions: 0 };
+  const screened: ScreenUnit[] = [];
+  const unscreened: ScreenUnscreened[] = [];
+  while (batches.length > 0) {
+    const batch = batches.shift()!;
+    try {
+      await evaluateBatch(connection, batch, taskTokens, totals, fetchImpl);
+      screened.push(...batch);
+      continue;
+    } catch (error) {
+      if (!(error instanceof JevError) || error.code !== "max_tokens_exceeded") throw error;
+    }
+    if (batch.length > 1) {
+      const mid = Math.ceil(batch.length / 2);
+      batches.unshift(batch.slice(0, mid), batch.slice(mid));
+      continue;
+    }
+    const { piece } = batch[0]!;
+    const halves = piece.splits < MAX_REACTIVE_SPLITS ? halvePiece(piece) : undefined;
+    if (halves && halves.length > 0) {
+      batches.unshift(...halves.map((half) => [toUnit({ ...half, splits: piece.splits + 1 })]));
+      continue;
+    }
+    unscreened.push({
+      id: piece.id,
+      path: piece.path,
+      startLine: piece.startLine,
+      endLine: piece.endLine,
+      reason: "max_tokens_exceeded",
+    });
+  }
+
+  screened.sort(
+    (a, b) =>
+      a.piece.hunkIndex - b.piece.hunkIndex ||
+      a.piece.startLine - b.piece.startLine ||
+      (a.piece.id < b.piece.id ? -1 : a.piece.id > b.piece.id ? 1 : 0),
+  );
   const findings: ReviewFinding[] = [];
-  const hunkReports: ScreenHunkReport[] = [];
-  hunks.forEach((hunk, i) => {
-    const catchAll = result.probabilities[`d${i}`];
-    const hits = patternIds.map((patternId, p) => ({ patternId, probability: result.probabilities[`p${i}_${p}`] }))
+  const merged = hunks.map(() => ({ catchAll: undefined as number | undefined, patterns: new Map<string, number>() }));
+  for (const { piece, key } of screened) {
+    const catchAll = totals.probabilities[`d${key}`];
+    const hits = patternIds.map((patternId, p) => ({ patternId, probability: totals.probabilities[`p${key}_${p}`] }))
       .filter((hit): hit is { patternId: string; probability: number } => hit.probability !== undefined && hit.probability >= SCREEN_THRESHOLD)
       .sort((a, b) => b.probability - a.probability);
 
@@ -361,49 +567,59 @@ export async function screenHunks(
       findings.push({
         id: `S${findings.length + 1}`,
         severity: pattern.severity,
-        path: hunk.path,
+        path: piece.path,
         summary: pattern.title,
         actionable: true,
         details:
-          `Evidence: hunk "${hunk.id}" (${hunk.path}:${hunk.startLine}-${hunk.endLine}) matched defect pattern ` +
+          `Evidence: hunk "${piece.id}" (${piece.path}:${piece.startLine}-${piece.endLine}) matched defect pattern ` +
           `"${hit.patternId}" (p=${hit.probability.toFixed(2)}, category=${pattern.category}).`,
         recommendation: pattern.recommendation,
-        location: { startLine: hunk.startLine, endLine: hunk.endLine },
+        location: { startLine: piece.startLine, endLine: piece.endLine },
       });
     }
     if (hits.length === 0 && catchAll !== undefined && catchAll >= SCREEN_THRESHOLD) {
       findings.push({
         id: `S${findings.length + 1}`,
         severity: "major",
-        path: hunk.path,
-        summary: `Possible defect in "${hunk.id}" matched no known pattern — needs deeper review`,
+        path: piece.path,
+        summary: `Possible defect in "${piece.id}" matched no known pattern — needs deeper review`,
         actionable: true,
         details:
-          `Evidence: the screening catch-all scored p=${catchAll.toFixed(2)} for hunk "${hunk.id}" ` +
-          `(${hunk.path}:${hunk.startLine}-${hunk.endLine}) but every catalog pattern scored below ${SCREEN_THRESHOLD}.`,
+          `Evidence: the screening catch-all scored p=${catchAll.toFixed(2)} for hunk "${piece.id}" ` +
+          `(${piece.path}:${piece.startLine}-${piece.endLine}) but every catalog pattern scored below ${SCREEN_THRESHOLD}.`,
         recommendation: "Run a full `pi-review` on this file for evidence-backed findings.",
-        location: { startLine: hunk.startLine, endLine: hunk.endLine },
+        location: { startLine: piece.startLine, endLine: piece.endLine },
       });
     }
-    hunkReports.push({
+    const report = merged[piece.hunkIndex]!;
+    if (catchAll !== undefined) report.catchAll = Math.max(report.catchAll ?? 0, catchAll);
+    for (const hit of hits) {
+      report.patterns.set(hit.patternId, Math.max(report.patterns.get(hit.patternId) ?? 0, hit.probability));
+    }
+  }
+
+  const hunkReports: ScreenHunkReport[] = hunks.map((hunk, i) => {
+    const report = merged[i]!;
+    return {
       id: hunk.id,
       path: hunk.path,
       startLine: hunk.startLine,
       endLine: hunk.endLine,
-      ...(catchAll !== undefined ? { defectProbability: catchAll } : {}),
-      patterns: hits.map((hit) => hit.patternId),
-    });
+      ...(report.catchAll !== undefined ? { defectProbability: report.catchAll } : {}),
+      patterns: [...report.patterns].sort((a, b) => b[1] - a[1]).map(([patternId]) => patternId),
+    };
   });
 
   return {
-    status: findings.length > 0 ? "has_findings" : "clean",
+    status: findings.length > 0 ? "has_findings" : unscreened.length > 0 ? "incomplete" : "clean",
     findings,
     hunkReports,
-    questions: Object.keys(questions).length,
-    calls: result.calls,
+    ...(unscreened.length > 0 ? { unscreened } : {}),
+    questions: totals.questions,
+    calls: totals.calls,
     durationMs: Date.now() - startedAt,
-    ...(result.model ? { model: result.model } : {}),
-    ...(result.usage ? { usage: result.usage } : {}),
+    ...(totals.model ? { model: totals.model } : {}),
+    ...(totals.usage ? { usage: totals.usage } : {}),
   };
 }
 
@@ -477,6 +693,14 @@ export function formatScreenAscii(result: ScreenResult): string {
       lines.push(`      ${finding.summary}`);
     }
   }
+  const unscreened = result.unscreened ?? [];
+  if (unscreened.length > 0) {
+    lines.push("");
+    lines.push(`  Unscreened ${unscreened.length} piece${unscreened.length === 1 ? "" : "s"} exceeded the Jev token limit — coverage incomplete, not a pass`);
+    for (const piece of unscreened) {
+      lines.push(`      ${piece.path}:${piece.startLine}-${piece.endLine}  (${piece.id})`);
+    }
+  }
   lines.push("─".repeat(39));
   return lines.join("\n");
 }
@@ -526,7 +750,7 @@ export async function runScreen(parsed: ParsedArgs): Promise<never> {
 
   process.stdout.write(`${formatScreenAscii(result)}\n`);
   process.stderr.write(`PI_REVIEW_SCREEN_JSON: ${JSON.stringify(result)}\n`);
-  process.exit(result.status === "clean" ? 0 : 1);
+  process.exit(result.status === "clean" ? 0 : result.status === "has_findings" ? 1 : 4);
 }
 
 /** `pi-review screen-memory`: report the accumulated signal log and catalog state. */

@@ -69,9 +69,25 @@ export function resolveJevConnection(env: NodeJS.ProcessEnv = process.env): JevC
 }
 
 export class JevError extends Error {
-  constructor(message: string) {
+  /** Allowlisted server error code (e.g. `max_tokens_exceeded`); never raw body content. */
+  readonly code?: string;
+  constructor(message: string, code?: string) {
     super(message);
     this.name = "JevError";
+    if (code) this.code = code;
+  }
+}
+
+const SAFE_ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** Only `detail.error_type` matching SAFE_ERROR_CODE survives; anything else in the body is dropped. */
+async function readErrorCode(response: Response): Promise<string | undefined> {
+  try {
+    const body = (await response.json()) as { detail?: { error_type?: unknown } } | undefined;
+    const code = body?.detail?.error_type;
+    return typeof code === "string" && SAFE_ERROR_CODE.test(code) ? code : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -148,7 +164,8 @@ async function callSystemOne(
     break;
   }
   if (!response.ok) {
-    throw new JevError(`typesafe api http ${response.status}`);
+    const code = await readErrorCode(response);
+    throw new JevError(`typesafe api http ${response.status}${code ? ` (${code})` : ""}`, code);
   }
   let body: unknown;
   try {

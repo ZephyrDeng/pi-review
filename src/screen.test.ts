@@ -13,8 +13,12 @@ import {
   SCREEN_THRESHOLD,
   MAX_HUNKS_PER_FILE,
   MAX_QUESTIONS_PER_CALL,
+  BATCH_TOKEN_BUDGET,
+  STATE_TOKEN_BUDGET,
+  estimateTokens,
+  type ScreenHunk,
 } from "./screen.js";
-import type { JevConnection } from "./jev.js";
+import { GENERIC_NOUL_CRITERIA, type JevConnection } from "./jev.js";
 
 const CONN: JevConnection = { apiKey: "test-key", baseUrl: "https://example.test", model: "jev-test" };
 
@@ -256,4 +260,170 @@ test("formatScreenAscii renders status, hunks, and finding lines", () => {
   assert.ok(text.includes("S1"));
   assert.ok(text.includes("a.ts:3-9"));
   assert.ok(SCREEN_THRESHOLD > 0 && SCREEN_THRESHOLD < 1);
+});
+
+// --- Token-budget batching and degradation (#12) ---
+
+interface CapturedRequest {
+  body: string;
+  hunkIds: string[];
+  questionIds: string[];
+  questionTexts: string[];
+}
+
+/**
+ * Recording mock: answers every question with `prob(text, request)` unless
+ * `reject(request)` says the request is too large (400 max_tokens_exceeded).
+ */
+function budgetFetch(
+  requests: CapturedRequest[],
+  options: { reject?: (request: CapturedRequest, code: string) => boolean; prob?: (text: string, code: string) => number } = {},
+): typeof fetch {
+  return (async (_url: string, init: { body: string }) => {
+    const body = JSON.parse(init.body);
+    const request: CapturedRequest = {
+      body: init.body,
+      hunkIds: body.state.hunks.map((h: { id: string }) => h.id),
+      questionIds: Object.keys(body.questions),
+      questionTexts: Object.values(body.questions).map((q) => (q as { instructions: string }).instructions),
+    };
+    requests.push(request);
+    const code = body.state.hunks.map((h: { code: string }) => h.code).join("\n");
+    if (options.reject?.(request, code)) {
+      return { ok: false, status: 400, json: async () => ({ detail: { error_type: "max_tokens_exceeded" } }) };
+    }
+    const answers: Record<string, unknown> = {};
+    for (const [id, q] of Object.entries(body.questions)) {
+      answers[id] = { type: "noul", noul: options.prob?.((q as { instructions: string }).instructions, code) ?? 0.05 };
+    }
+    return { ok: true, status: 200, json: async () => ({ model: "jev-1.13.0", answers, usage: { input_tokens: 10, output_tokens: 1 } }) };
+  }) as unknown as typeof fetch;
+}
+
+function bigHunk(path: string, id: string, startLine: number, lineCount: number, marker?: { line: number; text: string }): ScreenHunk {
+  const lines = Array.from({ length: lineCount }, (_, i) =>
+    marker && i === marker.line ? marker.text : `  const value${i} = compute(${i}, "padding-padding-padding");`,
+  );
+  return { id, path, startLine, endLine: startLine + lineCount - 1, code: lines.join("\n") };
+}
+
+test("screenHunks keeps the legacy single request when the input fits one budget", async () => {
+  const hunks = sliceHunks("order-service.ts", FIXTURE);
+  const requests: CapturedRequest[] = [];
+  await screenHunks(CONN, hunks, { fetchImpl: budgetFetch(requests) });
+  assert.equal(requests.length, 1);
+  const patternTitles = Object.values(SCREEN_PATTERNS).map((p) => p.title);
+  const questions: Record<string, unknown> = {};
+  hunks.forEach((hunk, i) => {
+    questions[`d${i}`] = {
+      type: "noul",
+      instructions:
+        `Does hunk "${hunk.id}" contain a real correctness, security, or data-loss defect that should block merge? ` +
+        "Ignore style and hypothetical concerns.",
+      criteria: { ...GENERIC_NOUL_CRITERIA },
+    };
+    patternTitles.forEach((title, p) => {
+      questions[`p${i}_${p}`] = { type: "noul", instructions: `Does hunk "${hunk.id}" contain this defect: ${title}?`, criteria: { ...GENERIC_NOUL_CRITERIA } };
+    });
+  });
+  const legacy = JSON.stringify({
+    model: CONN.model,
+    state: {
+      task: "Screen code hunks for real defects worth blocking a merge on. Judge each hunk independently against the supplied code.",
+      hunks: hunks.map((h) => ({ id: h.id, path: h.path, lines: `${h.startLine}-${h.endLine}`, code: h.code })),
+    },
+    questions,
+  });
+  assert.equal(requests[0]!.body, legacy);
+});
+
+test("screenHunks batches large inputs with only the referenced hunks per request, within budget", async () => {
+  // 12 hunks x ~9k chars each: individually fine, far over one request together.
+  const hunks = Array.from({ length: 12 }, (_, i) => bigHunk(`f${i % 3}.swift`, `h${i}`, 1 + i * 200, 150));
+  const requests: CapturedRequest[] = [];
+  const result = await screenHunks(CONN, hunks, { fetchImpl: budgetFetch(requests) });
+  assert.ok(requests.length > 1);
+  assert.equal(result.calls, requests.length);
+  assert.equal(result.status, "clean");
+  assert.equal(result.hunkReports.length, hunks.length);
+  assert.equal(result.questions, hunks.length * (Object.keys(SCREEN_PATTERNS).length + 1));
+  const asked = new Set<string>();
+  for (const request of requests) {
+    const referenced = new Set(request.questionTexts.map((text) => /hunk "([^"]+)"/.exec(text)![1]!));
+    assert.deepEqual([...referenced].sort(), [...request.hunkIds].sort());
+    assert.ok(estimateTokens(request.body) <= BATCH_TOKEN_BUDGET * 1.05, `request ~${estimateTokens(request.body)} tokens`);
+    assert.ok(request.questionIds.length <= MAX_QUESTIONS_PER_CALL);
+    request.hunkIds.forEach((id) => asked.add(id));
+  }
+  assert.deepEqual([...asked].sort(), hunks.map((h) => h.id).sort());
+});
+
+test("screenHunks pre-splits an oversized hunk into fitting pieces with exact line ranges", async () => {
+  const hunk = bigHunk("big.swift", "tail", 10, 2000, { line: 1500, text: "  let total = price * 0.1 // MARKER" });
+  const requests: CapturedRequest[] = [];
+  const result = await screenHunks(CONN, [hunk], {
+    fetchImpl: budgetFetch(requests, { prob: (text, code) => (text.includes("block merge") && code.includes("MARKER") ? 0.9 : 0.05) }),
+  });
+  assert.ok(requests.length > 1);
+  for (const request of requests) {
+    const state = JSON.parse(request.body).state;
+    assert.ok(estimateTokens(JSON.stringify(state)) <= STATE_TOKEN_BUDGET, "state over budget");
+  }
+  // Pieces tile the hunk exactly.
+  const ranges = requests
+    .flatMap((r) => JSON.parse(r.body).state.hunks.map((h: { lines: string }) => h.lines.split("-").map(Number) as [number, number]))
+    .sort((a, b) => a[0] - b[0]);
+  assert.equal(ranges[0]![0], hunk.startLine);
+  assert.equal(ranges[ranges.length - 1]![1], hunk.endLine);
+  ranges.slice(1).forEach((range, i) => assert.equal(range[0], ranges[i]![1] + 1));
+  // The finding points at the piece holding the marker; the hunk report stays whole.
+  assert.equal(result.status, "has_findings");
+  assert.equal(result.findings.length, 1);
+  const { startLine, endLine } = result.findings[0]!.location as { startLine: number; endLine: number };
+  assert.ok(startLine <= 1510 && 1510 <= endLine && endLine - startLine < hunk.endLine - hunk.startLine);
+  assert.deepEqual([result.hunkReports.length, result.hunkReports[0]!.startLine, result.hunkReports[0]!.endLine], [1, 10, 2009]);
+  assert.equal(result.hunkReports[0]!.defectProbability, 0.9);
+});
+
+test("screenHunks halves batches on max_tokens_exceeded without resending identical requests", async () => {
+  const hunks = Array.from({ length: 6 }, (_, i) => bigHunk("a.ts", `h${i}`, 1 + i * 100, 60));
+  const requests: CapturedRequest[] = [];
+  // Server limit tighter than the estimate: more than 2 hunks per request is rejected.
+  const result = await screenHunks(CONN, hunks, { fetchImpl: budgetFetch(requests, { reject: (r) => r.hunkIds.length > 2 }) });
+  assert.equal(result.status, "clean");
+  assert.equal(result.unscreened, undefined);
+  assert.equal(new Set(requests.map((r) => r.body)).size, requests.length);
+  assert.equal(result.questions, hunks.length * (Object.keys(SCREEN_PATTERNS).length + 1));
+  assert.ok(result.hunkReports.every((h) => h.defectProbability === 0.05));
+});
+
+test("screenHunks reports a persistently rejected piece as incomplete, never clean", async () => {
+  const hunks = [bigHunk("a.ts", "ok", 1, 40), bigHunk("a.ts", "poison", 41, 40, { line: 7, text: "POISON" })];
+  const requests: CapturedRequest[] = [];
+  const result = await screenHunks(CONN, hunks, {
+    fetchImpl: budgetFetch(requests, { reject: (_r, code) => code.includes("POISON") }),
+  });
+  assert.equal(result.status, "incomplete");
+  assert.equal(new Set(requests.map((r) => r.body)).size, requests.length);
+  assert.equal(result.unscreened!.length, 1);
+  const piece = result.unscreened![0]!;
+  assert.equal(piece.reason, "max_tokens_exceeded");
+  assert.ok(piece.startLine <= 48 && 48 <= piece.endLine && piece.endLine - piece.startLine < 39);
+  assert.ok(formatScreenAscii(result).includes("coverage incomplete"));
+
+  // With a finding elsewhere the gate already blocks: has_findings, still listing coverage gaps.
+  const flagged = await screenHunks(CONN, hunks, {
+    fetchImpl: budgetFetch([], {
+      reject: (_r, code) => code.includes("POISON"),
+      prob: (text) => (text.includes('"ok"') && text.includes("block merge") ? 0.9 : 0.05),
+    }),
+  });
+  assert.equal(flagged.status, "has_findings");
+  assert.equal(flagged.unscreened!.length, 1);
+});
+
+test("screenHunks still aborts on errors other than max_tokens_exceeded", async () => {
+  const hunks = sliceHunks("order-service.ts", FIXTURE);
+  const fetchImpl = (async () => ({ ok: false, status: 400, json: async () => ({ detail: { error_type: "invalid_model" } }) })) as unknown as typeof fetch;
+  await assert.rejects(screenHunks(CONN, hunks, { fetchImpl }), /http 400 \(invalid_model\)/);
 });

@@ -6,7 +6,7 @@
 pi-review screen src/order-service.ts
 # exit 0: clean
 # exit 1: blocking finding
-# exit 4: screening could not run (for example, no TYPESAFE_API_KEY)
+# exit 4: screening could not run or is incomplete (for example, no TYPESAFE_API_KEY)
 ```
 
 ## Workflow
@@ -25,7 +25,7 @@ changed files
     │  probabilities become findings; no generated review prose
     ▼
 4. gate result
-       clean (0) or findings (1)
+       clean (0), findings (1), or incomplete (4)
 ```
 
 ### 1. Read and slice locally
@@ -39,7 +39,7 @@ Jev evaluates every hunk independently in one or more API calls. Each hunk recei
 - a catch-all question for a real correctness, security, or data-loss defect;
 - one typed question for each built-in catalog pattern.
 
-The command does not start a Pi child session and does not generate Markdown. Questions are chunked when the request exceeds the API limit.
+The command does not start a Pi child session and does not generate Markdown. Hunks are packed into requests under Jev's token limits (64k per request, 32k for state plus the longest question, with 25% headroom); each request carries only the hunks its questions ask about. A hunk too large for one request is split by lines into pieces with their own line ranges. If the API still answers `max_tokens_exceeded`, the batch and then the piece are halved; a piece that keeps failing is listed under `unscreened`. Details: [token budget research](../research/jev-screen-token-budget.md).
 
 ### 3. Assemble findings deterministically
 
@@ -49,7 +49,7 @@ The shipped catalog covers injection classes (SQL, OS command, XSS, path travers
 
 ### 4. Consume the gate
 
-Human output is printed as an ASCII summary. Machine consumers can read `PI_REVIEW_SCREEN_JSON` from stderr; it contains the status, findings, hunk reports, question/call counts, duration, model, and usage.
+Human output is printed as an ASCII summary. Machine consumers can read `PI_REVIEW_SCREEN_JSON` from stderr; it contains the status, findings, hunk reports, any `unscreened` pieces, question/call counts, duration, model, and usage.
 
 Use the result to choose the next step:
 
@@ -57,6 +57,7 @@ Use the result to choose the next step:
 |---|---|
 | `clean` / exit `0` | Continue to tests, build, or a deeper review. |
 | `has_findings` / exit `1` | Fix the finding, then run screening again. Use full review for an unmatched signal. |
+| `incomplete` / exit `4` | No findings, but some code exceeded the Jev token limit and went unscreened. Treat it as unavailable, not a pass; screen the listed ranges separately or use a full review. (With findings, the status stays `has_findings` and still lists `unscreened`.) |
 | blocked / exit `4` | Treat screening as unavailable; do not convert it into a pass. Retry with Jev configured or use a full review. |
 
 ## Screen memory — the catalog grows from use

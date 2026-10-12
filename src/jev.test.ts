@@ -286,3 +286,20 @@ test("withUncertaintyEscalation skips the strong tier when nothing is borderline
   } as never);
   assert.equal(called, false);
 });
+
+test("evaluateNouls surfaces only an allowlisted server error code", async () => {
+  const withCode = mockFetch(400, { detail: { error_type: "max_tokens_exceeded" } });
+  await assert.rejects(evaluateNouls(CONN, {}, { q: "x" }, withCode), (error: unknown) => {
+    assert.ok(error instanceof JevError);
+    assert.equal(error.message, "typesafe api http 400 (max_tokens_exceeded)");
+    assert.equal(error.code, "max_tokens_exceeded");
+    return true;
+  });
+  const unsafe = mockFetch(400, { detail: { error_type: "Bearer sk-secret <script>", input: "private source" } });
+  await assert.rejects(evaluateNouls(CONN, {}, { q: "x" }, unsafe), (error: unknown) => {
+    assert.ok(error instanceof JevError);
+    assert.equal(error.message, "typesafe api http 400");
+    assert.equal(error.code, undefined);
+    return true;
+  });
+});
