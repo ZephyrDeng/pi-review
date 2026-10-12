@@ -82,6 +82,12 @@ npm install -g @zephyrdeng/pi-review
 npx @zephyrdeng/pi-review install
 ```
 
+Claude Code 插件（skill + 实时面板 Pane）：PATH 上有 `claude` 时 `pi-review install` / `pi-review update` 会自动装好，也可以在 Claude Code 输入框里输入：
+
+```
+/plugin install pi-review --marketplace ZephyrDeng/pi-review
+```
+
 ```bash
 pi-review -- @src/foo.ts                                   # 单次审查
 pi-review --mode plan -- @docs/architecture.md             # 多视角方案审查

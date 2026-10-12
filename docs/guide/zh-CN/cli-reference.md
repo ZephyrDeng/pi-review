@@ -64,6 +64,7 @@ pi-review models [search]
 - **`--consensus <policy>` / `--min-agree <n>`**——微调面板法定人数。默认 `quorum`、`min-agree: 2`。零容忍的安全发布用 `unanimous`，广撒网找 bug 用 `any`。
 - **`--progress-log <path>`**——把精简 JSON 事件流写到文件；在 Claude Code、Codex、Cursor 这类缓冲输出的宿主里后台运行时很有用。
 - **`--ui web`**——为面板运行启动本地回环浏览器看板；在 agent 宿主里做可视化检查时推荐。
+  设置了 `PI_REVIEW_UI=pane`（Claude Code 插件会设置）时忽略此参数，由插件 Pane 显示。
 
 会话参数（`--keep-session`、`--continue`、`--name`）在 v1 中不被 `loop` 和面板支持；非法组合会打印用法并以 `2` 退出。
 

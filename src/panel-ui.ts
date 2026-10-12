@@ -141,3 +141,27 @@ export async function launchPanelUi(options: LaunchPanelUiOptions = {}): Promise
     },
   };
 }
+
+/** True when a host pane (the Claude Code plugin sets `PI_REVIEW_UI=pane`) draws panel runs instead of the dashboard. */
+export function isPaneUi(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PI_REVIEW_UI === "pane";
+}
+
+/**
+ * Event sink for a host pane: the same run directory and events.jsonl the
+ * dashboard uses, with no server and no browser. Each `panel.started` opens a
+ * fresh directory, so every loop round shows up as its own run.
+ */
+export function createPaneEventSink(baseDir?: string): ReviewEventListener {
+  let eventsPath: string | undefined;
+  return (event) => {
+    try {
+      if (event.type === "panel.started" || !eventsPath) {
+        eventsPath = path.join(createRunDirectory(randomUUID(), baseDir), "events.jsonl");
+      }
+      fs.appendFileSync(eventsPath, `${JSON.stringify(event)}\n`);
+    } catch {
+      /* the pane is best-effort; a write failure must never break the review */
+    }
+  };
+}

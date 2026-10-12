@@ -83,6 +83,12 @@ npm install -g @zephyrdeng/pi-review
 npx @zephyrdeng/pi-review install
 ```
 
+Claude Code plugin (skill + live panel pane): `pi-review install` / `pi-review update` set it up when `claude` is on PATH, or type at the Claude Code prompt:
+
+```
+/plugin install pi-review --marketplace ZephyrDeng/pi-review
+```
+
 ```bash
 pi-review -- @src/foo.ts                                   # single review
 pi-review --mode plan -- @docs/architecture.md             # multi-lens plan review

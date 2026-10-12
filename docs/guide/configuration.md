@@ -20,6 +20,7 @@ Per-process overrides via environment variables (env wins over the config file):
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
 | `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |
+| `PI_REVIEW_UI` | `pane`: panel runs (and panel `loop` rounds) write their events for a host pane under `$TMPDIR/pi-review-ui/` and start no dashboard server or browser, even with `--ui web`. The Claude Code plugin sets it for its session |
 | `PI_REVIEW_JEV` | Per-run override for `jev`: `1`/`true`/`on` routes panel consensus adjudication to TypeSafe Jev, any other set value (e.g. `0`) keeps the Pi adjudicator. Connection: `TYPESAFE_API_KEY` (required), optional `TYPESAFE_BASE_URL` and `PI_REVIEW_JEV_MODEL` (default `jev-latest`) |
 | `PI_REVIEW_CHILD_EXTENSIONS` | Per-run override for `childExtensions`: `1`/`true`/`keep` enables host extensions for this process, any other set value (e.g. `0`) forces isolation; an empty value counts as unset. Persistent equivalent: `{ "childExtensions": true }` in the config file. With an explicit `--provider`, pi-review first probes the model catalog and blocks with a hint if the provider only exists via extensions |
 | `PI_REVIEW_CONFIG` | Path to the review config file (default: `~/.pi/pi-review/config.json`) |

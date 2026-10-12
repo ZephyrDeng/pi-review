@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, afterEach } from "vitest";
-import { launchPanelUi } from "./panel-ui.js";
+import { createPaneEventSink, isPaneUi, launchPanelUi } from "./panel-ui.js";
+import type { ReviewEvent } from "./review-events.js";
 
 // launchPanelUi forks the compiled dashboard server, so these tests need a
 // fresh `dist/ui-server-main.js` (see ui-server-main.test.ts for the same
@@ -143,4 +144,28 @@ test("browserOpenCommand maps each platform to its native opener", async () => {
   assert.deepEqual(browserOpenCommand("darwin", url), { command: "open", args: [url] });
   assert.deepEqual(browserOpenCommand("win32", url), { command: "cmd", args: ["/c", "start", "", url] });
   assert.deepEqual(browserOpenCommand("linux", url), { command: "xdg-open", args: [url] });
+});
+
+test("createPaneEventSink writes events.jsonl with no server, one run dir per panel.started", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "pane-sink-"));
+  try {
+    const sink = createPaneEventSink(base);
+    const started = (runId: string, seq: number) =>
+      ({ v: 1, runId, seq, at: 0, type: "panel.started", target: "@src", mode: "code", reviewers: [] }) as ReviewEvent;
+    sink(started("a", 1));
+    sink({ v: 1, runId: "a", seq: 2, at: 0, type: "aggregation.started" });
+    sink(started("b", 1));
+    const runs = fs.readdirSync(path.join(base, "pi-review-ui"));
+    assert.equal(runs.length, 2);
+    const lines = runs.map((run) => fs.readFileSync(path.join(base, "pi-review-ui", run, "events.jsonl"), "utf8").trim().split("\n").length);
+    assert.deepEqual(lines.sort(), [1, 2]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("isPaneUi reads PI_REVIEW_UI=pane only", () => {
+  assert.equal(isPaneUi({ PI_REVIEW_UI: "pane" }), true);
+  assert.equal(isPaneUi({ PI_REVIEW_UI: "web" }), false);
+  assert.equal(isPaneUi({}), false);
 });

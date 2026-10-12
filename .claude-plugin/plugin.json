@@ -1,0 +1,11 @@
+{
+  "name": "pi-review",
+  "description": "Live pi-review panel pane for Claude Code, plus the pi-review skill",
+  "author": {
+    "name": "ZephyrDeng"
+  },
+  "homepage": "https://github.com/ZephyrDeng/pi-review#readme",
+  "repository": "https://github.com/ZephyrDeng/pi-review",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

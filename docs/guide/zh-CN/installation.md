@@ -64,13 +64,35 @@ pi-review install-skill --agent agy
 pi-review uninstall-skill
 ```
 
+### Claude Code 插件（实时面板 Pane）
+
+PATH 上有 `claude` CLI 时，`pi-review install` 和 `pi-review update` 会自动安装或更新它（user 范围）。手动安装：在 Claude Code 终端的输入框里输入：
+
+```
+/plugin install pi-review --marketplace ZephyrDeng/pi-review
+```
+
+按 `y` 添加 marketplace，再选安装范围（首选 user）。插件带上 `pi-review` skill 和一个 mod，mod 把面板评审画进 Claude Code 的 Pane：运行中显示每个 reviewer 的状态、当前工具、轮次、token 与费用，结束后显示 verdict、gate 状态、confirmed 发现和 advisories。插件会为它的会话设置 `PI_REVIEW_UI=pane`，面板运行（以及面板 `loop` 的每一轮）只为 Pane 写事件，不启动 web 看板，也不打开浏览器；有评审开始时 Pane 自动打开，也可以用 `/pi-review-panel` 手动打开。CLI 仍需在 PATH 上（`npm i -g @zephyrdeng/pi-review`）。
+
+装好插件后，Claude Code 只用插件里的 skill：`install` / `update` 会删掉独立的 `~/.claude/skills/pi-review`，之后只为其它 agent 刷新 skill，Claude Code 里不会出现两份。卸载插件用 `claude plugin uninstall pi-review@pi-review`，再执行 `pi-review install-skill --agent claude-code` 可装回独立 skill。
+
+需要 Claude Code 2.1.275 及以上。自动打开的 Pane 要求终端至少 110 列宽；`/pi-review-panel` 在任意宽度都能打开。
+
+#### 从旧版 pi-review 升级
+
+```bash
+pi-review update        # npm 包升到最新、安装 Claude Code 插件、去掉重复的 skill
+```
+
+然后重启 Claude Code（或执行 `/reload-plugins`）。在 `pi-review update` 之前、CLI 还是旧版时，skill 仍会带 `--ui web --no-ui-open`，旧 CLI 只起看板 server、不开浏览器，Pane 读同一份事件照样显示。
+
 ### 更新包 + skill
 
 ```bash
 pi-review update
 ```
 
-有新版本时更新全局 npm 包，然后刷新已安装的 agent skill 内容（走 `skills update pi-review`，失败时退回重装 / Claude + agy 直接拷贝）。
+有新版本时更新全局 npm 包，PATH 上有 `claude` 时安装或更新 Claude Code 插件，然后刷新已安装的 agent skill 内容（走 `skills update pi-review`，失败时退回重装 / Claude + agy 直接拷贝；装了插件后 Claude Code 交给插件）。
 
 ### 从源码安装
 

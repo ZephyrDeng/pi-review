@@ -50,6 +50,7 @@ pi-review models [search]
 - **`--consensus <policy>` / `--min-agree <n>`** — Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts.
 - **`--progress-log <path>`** — Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor.
 - **`--ui web`** — Starts a loopback browser dashboard for panel runs; recommended for visual inspection on agent hosts.
+  With `PI_REVIEW_UI=pane` (set by the Claude Code plugin) the flag is skipped: the plugin pane draws the run.
 
 Session flags (`--keep-session`, `--continue`, `--name`) are unsupported by `loop` and panel in v1; invalid combinations print usage and exit `2`.
 

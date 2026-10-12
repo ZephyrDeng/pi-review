@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { DEFAULT_AGENT_SKILL_ARGS, installSkill } from "./skill.js";
+import { removeStandaloneClaudeSkill, SKILL_ARGS_WITHOUT_CLAUDE, syncClaudePlugin } from "./claude-plugin.js";
+import { DEFAULT_AGENT_SKILL_ARGS, runInstallSkill, selectedSkillAgents } from "./skill.js";
 
 const PI_PACKAGE = "npm:@zephyrdeng/pi-review";
 
@@ -53,11 +54,18 @@ export function runInstall(options: InstallOptions): never {
     piOk = runPiInstall();
   }
 
+  let agentsOk = true;
   if (options.agents) {
-    const args = options.agentArgs.length > 0 ? options.agentArgs : DEFAULT_AGENT_SKILL_ARGS;
+    const selected = selectedSkillAgents(options.agentArgs);
+    const plugin = selected === "all" || selected.includes("claude-code") ? syncClaudePlugin() : undefined;
+    if (plugin) process.stdout.write(`${plugin.message}\n`);
+    const hasPlugin = plugin?.status === "installed" || plugin?.status === "updated";
+    const args =
+      options.agentArgs.length > 0 ? options.agentArgs : hasPlugin ? SKILL_ARGS_WITHOUT_CLAUDE : DEFAULT_AGENT_SKILL_ARGS;
     process.stdout.write(`Running: pi-review install-skill ${args.join(" ")}\n`);
-    installSkill(args);
+    agentsOk = runInstallSkill(args).ok;
+    if (hasPlugin) removeStandaloneClaudeSkill();
   }
 
-  process.exit(piOk ? 0 : 1);
+  process.exit(piOk && agentsOk ? 0 : 1);
 }

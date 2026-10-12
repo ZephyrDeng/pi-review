@@ -10,8 +10,8 @@ export function usage(exitCode = 0): never {
   pi-review classify --baseline <text|@file> [--meta <path>]   Classify a previous review's findings against the frozen baseline (Jev required)
   pi-review screen <@files|paths...>           Gate-grade Jev screening: typed defect judgments, no LLM generation (Jev required)
   pi-review screen-memory                     Show accumulated screen signals and the effective pattern catalog
-  pi-review update                      Update package + agent skill content
-  pi-review install [options]           Pi package + agent skills (one-shot)
+  pi-review update                      Update package, Claude Code plugin + agent skill content
+  pi-review install [options]           Pi package, Claude Code plugin + agent skills (one-shot)
   pi-review install-skill [options]     Install skill to AI agents only
   pi-review uninstall-skill [options]  Remove skill from AI agents
 

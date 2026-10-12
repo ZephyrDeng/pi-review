@@ -56,13 +56,35 @@ To remove:
 pi-review uninstall-skill
 ```
 
+### Claude Code plugin (live panel pane)
+
+`pi-review install` and `pi-review update` install or update it for you when the `claude` CLI is on PATH (user scope). To install it by hand, type at a Claude Code terminal prompt:
+
+```
+/plugin install pi-review --marketplace ZephyrDeng/pi-review
+```
+
+Answer `y` to add the marketplace, then pick a scope (user scope first). The plugin ships the `pi-review` skill plus a mod that draws panel reviews in a Claude Code pane: reviewer status, active tool, turns, tokens and cost while it runs, then verdict, gate status, confirmed findings and advisories. The plugin sets `PI_REVIEW_UI=pane` for its session, so panel runs (and panel `loop` rounds) write their events for the pane and start no web dashboard or browser; the pane opens on its own when a run starts, or with `/pi-review-panel`. The CLI still has to be on PATH (`npm i -g @zephyrdeng/pi-review`).
+
+Once the plugin is installed it is Claude Code's copy of the skill: `install` / `update` remove the standalone `~/.claude/skills/pi-review` and keep refreshing the skill for the other agents only, so Claude Code never lists it twice. Remove the plugin with `claude plugin uninstall pi-review@pi-review` (then `pi-review install-skill --agent claude-code` brings the standalone skill back).
+
+Requires Claude Code 2.1.275 or later. An auto-opened pane needs a terminal at least 110 columns wide; `/pi-review-panel` opens it at any width.
+
+#### Upgrading from an earlier pi-review
+
+```bash
+pi-review update        # npm package → latest, Claude Code plugin installed, skill de-duplicated
+```
+
+Then restart Claude Code (or run `/reload-plugins`). On a CLI older than the plugin (before `pi-review update` ran), the skill still passes `--ui web --no-ui-open`, so the old CLI starts its dashboard server without a browser and the pane follows the same events.
+
 ### Update package + skill
 
 ```bash
 pi-review update
 ```
 
-Updates the global npm package when a newer version is available, then refreshes the installed agent skill content (via `skills update pi-review`, with a reinstall / Claude + agy direct-copy fallback).
+Updates the global npm package when a newer version is available, then installs or updates the Claude Code plugin when `claude` is on PATH, then refreshes the installed agent skill content (via `skills update pi-review`, with a reinstall / Claude + agy direct-copy fallback; Claude Code is left to the plugin once it is installed).
 
 ### From source
 
