@@ -1,0 +1,14 @@
+{
+  "name": "pi-review",
+  "owner": {
+    "name": "ZephyrDeng"
+  },
+  "plugins": [
+    {
+      "name": "pi-review",
+      "source": "./",
+      "description": "Live pi-review panel pane for Claude Code, plus the pi-review skill"
+    }
+  ],
+  "description": "pi-review for Claude Code: live panel review pane and the pi-review skill"
+}

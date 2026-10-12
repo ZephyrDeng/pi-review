@@ -22,6 +22,7 @@
 | `PI_REVIEW_SYSTEM_PROMPT` | 系统提示词文件路径 |
 | `PI_REVIEW_SESSION_DIR` | 持久化审查会话的目录 |
 | `PI_REVIEW_META_STDOUT` | 设为 `1`/`true` 时把 `PI_REVIEW_META_JSON` 打到 stdout 而不是 stderr |
+| `PI_REVIEW_UI` | `pane`：面板运行（以及面板 `loop` 的每一轮）把事件写到 `$TMPDIR/pi-review-ui/` 供宿主 Pane 读取，不启动看板 server 也不打开浏览器，即使传了 `--ui web`。Claude Code 插件会为它的会话设置这个变量 |
 | `PI_REVIEW_JEV` | `jev` 的单次覆盖：`1`/`true`/`on` 把面板共识裁决交给 TypeSafe Jev，其它任何已设置的值（如 `0`）保留 Pi 裁决器。连接：`TYPESAFE_API_KEY`（必需），可选 `TYPESAFE_BASE_URL` 和 `PI_REVIEW_JEV_MODEL`（默认 `jev-latest`） |
 | `PI_REVIEW_CHILD_EXTENSIONS` | `childExtensions` 的单次覆盖：`1`/`true`/`keep` 为本进程启用宿主扩展，其它任何已设置的值（如 `0`）强制隔离；空值视为未设置。持久等价写法：配置文件里 `{ "childExtensions": true }`。带显式 `--provider` 时，pi-review 先探测模型目录，若该 provider 只存在于扩展中则带提示阻塞 |
 | `PI_REVIEW_CONFIG` | 审查配置文件路径（默认 `~/.pi/pi-review/config.json`） |

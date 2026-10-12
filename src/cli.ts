@@ -6,7 +6,8 @@ import { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.j
 import { normalizePayloadRefs, splitPayload } from "./prompt.js";
 import path from "node:path";
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
-import { runPanelReview, runPanelReviewOnce, runPanelReviewWithUi } from "./panel.js";
+import { runPanelReview, runPanelReviewInPane, runPanelReviewOnce, runPanelReviewWithUi } from "./panel.js";
+import { createPaneEventSink, isPaneUi } from "./panel-ui.js";
 import { resolveConfig } from "./config.js";
 import { currentConfig } from "./pi-config.js";
 import { DeterministicMatcher, SemanticMatcher, type FindingMatcher } from "./matcher.js";
@@ -72,8 +73,9 @@ if (parsed.command === "models") {
   uninstallSkill(parsed.extraArgs);
 } else if (parsed.command === "loop") {
   const stdinText = readReviewStdin();
+  const paneSink = isPanelActive(parsed) && isPaneUi() ? createPaneEventSink() : undefined;
   const runOne = isPanelActive(parsed)
-    ? () => runPanelReviewOnce(parsed, stdinText)
+    ? () => runPanelReviewOnce(parsed, stdinText, paneSink ? { onEvent: paneSink } : {})
     : () => runReviewOnce(parsed, stdinText);
   const result = await runReviewLoop(
     {
@@ -86,7 +88,9 @@ if (parsed.command === "models") {
   process.stdout.write(`${formatLoopSummary(result)}\n`);
   process.exit(result.exitCode);
 } else if (isPanelActive(parsed)) {
-  if (parsed.ui === "web") {
+  if (isPaneUi()) {
+    await runPanelReviewInPane(parsed);
+  } else if (parsed.ui === "web") {
     await runPanelReviewWithUi(parsed);
   } else {
     await runPanelReview(parsed);

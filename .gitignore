@@ -10,3 +10,4 @@ npm-debug.log*
 .env.*
 !.env.example
 .release-notes-*.md
+.claude-plugin/types/

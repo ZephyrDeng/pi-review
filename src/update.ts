@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { removeStandaloneClaudeSkill, SKILL_ARGS_WITHOUT_CLAUDE, syncClaudePlugin } from "./claude-plugin.js";
 import { runUpdateSkill } from "./skill.js";
 
 const PKG_NAME = "@zephyrdeng/pi-review";
@@ -47,8 +48,8 @@ function box(lines: string[]): string {
   return `${top}\n${empty}\n${body}\n${empty}\n${bot}\n`;
 }
 
-function refreshSkill(): boolean {
-  const skill = runUpdateSkill();
+function refreshSkill(args: string[] = []): boolean {
+  const skill = runUpdateSkill(args);
   if (!skill.ok) {
     process.stderr.write(
       box([
@@ -134,12 +135,16 @@ export function runUpdate(): void {
 
   // skills CLI pulls latest skill content from the source repo; the direct
   // fallback copies from this package tree (refreshed on disk after npm -g).
-  const skillOk = refreshSkill();
+  const plugin = syncClaudePlugin();
+  const hasPlugin = plugin.status === "installed" || plugin.status === "updated";
+  const skillOk = refreshSkill(hasPlugin ? SKILL_ARGS_WITHOUT_CLAUDE : []);
+  if (hasPlugin) removeStandaloneClaudeSkill();
 
   process.stdout.write(
     box([
       packageLine,
       skillOk ? "Skill refreshed ✓" : "Skill refresh failed",
+      plugin.message,
       "",
       skillOk ? "Done ✓" : "Package ok; skill needs manual install-skill",
     ]),

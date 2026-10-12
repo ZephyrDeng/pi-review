@@ -107,7 +107,7 @@ test("bundled skill ships SKILL.md and references assets for update fallback", (
   assert.ok(fs.readdirSync(bundledRefs).length > 0);
 });
 
-test("usage documents update as package + skill", async () => {
+test("usage documents update as package, Claude Code plugin + skill", async () => {
   const argsSource = fs.readFileSync(path.join(packageRoot, "src", "args.ts"), "utf8");
-  assert.match(argsSource, /pi-review update\s+Update package \+ agent skill content/);
+  assert.match(argsSource, /pi-review update\s+Update package, Claude Code plugin \+ agent skill content/);
 });

@@ -18,7 +18,7 @@ Native shell tools on these hosts **buffer stdout/stderr until the command exits
 
 ### Panel review: browser dashboard (default)
 
-`--reviewers <n>` or `--panel <name>` activates panel review. On Codex, Claude Code, Cursor, or agy, default to the dashboard instead of a tailed log:
+`--reviewers <n>` or `--panel <name>` activates panel review. On Codex, Claude Code, Cursor, or agy, default to the dashboard instead of a tailed log (Claude Code with the pi-review plugin, where `PI_REVIEW_UI=pane` is set, skips this: the pane draws the run, so run it in the background with `--ui web --no-ui-open` and no `--ui-url-file`):
 
 1. Run `pi-review --reviewers <n> --ui web --ui-url-file <path> -- <target>` (or `--panel <name>`) in the **background**. Pass `--no-ui-open` only when the user asked not to open a browser (CI, remote shells).
 2. Read `<path>` shortly after launch — it is written atomically as soon as the dashboard server is ready, well before reviewers finish (poll a few times a second for a couple of seconds if the file is not there yet). Then get the dashboard in front of the user: on **Claude Code** the CLI auto-open already lands in the system default browser; on **Codex** the CLI cannot reach a GUI browser, so open the URL from `<path>` in the host's built-in browser yourself. Share the URL either way as a fallback: *"Dashboard opened in your browser (URL: `<url>`). I'll report back when the review completes."*

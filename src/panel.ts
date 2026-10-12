@@ -35,7 +35,7 @@ import { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, w
 import { currentConfig } from "./pi-config.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
-import { launchPanelUi } from "./panel-ui.js";
+import { createPaneEventSink, launchPanelUi } from "./panel-ui.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
 export function emitPanelFooter(meta: PanelReviewMeta): void {
@@ -655,4 +655,14 @@ export async function runPanelReviewWithUi(parsed: ParsedArgs): Promise<never> {
     openBrowser: parsed.uiOpen !== false,
   });
   return runPanelReviewToExit(parsed, launch ? { onEvent: launch.onEvent } : {});
+}
+
+/**
+ * CLI-compatible panel review entrypoint for a host pane (`PI_REVIEW_UI=pane`,
+ * set by the Claude Code plugin): events land where the pane reads them and
+ * no dashboard server or browser starts, even when `--ui web` was passed.
+ */
+export async function runPanelReviewInPane(parsed: ParsedArgs): Promise<never> {
+  if (parsed.ui === "web") process.stderr.write("pi-review: PI_REVIEW_UI=pane, the host pane shows this panel; --ui web skipped\n");
+  return runPanelReviewToExit(parsed, { onEvent: createPaneEventSink() });
 }

@@ -81,7 +81,8 @@
     "test:watch": "vitest",
     "test:rv": "vitest run extensions",
     "prepublishOnly": "npm run build",
-    "pack:dry": "npm pack --dry-run"
+    "pack:dry": "npm pack --dry-run",
+    "test:mod": "sh scripts/test-claude-mod.sh"
   },
   "engines": {
     "node": ">=20"
