@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "pi-review",
-      "source": "./",
+      "source": "./claude-plugin",
       "description": "Live pi-review panel pane for Claude Code, plus the pi-review skill"
     }
   ],

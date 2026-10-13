@@ -3,15 +3,16 @@
 // Bash runs writes ReviewEvent v1 lines to $TMPDIR/pi-review-ui/<runId>/events.jsonl
 // with no dashboard server or browser (src/panel-ui.ts); an older CLI run with
 // `--ui web` writes the same file. This module tails the newest one and folds
-// it through the reducer the Pi renderer uses.
+// it through the reducer the Pi renderer uses. ../vendor holds copies of src/
+// files made by scripts/sync-claude-plugin.mjs: edit src/, then sync.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { createPanelViewState, reducePanelEvent } from '../src/panel-view.js'
-import type { PanelReviewerView, PanelViewState } from '../src/panel-view.js'
-import type { ReviewEvent } from '../src/review-events.js'
-import type { FindingCluster, TokenUsage } from '../src/types.js'
+import { createPanelViewState, reducePanelEvent } from '../vendor/panel-view.js'
+import type { PanelReviewerView, PanelViewState } from '../vendor/panel-view.js'
+import type { ReviewEvent } from '../vendor/review-events.js'
+import type { FindingCluster, TokenUsage } from '../vendor/types.js'
 import type { PiReviewTick } from '../types'
 
 const PANE = 'pi-review'
