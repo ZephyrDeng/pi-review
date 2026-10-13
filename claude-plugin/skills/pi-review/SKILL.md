@@ -1,0 +1,320 @@
+---
+name: pi-review
+description: "Use pi-review only when the user explicitly requests an independent review or review workflow: code review, review of a diff or MR, loop review, review-fix-re-review closeout, panel review gates, or review status/progress questions. Do not use it for repository inspection, spec-driven evaluation or optimization (for example, checking whether X can be optimized against a specification), implementation-oriented analysis, diagnosis, migration, or conformance fixes (for example, checking compliance and correcting the implementation) unless the user separately asks for an independent review."
+---
+
+# Pi Review
+
+Use `pi-review` to run a fresh Pi review session and return only the review conclusion. Every review run is read-only: the child session never edits, patches, or commits — the host agent owns all fixes.
+
+## CLI resolution
+
+Resolve the CLI in this order — try each until one works, then reuse it for the whole session:
+
+```bash
+# 1. Global install (npm i -g @zephyrdeng/pi-review)
+command -v pi-review && pi-review --help
+
+# 2. Package-local CLI: when this SKILL.md lives inside the installed
+#    npm/Pi package, the bin sits two levels up (skills/pi-review/ → bin/)
+node ../../bin/pi-review.js --help
+
+# 3. Universal fallback: npx runs the published package without a global
+#    install (npm caches it — first run is slow, later runs ~0.3s)
+npx -y @zephyrdeng/pi-review --help
+```
+
+Case 2 applies to `pi install` setups; case 3 covers skill-only installs (`~/.claude/skills/…`) where no package bin exists on disk. If the user runs pi-review often, recommend `npm i -g @zephyrdeng/pi-review` — it removes the npx startup overhead and version drift.
+
+## Registered providers (explicit opt-in)
+
+Review children stay isolated (`--no-extensions`) unless the persistent review config enables host extensions. Enable them only when the review needs an extension-registered provider (e.g. `px:anthropic`, `zenmux`) — and only with explicit user acceptance:
+
+```json
+// ~/.pi/pi-review/config.json
+{ "childExtensions": true }
+```
+
+Before writing, tell the user the config is machine-level: every later pi-review on this machine (including bare CLI) inherits it. Write it only on acceptance; when editing an existing file, keep every unknown key and never overwrite a value the user set (invalid JSON — stop, do not overwrite). Verify on Pi with `/rv-config`, elsewhere with `cat ~/.pi/pi-review/config.json`. Isolate one run with `PI_REVIEW_CHILD_EXTENSIONS=0` (env overrides config). If a child exits with stale extension ctx after dispose/reload (issue #8), retry that one run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
+
+## Claude rules
+
+Reviewer children load `.claude/rules/` by default, with Claude Code semantics — user-level `~/.claude/rules/` plus project-level `<dir>/.claude/rules/` from the child's working directory upward. Rules without a `paths` frontmatter key are appended to the child system prompt; rules with `paths` are injected into a `read` result only when the read file matches the glob (`write`/`edit` never trigger).
+
+This loader is **our own extension, explicitly passed with `--extension`** — it is not host-extension discovery. Review children still run isolated (`--no-extensions`) by default, so host extensions stay off unless the user opts in above. Disable rules for one run with `--no-rules` or `PI_REVIEW_RULES=0` (also accepts `false` / `off` / `no`). The consensus adjudicator, `screen`, and `classify` never load rules.
+
+### Setting config via the agent (preferred path)
+
+There is no `/rv-config set` command — the agent is the config editor. When the user asks to change a pi-review setting, edit `~/.pi/pi-review/config.json` directly, with these rules:
+
+- **Keys** — known schema today: `childExtensions` (bool), `jev` (bool). Keep every unknown key untouched (forward compat). Set only what the user asked for.
+- **Desensitization (脱敏)** — the config file holds *flags only, never secrets*:
+  - `TYPESAFE_API_KEY` and any other API keys are **environment variables by design**; never write them into `config.json`, and never echo a key's value back to the user or into logs/docs. Show key state as set/unset only.
+  - Never commit `~/.pi/pi-review/config.json` (machine-level, may reflect personal setup) into any repo.
+  - After editing, confirm with `/rv-config` (Pi) or `cat` + `jq` (elsewhere) — display values, not file dumps, when the conversation is logged.
+- **Sequence** — read the file (it may not exist), validate JSON, apply the one change, write back pretty-printed, verify with `/rv-config`, and state the machine-level consequence in one sentence.
+
+## Default workflow by host
+
+| Host | How to run `pi-review` |
+|------|-------------------------|
+| **Fast CI / Pre-commit Gate** | Run `pi-review screen <@files\|paths...>` (~1s wall time, zero LLM generation). Immediately blocks obvious defects (off-by-one, SQLi, unawaited async, float money) via typed Jev judgments before launching full reviewer sessions. |
+| **Pi** (`/rv`) | New panel reviews call the native `pi_review` API tool, shown to users as **Pi Review Panel**, which launches the packaged CLI in event mode and renders live reviewer state. Continuations, kept sessions, `/rv-loop`, and explicit `--no-stream` use the shell CLI. |
+| **Pi terminal** | Foreground `pi-review`; text deltas stream live by default. |
+| **Claude Code with the pi-review plugin** (`PI_REVIEW_UI=pane` in the shell environment; check with `echo $PI_REVIEW_UI`) | The plugin draws panel runs live in a Claude Code pane, and the CLI skips the web dashboard even when `--ui web` is passed. **Panel review default: background run with `--ui web --no-ui-open`, no `--ui-url-file`** (a pane-aware CLI skips the dashboard; an older CLI starts it without a browser, and the pane follows its events either way); panel `loop` runs in the background with no `--ui` flags. Tell the user the pane shows progress (`/pi-review-panel` reopens it). Single review keeps the row below. |
+| **Claude Code / Codex / Cursor / agy (Antigravity)** and similar agent hosts | These hosts buffer a shell tool's output until the command exits, so a foreground run looks like a silent wait. **Panel review (`--reviewers`/`--panel`) default: `--ui web --ui-url-file <path>` + background run** — get the dashboard in front of the user: on Claude Code the CLI auto-open lands in the system default browser; on Codex open the `--ui-url-file` URL in the host's built-in browser (the CLI cannot reach a GUI there); on agy prefer the host browser / share the URL the same way; hand over the URL as fallback either way. **Single review / `loop` default: `--progress-log <path>` + background run + tail the log** (`--ui web` requires an active panel and rejects `loop`). See [references/codex-tools.md](./references/codex-tools.md). Map skill mentions of `Bash` to your host shell tool. |
+| Scripts / CI | Foreground is fine; add `--no-stream` only when the caller must buffer until exit (cannot combine with `--progress-log`). |
+
+`--progress-log <path>` tees a compact `--mode json` event stream to a file for outside observation and debugging (each `message_update` reduces its cumulative message snapshots to `usage` to keep the file small; add `--progress-log-raw` for the verbatim stream); it is never a prerequisite for metrics. Token usage accumulates by default, and `pi-review` writes milestone notices (`pi-review: review started`, `pi-review: tool <name> started/finished`, `pi-review: review finished`) to stderr.
+
+`--ui web` starts a loopback-only browser dashboard for panel review and auto-opens it in the default browser (`--no-ui-open` disables the auto-open); `--ui-url-file <path>` writes its URL atomically so a buffered-output host can read it without parsing stderr. Open the dashboard as wide as the host allows: Claude Code rides the auto-open (system default browser), Codex opens the url-file URL in its built-in browser, and Pi renders panels natively so `/rv` needs no `--ui web`. After completion the page counts down 60s, then closes itself and stops the dashboard server (any interaction cancels the countdown). It never substitutes for panel semantics — findings, gate status, and exit code come from the same `PI_REVIEW_META_JSON` as always.
+
+## Run metrics
+
+Quote metrics from the run output; never estimate or invent them.
+
+- **ASCII footer** (the `── pi-review` / `── pi-review panel` block): Duration, Tokens as `in · out · cache · reason` plus total, and Cost — the provider-reported value, or `n/a` when the provider reports none. On Pi `/rv` the panel tool result is **plain text / ASCII only** (Pi does not render markdown in tool results) — same classic chrome as the CLI, no `###` headings or fenced code blocks.
+- **Pi Review Panel**: each reviewer row shows **role persona · lifecycle · model · thinking · elapsed · tokens**. Lifecycle is `queued` / `running` / `completed` / `failed` / `cancelled`. Expanded view adds bounded activity, plain-text findings, and the ASCII footer.
+- Machine output: parse `PI_REVIEW_META_JSON:` from **stderr** (or set `PI_REVIEW_META_STDOUT=1` to emit it on stdout). Show users the plain review text and ASCII footer, not raw JSON, unless they ask for machine output. Do **not** rewrap the tool result into markdown tables or `###` report sections. On panel runs the top-level `model` is the reviewers' shared effective model (configured, else provider-reported) or the literal sentinel `"mixed"` when reviewers ran on different models; per-reviewer entries carry their own `model`/`responseModel`.
+
+## Pi host (`/rv*`)
+
+Slash commands select **strategy only**. Everything after the command is a **natural-language target**.
+
+| Command | Strategy |
+|---------|----------|
+| `/rv <natural-language target>` | Panel review via native **Pi Review Panel** (`pi_review` API tool); preset `code-experts` unless `--reviewers`/`--panel` say otherwise |
+| `/rv-loop <natural-language target>` | Loop closeout via shell `pi-review loop`; host fix point `--max-rounds 1` by default |
+| `/rv-models` | Model catalog only |
+| `/rv-config` | Show the effective configuration (config file, env overrides, resolved paths) |
+| `/rv --continue <handle> [text]` | Continue a kept single-review session |
+
+- Pass the user target **as given**. Path mentions like `@src` or `@src/foo.ts` are fine as text. Do **not** expand directories into multi-file lists in the parent agent.
+- Remaining strategy matching lives here and in the CLI: mode defaults (`code` / `plan` / `challenge`), model choice from `pi-review models` + [references/model-selection.md](./references/model-selection.md), panel width, and path-vs-file handling (directories stay tool path targets; only real files are attached).
+- `/rv` needs no streaming flags; the tool owns normalized events, live rendering, and the packaged CLI process. `/rv --reviewers 1` is an explicit non-panel single review and stays on the shell CLI path — never substitute the default panel.
+
+## Review status (no slash command)
+
+There is **no** `/status` slash in this skill. When the user asks for **review status**, **progress**, or **is pi-review still running**, run read-only checks and summarize — do **not** start a new review.
+
+1. **In-flight review (heuristic)** — list likely `pi-review` / child `pi -p` processes:
+   ```bash
+   pgrep -fl 'pi-review' 2>/dev/null || true
+   pgrep -fl 'pi.*-p' 2>/dev/null | head -20 || true
+   ```
+   If matches exist, say a review **may still be running** (heuristic; other `pi -p` jobs can match). If none, say **no obvious in-flight pi-review** from the process list — not that the last review failed.
+
+2. **Persisted sessions** (only after `--keep-session` / `--continue`) — default dir `~/.pi/pi-review/sessions`, overridable with `PI_REVIEW_SESSION_DIR`:
+   ```bash
+   ls -lt "${PI_REVIEW_SESSION_DIR:-$HOME/.pi/pi-review/sessions}" 2>/dev/null | head -15 || true
+   ```
+   Mention newest folders and that **Session** from the ASCII footer (or `sessionHandle` in `PI_REVIEW_META_JSON`) is used with `--continue`.
+
+3. **Last conclusion** — if this conversation already has the ASCII `── pi-review` footer, quote verdict, duration, and session path instead of re-running the review.
+
+4. **Live output** — for live progress, re-run with the host's default workflow: panel review gets `--ui web` (browser dashboard) on agent hosts, single review/`loop` gets background + `--progress-log` + tail; a terminal running `pi-review` is a fallback for either.
+
+Do not implement findings from a status check; status is informational only.
+
+## Loop closeout protocol
+
+Use this protocol when the host is closing out implementation work and may edit between reviews. `pi-review` and every child session remain review-only; the host agent owns all fixes.
+
+1. **Freeze the scope baseline before the first review.** Record the originating task, accepted files/modules, required behavior, and proof commands. Do not silently expand this baseline because a reviewer noticed adjacent cleanup.
+2. **Confirm until-clean stop conditions with the user.** An until-clean run starts only after the user confirms two things: what **clean** must mean for this run, and the hard `--max-rounds` cap. Offer a suggested default they can accept or adjust — e.g. "clean = zero confirmed actionable findings (advisories allowed), hard cap 10 rounds". A user request that already pins both counts as confirmation; restate it in one line and proceed. Fixed-round gates (`--max-rounds N` without `--until`) need no confirmation.
+3. **Run a bounded structured gate.** Prefer the productized command:
+   ```bash
+   pi-review loop --max-rounds 1 [shared review options] -- <@files|text...>
+   # Or host-driven until-clean (still hard-capped; never unlimited):
+   pi-review loop --until clean --max-rounds 10 [shared review options] -- <@files|text...>
+   ```
+   Round budgets: CLI `loop` defaults to `--max-rounds 3` when the flag is omitted; `--until clean` without an explicit flag defaults to a hard cap of 10; `/rv-loop` defaults to `--max-rounds 1` as a host fix point. A one-round invocation gives the host a fix point between reviews. `--until clean` declares the success **goal** and never removes the hard ceiling. The CLI never waits for edits and never loops forever on an unchanged tree. Re-invocation after a host fix is a new process (or the next host cycle under until-clean). Run `loop` with the host's default workflow from the table above. `loop` rejects `--keep-session`, `--continue`, and `--name`.
+
+   **Clean goal definition:**
+   - Single review: `status=clean` means no actionable findings (notes/non-actionable may remain).
+   - Panel review: `status=clean` means zero **confirmed** actionable clusters. Advisories do **not** fail clean.
+   - `needs_human` / `blocked` never count as clean.
+   - Successful closeout requires exit code `0`.
+4. **Read the gate signals.** Parse `status`, `findings`, and `actionableCount` from each `PI_REVIEW_META_JSON` line and use the final loop summary. Expected statuses are `clean`, `has_findings`, `needs_human`, and `blocked`.
+5. **Apply the scope governor to every finding:**
+   - **in-scope blocker** — accepted, actionable, and required by the frozen task; the host may fix it now.
+   - **follow-up** — valid but outside the baseline or not required for safe closeout; record it without drive-by edits.
+   - **stop-and-escalate** — ambiguous intent, architectural expansion, unsafe migration, blocked tooling, or anything requiring a human decision; stop rather than guess.
+   - A rejected finding must be intentional and recorded with its rationale in the final report. Never silently ignore it.
+   - Check sibling instances of the same bug class only inside the frozen task/PR scope. Do not turn the check into a repository-wide refactor.
+   - When `TYPESAFE_API_KEY` is available, `pi-review classify --baseline <text|@file> [--meta <path>]` turns this step into a typed Jev decision per finding (advisory; the host still owns the final call).
+6. **Fix only in-scope blockers in the host.** Never ask the child review session to implement fixes. After each host patch, rerun the narrowest relevant proof (focused test, typecheck, lint, or reproduction) before re-reviewing.
+7. **Re-review until a stop condition:**
+   - `clean` → clean goal met; proceed to final proof and closeout.
+   - `has_findings` → classify, fix accepted in-scope blockers, and re-invoke within the agreed host-cycle budget.
+   - `needs_human` or `blocked` → stop early and escalate with the review history.
+   - budget exhausted → report remaining findings and ask for a decision; do not loop indefinitely.
+   - `non_converging` → two consecutive rounds produced an identical actionable set; the tree is frozen between rounds, so more rounds are dice rolls. Fix in the host and re-invoke; do not re-roll.
+   - With `--until clean`, the host owns the fix→re-review cycle until clean or hard budget. Advisories alone do not block clean; confirmed actionable findings do.
+8. **Detect non-convergence.** After two non-converging patch cycles (the same finding persists, findings oscillate, or scope grows), pause and reclassify all remaining findings before any further edit. The loop's per-round `vs prev` comparison (persisting / new / resolved) is the machine signal for this; `--until clean` also stops early as `non_converging` when the actionable set is stable across two rounds.
+9. **Gate completion claims.** Never claim done, ship, commit-ready, or clean without a fresh `clean` result, unless the user gives explicit human acceptance of named remaining findings. Report accepted fixes, rejected findings with rationale, follow-ups, stop reason, and proof evidence.
+
+The shell exit policy is: `0` clean, `1` status is `has_findings`, `2` usage error, `3` needs human, `4` blocked/runtime failure. A non-zero loop result is a gate signal, not permission for the child reviewer to edit.
+
+## Gate-grade fast screening (`pi-review screen`)
+
+`pi-review screen <@files|paths...>` is a sub-second gate check that completely skips LLM prose generation. It slices files at declaration boundaries into hunks, evaluates each hunk against defect patterns via single-call typed Jev judgments, and assembles findings from catalog templates in **~1.0–1.2s**:
+
+```bash
+pi-review screen @src/order-service.ts
+```
+
+### When to choose `screen` vs `review` vs `panel` vs `loop`
+
+- **Use `screen`** for Pre-commit / Pre-push hooks, fast CI PR pre-flight checks, or when an operator asks for an instant sanity pass. Exit codes: `0` (clean), `1` (has findings / blocked), `4` (no `TYPESAFE_API_KEY`).
+- **Use `review`** (single review) for routine local development and self-review where one model's prose recommendations are sufficient.
+- **Use `panel`** (`--reviewers N`) for PR merge gates, security-sensitive changes, or cross-model verification where independent agreement matters.
+- **Use `loop`** (`loop [--until clean]`) during automated implementation closeout where an agent iteratively patches code and re-verifies until clean.
+
+### Screen memory (catalog that grows from use)
+
+Screening accumulates two kinds of state under the pi-review dir (siblings of `config.json`):
+
+- **`screen-patterns.json`** — user-declared patterns merged over the builtin catalog: `{ "patterns": { "<id>": { "title", "severity" (critical|major|minor), "category" (correctness|security|data-loss|performance), "recommendation" } }, "disabled": ["<id>"] }`. An id matching a builtin overrides it; `disabled` retires entries that misfire on this codebase. `PI_REVIEW_SCREEN_PATTERNS=<path>` loads one extra file last (e.g. a project catalog committed to the repo — that is how a team shares patterns).
+- **`screen-memory.jsonl`** — every flagged hunk is appended with a code hash; `pi-review screen-memory` aggregates it into hit frequencies and recurring **unmatched signals** (catch-all fired, no catalog hit). Those are the evidence for new patterns — promotion is a human/agent edit of `screen-patterns.json`, screen never rewrites its own catalog. `PI_REVIEW_SCREEN_MEMORY=0` disables recording; `PI_REVIEW_SCREEN_MEMORY_FILE` moves the log.
+
+A finding whose summary ends `matched no known pattern` is an unmatched signal: escalate that file to a full `pi-review` run, and the hunk is already in `screen-memory.jsonl`. Reach for `pi-review screen-memory` when:
+
+- The same unmatched signal recurs (`seen` ≥ 2) — promote it into `screen-patterns.json`.
+- The user reports screen missing a defect class — check `Unmatched` for the accumulated candidates.
+- A pattern misfires on this codebase — retire it via `disabled` instead of deleting history.
+
+## CLI arguments: when to use each
+
+| Argument | When to use |
+|---|---|
+| `screen <paths>` | Instant (~1s) gate screening; no LLM child session spawned. Requires `TYPESAFE_API_KEY`. |
+| `screen-memory` | Read the accumulated signal log: pattern hit frequencies + recurring unmatched signals to promote into `screen-patterns.json`. |
+| `--reviewer-model <id=model[:thinking]>` | In panel mode, to assign specific models or thinking levels to individual reviewers (e.g. `r1=openai/gpt-5:high`, `r2=zenmux/deepseek/deepseek-v4.1-flash:low`). Essential for cross-family heterogeneous panels. |
+| `--concurrency <n>` | Bounds parallel reviewer execution. **Omit for full speed** (all reviewers run concurrently by default). Only pass `<n>` if the provider account has strict concurrent request limits. |
+| `--consensus-model <model>` | Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters. |
+| `--consensus <policy>` / `--min-agree <n>` | Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts. |
+| `--until clean` | In `loop` mode, automates iterative convergence (stops when confirmed actionable issues drop to 0 or hard `--max-rounds` cap is hit). |
+| `--progress-log <path>` | Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor. |
+| `--ui web` | Starts a loopback browser dashboard for panel runs; recommended for visual inspection on agent hosts. |
+
+
+## Panel review
+
+Panel review runs multiple **independent** reviewers in isolated child sessions and aggregates their findings into one gate result. Reviewers cannot see one another's findings, so agreement represents independent discovery.
+
+### When to use panel vs single review
+
+- **Single review (default):** keep for small, low-cost changes. Reviewer count defaults to one; the existing execution, output, status mapping, and exit policy stay unchanged.
+- **Panel review:** use when a change deserves independent scrutiny. Activate it with `--reviewers <n>` (2-8) or `--panel <name>`; the two flags cannot combine. `--reviewers 1` stays a shell single review, and the `pi_review` API tool accepts only 2-8 reviewers.
+- **Generic `--reviewers N` roles** are distinct persona labels (rappers / AI KOLs / sports stars), **not** the literal string `Independent reviewer`. Named presets (`code-experts`) keep their fixed roles (correctness/security/testing). Do not invent or hardcode role names when calling `pi_review` — the CLI assigns them.
+- **Per-reviewer thinking**: pass `id=provider/model:thinking` via `--reviewer-model` / `reviewerModels` (e.g. `r1=zenmux/deepseek/deepseek-v4-flash:low`). The `:thinking` suffix is stripped into the thinking field and **must not** be overridden by a shared `--thinking` or preset default. Display should look like `model · low`, never `model:low · high`.
+
+### Consensus
+
+A finding becomes a **confirmed finding** (gate-relevant) only when enough independent reviewers mark the issue **actionable**. Otherwise it stays a non-blocking **advisory**.
+
+Consensus policies (default `quorum` for multi-reviewer panels):
+
+| Policy | Threshold |
+|--------|----------|
+| `any` | one actionable reviewer confirms |
+| `quorum` | configured minimum agreement (default 2; set with `--min-agree`) |
+| `majority` | `floor(reviewers / 2) + 1` |
+| `unanimous` | every reviewer |
+
+Multi-reviewer panels default to **quorum with minimum agreement 2** so panel mode never silently becomes any-finding fail-closed. Single-review stays threshold one.
+
+### Advisories
+
+Singleton (uncorroborated) findings remain visible as **advisories** but do **not** change clean status or fail the gate. They are recorded as non-blocking follow-ups; the host promotes them only with explicit human acceptance. Confirmed actionable clusters produce `has_findings`; no confirmed clusters produce `clean`.
+
+### Aggregation
+
+Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may **not** invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
+
+### Cost multipliers
+
+Cost is visible before execution. Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop). One consensus-adjudication call may run per round when `--consensus-model` is set, tracked separately. Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it).
+
+### Host-only fixes
+
+Panel review composes with Loop Review: one loop round evaluates one **complete panel** with fresh reviewer sessions. The CLI never edits, patches, or waits for filesystem changes — the host agent remains the only actor allowed to fix between process invocations. Apply the scope governor to **confirmed** findings exactly as for single-review findings. Rejected confirmed findings must be recorded with rationale. `--max-rounds 1` keeps the patch-by-patch closeout workflow.
+
+Panel review rejects `--keep-session`, `--continue`, and `--name` in v1 (reviewers run `--no-session`). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean.
+
+### Examples
+
+```bash
+# Single panel review (roles auto-assigned as distinct personas)
+pi-review --reviewers 3 --consensus quorum --min-agree 2 -- @src
+# Per-reviewer model + thinking (suffix wins over shared --thinking)
+pi-review --reviewers 3 --reviewer-model r1=zenmux/deepseek/deepseek-v4-flash:low --reviewer-model r2=zenmux/minimax/minimax-m3:off -- @src
+# Expert preset
+pi-review --panel code-experts --consensus majority -- @src
+# Panel loop review (up to 6 reviewer runs + adjudication)
+pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
+# Claude Code / Codex / Cursor default: browser dashboard instead of a tailed log
+pi-review --reviewers 3 --ui web --ui-url-file /tmp/pi-review-ui-url.txt -- @src
+```
+
+## Steps
+
+1. Prime the model catalog and pick a model:
+   ```bash
+   pi-review models [search]
+   ```
+   Rules:
+   - Extension-registered providers appear in the catalog only when the config enables them (`childExtensions: true`, see **Registered providers** — explicit opt-in).
+   - Run this before building the review command. **Never invent a `provider/model` id** — only ids from the catalog output.
+   - **Cross-model review**: identify the model this host session itself runs on (its id is in your session context), then prefer reviewer models from a different model family — same-family reviewers share the author model's blind spots. On a panel, keep the host's family to a minority of reviewers.
+   - Follow **[references/model-selection.md](./references/model-selection.md)** for everything else: profile inference (code / frontend / plan), priority lists, cross-model resolution, user-named-model resolution, and thinking aliases (`max`/`最高` → `xhigh`, with fallback to the nearest supported level).
+   - Ambiguous match across model families: show the top candidates and ask; do not guess.
+   - User named no model: propose 2–3 exact catalog ids (cross-model first, one line of why each, "Pi default" as an explicit option) and ask the user to pick before running.
+   - On **Claude Code / Codex / Cursor**, state the chosen model in one line (match the user's language) before running the review command.
+   Completion criterion: an exact listed `provider/model[:thinking]` (or Pi default) that the user named or picked from your proposal; never invented ids.
+
+2. Choose one mode:
+   - default `code` — code, diff, MR, file, or repository review.
+   - `--mode plan` — broad plan, architecture, product, or strategy review through multiple expert lenses.
+   - `--mode challenge` — adversarial review of assumptions, boundaries, dependencies, and missing evidence.
+   **Challenge mode: grill first.** Before running an adversarial review, grill the user with 2-3 pointed questions — for example: what outcome must this work achieve, which assumption hurts most if wrong, what evidence supports it? Weave the answers into the natural-language target so the reviewer attacks the real weak points.
+   Completion criterion: use default `code` unless the target is clearly a plan/design review; if two modes fit equally, ask the user to choose. For `challenge`, the grill answers are folded into the target before the command runs.
+
+3. Run an isolated review:
+   ```bash
+   pi-review [--mode <name>] [--model <provider/model[:thinking]>] [--keep-session|--continue <handle>] [--progress-log <path>] -- <natural-language target...>
+   ```
+   Rules:
+   - Use the model decision from step 1 and the execution path from **Default workflow by host**. **Registered providers** enable host extensions only after explicit user acceptance (see **Registered providers**); override a single run with `PI_REVIEW_CHILD_EXTENSIONS=0`.
+   - Omit `--mode` for normal code review; the command defaults to `code`.
+   - Use `--keep-session` only when the user wants follow-up questions on this review; use `--continue <handle>` only with a **Session** path from a prior ASCII footer or `sessionHandle` in `PI_REVIEW_META_JSON`.
+   - Pass the review request as natural language after `--`. Path mentions (`@src`, `@src/foo.ts`) are allowed as text. Do **not** expand directories into multi-file attachment lists — the CLI keeps directory `@refs` as tool path targets and only attaches real files.
+   - On Pi `/rv`, call `pi_review` with that same natural-language target. On Pi `/rv-loop`, run shell `pi-review loop` with it and follow **Loop closeout protocol**.
+   - Do not ask `pi-review` to edit, patch, commit, or implement.
+   Completion criterion: the command includes the resolved model/default choice and a concrete natural-language review target.
+
+4. Return the result:
+   - Show the review conclusion and ASCII footer as plain text, with metrics quoted per **Run metrics**. Do not reformat into markdown tables or invented `###` sections — Pi does not render markdown for this output.
+   - For an ordinary review-only request, do not apply findings automatically; implementation is a separate user decision. When the user already requested implementation closeout, follow **Loop closeout protocol** and let only the host fix accepted in-scope blockers.
+   Completion criterion: the user sees the review conclusion and readable footer.
+
+## Examples
+
+```bash
+pi-review -- @src
+pi-review -- @src/foo.ts
+pi-review --model openai/gpt-5.5 -- "review the auth changes under @src"
+pi-review --mode challenge --keep-session -- @docs/design.md    # after the 2-3 grill questions
+pi-review --mode challenge --continue <sessionHandle> -- "expand finding 2"
+pi-review loop --max-rounds 1 -- @src                           # host fix point
+pi-review loop -- @src                                          # CLI default: --max-rounds 3
+pi-review loop --until clean --max-rounds 10 -- @src            # after the user confirms the stop conditions
+pi-review loop --max-rounds 1 --progress-log /tmp/pi-review-loop.jsonl -- @src
+```
+
+## Status examples (user phrasing)
+
+- "review status" / "is the review still running?" → run **Review status** checks above.
+- "show streaming in Claude Code" / "the wait is bad, is there a better way" → explain that the host buffers tool output; re-run with the default workflow for the run type — panel review gets `--ui web` (share the dashboard URL), single review/`loop` gets background + `--progress-log` + tail (or Pi `/rv`) — offering a local terminal only as a fallback.
+- "give me a dashboard" / "watch it in the browser" / "can I see this visually" → if the run is (or can be) a panel review, re-run with `--ui web --ui-url-file <path>` and share the printed URL; single review and `loop` do not support `--ui web` (offer to make it a panel review, or fall back to `--progress-log` + tail).
