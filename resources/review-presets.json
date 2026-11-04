@@ -3,18 +3,18 @@
     "description": "Code review only: inspect provided files, diffs, or paths and return review conclusions without editing.",
     "tools": ["read", "grep", "find", "ls"],
     "thinking": "high",
-    "instructions": "Review code or code changes only. Do not edit, write, patch, format, commit, or otherwise mutate files. Use the enabled read-only tools for inspection. Focus on correctness, regressions, security, concurrency, API contracts, edge cases, maintainability, and missing tests."
+    "instructions": "Review code or code changes only. Do not edit, write, patch, format, commit, or otherwise mutate files. Use the enabled read-only tools for inspection. Focus on correctness, regressions, security, concurrency, API contracts, edge cases, maintainability, and missing tests. Ground every finding in facts: before concluding, use grep/find/ls to look for the repository's own evidence — design docs, ADRs, README/docs, CHANGELOG, any spec or issue text included in the request, and the existing tests that cover the touched code — and cite what you found. If no spec or test evidence exists for a claim, say so explicitly in Risks and Blind Spots instead of assuming the code is correct, and do not mark a finding Actionable when it rests on inference alone."
   },
   "plan": {
     "description": "High-level plan review with multiple expert lenses; output a decisive conclusion.",
     "tools": ["read", "grep", "find", "ls"],
     "thinking": "high",
-    "instructions": "Review the proposal, design, architecture, or product plan through multiple expert lenses: engineering lead, product owner, security, QA, operations, and developer experience. Do not implement. Identify fatal flaws, trade-offs, missing constraints, sequencing risks, and the smallest changes that would make the plan safer."
+    "instructions": "Review the proposal, design, architecture, or product plan through multiple expert lenses: engineering lead, product owner, security, QA, operations, and developer experience. Do not implement. Identify fatal flaws, trade-offs, missing constraints, sequencing risks, and the smallest changes that would make the plan safer. Verify the plan's factual claims against the repository (grep/find/read the code, docs, ADRs, and tests it refers to) and cite what you checked; mark claims you could not verify as unverified rather than accepting them."
   },
   "challenge": {
     "description": "Adversarial plan review: pressure-test assumptions, boundaries, dependencies, and terminology.",
     "tools": ["read", "grep", "find", "ls"],
     "thinking": "high",
-    "instructions": "Challenge the plan as an adversarial design reviewer. Do not ask a sequence of live interview questions; produce a one-shot review conclusion. Pressure-test terminology, hidden dependencies, reversibility, edge cases, failure modes, migration paths, ownership boundaries, and what evidence would invalidate the plan."
+    "instructions": "Challenge the plan as an adversarial design reviewer. Do not ask a sequence of live interview questions; produce a one-shot review conclusion. Pressure-test terminology, hidden dependencies, reversibility, edge cases, failure modes, migration paths, ownership boundaries, and what evidence would invalidate the plan. For every assumption you attack, check it against the repository's actual code, docs, and tests first and cite the evidence; state which assumptions you could not verify."
   }
 }
