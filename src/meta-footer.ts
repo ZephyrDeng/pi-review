@@ -186,6 +186,7 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
 }
 /** Short verification status, e.g. "failed · 2 run / 1 skipped". */
 export function formatVerificationFooter(summary: VerificationSummary): string {
-  const ran = summary.steps.filter((s) => !s.status.startsWith("skipped_")).length;
-  return `${summary.status} · ${ran} run / ${summary.steps.length - ran} skipped${summary.reason ? ` · ${summary.reason}` : ""}`;
+  // Executed steps carry a duration; skipped and setup-error steps never ran.
+  const ran = summary.steps.filter((s) => s.durationMs !== undefined).length;
+  return `${summary.status} · ${ran} run / ${summary.steps.length - ran} not run${summary.reason ? ` · ${summary.reason.replace(/\s+/g, " ")}` : ""}`;
 }

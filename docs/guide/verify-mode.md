@@ -82,7 +82,7 @@ Plan steps (full schema in the [design doc](../design/verify-mode.md#plan-schema
 
 Reviewer prompt: a `## Verification evidence (source type: test-output)` section with each step's command, purpose, approval provenance, exit code, duration, and the last 4000 characters of output (secret-redacted, wrapped as untrusted data). Reviewers cite it as `Evidence: test-output <step id>`.
 
-Footer: `Verify  passed · 2 run / 0 skipped`.
+Footer: `Verify  passed · 2 run / 0 not run`.
 
 `PI_REVIEW_META_JSON` gains an optional `verification` object (single and panel; `metaVersion` stays `1`):
 

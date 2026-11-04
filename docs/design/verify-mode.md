@@ -156,7 +156,11 @@ own decision. The record also stores the `planSha256` it was made for, for audit
 - `link`: ignored paths (typically dependency dirs) symlinked from the original
   tree into the copy so commands work without a reinstall. Writes through a
   link land in the original (ignored) directory; keep it to dependency caches.
-- `--verify` without a plan runs exactly these commands, all pre-approved.
+- `--verify` without a plan runs exactly these commands, all pre-approved,
+  except ids a human explicitly rejected in a passed approval record.
+- The file is validated strictly: `verify` must be an object with only
+  `commands`, `link`, `maxFollowUpRounds`; a typo such as `links` is an error
+  (reported as `unverified` with the reason), never silently ignored.
 
 ## Isolation
 
@@ -217,16 +221,24 @@ Overall status:
 
 | Status | When |
 |---|---|
-| `unverified` | nothing ran (no plan and no whitelist, all skipped, setup error) or the tree guard tripped |
+| `unverified` | no command executed (no plan and no whitelist, all skipped, setup error) or the tree guard tripped |
 | `failed` | any executed step failed, timed out, or errored |
-| `partial` | every executed step passed, some steps were skipped |
+| `partial` | every executed step passed, some steps did not run |
 | `passed` | every step ran and passed |
+
+"Executed" means the command was spawned (the step has `durationMs`). A step
+whose setup failed before spawning (isolation failure, a repro file that would
+escape the copy) has `status: "error"` without `durationMs`, is rendered as
+`Result: not run`, and never counts as a run.
 
 Prompt: one extra section appended after the target sections, identical for
 every reviewer. It states the source type `test-output`, that commands ran once
 in an isolated copy, which steps were human-approved vs whitelist pre-approved,
 per-step exit/duration/timeout, and the redacted output tail inside
-`<test-output step="id">` tags marked as untrusted data. Reviewers are told to
+`<test-output step="id">` tags marked as untrusted data. Plan-controlled
+metadata is rendered on one line (argv as a JSON array; newlines in purpose,
+cwd, paths, and errors flattened; purpose capped at 1000 characters) so a plan
+cannot open a fake heading or instruction block in the reviewer prompt. Reviewers are told to
 cite `test-output <step id>` in `Evidence:` and never to claim verification
 beyond the listed steps. For `unverified`, the section says so with the reason.
 
@@ -270,6 +282,7 @@ accidental edits; it does **not** contain a malicious command (it can read
 ## Follow-ups
 
 - Remove a step's `files` after it runs (today they persist for later steps in the same run).
+- Skip the post-exit process-group kill once the group is known to be empty (pid-reuse window).
 - Widen the tree guard to refs (`git for-each-ref`) and report ignored-path writes through `link`.
 - Suggest whitelist candidates from `package.json` scripts / CI config (still require approval).
 - `/rv` Pi panel: native confirm dialog for the handshake and a verification row in the dashboard.

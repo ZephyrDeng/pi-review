@@ -82,7 +82,7 @@ pi-review --verify-plan plan.json --verify-approval approval.json -- @src
 
 reviewer prompt：多一节 `## Verification evidence (source type: test-output)`，逐步列出命令、目的、批准来源、退出码、耗时、输出末尾 4000 字符（已脱敏，并声明为不可信数据）。reviewer 以 `Evidence: test-output <step id>` 引用。
 
-页脚：`Verify  passed · 2 run / 0 skipped`。
+页脚：`Verify  passed · 2 run / 0 not run`。
 
 `PI_REVIEW_META_JSON` 新增可选 `verification` 对象（单 reviewer 与 panel 都有；`metaVersion` 仍为 `1`），字段见[英文版示例](../verify-mode.md#what-reviewers-and-scripts-see)。
 

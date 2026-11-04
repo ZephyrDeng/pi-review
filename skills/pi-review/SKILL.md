@@ -177,7 +177,7 @@ Opt-in. pi-review runs verification commands once, in a disposable isolated copy
 
 CI / non-interactive callers: pass `--verify` (whitelist) or a plan without approval; only pre-approved steps run.
 
-**Reading results:** the footer shows `Verify  <status> · N run / M skipped`; `PI_REVIEW_META_JSON.verification` carries `status` (`passed | partial | failed | unverified`), `reason`, per-step `approval`, `status`, `exitCode`, `stepSha256`, and the redacted output tail. A failing command is evidence, not a pi-review failure. Report `unverified` honestly; never describe it as passing.
+**Reading results:** the footer shows `Verify  <status> · N run / M not run`; `PI_REVIEW_META_JSON.verification` carries `status` (`passed | partial | failed | unverified`), `reason`, per-step `approval`, `status`, `exitCode`, `stepSha256`, and the redacted output tail. A failing command is evidence, not a pi-review failure. Report `unverified` honestly; never describe it as passing.
 
 ## Gate-grade fast screening (`pi-review screen`)
 

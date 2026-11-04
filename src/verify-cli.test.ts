@@ -129,7 +129,7 @@ test("plan -> approve -> single review: reviewer prompt carries approved results
   assert.equal(m.verification.approvals[0].approvedBy, "user via test");
   assert.equal(m.verification.steps[0].approval, "approved");
   assert.equal(m.verification.steps[0].stepSha256, JSON.parse(approve.stdout).decisions[0].stepSha256);
-  assert.match(run.stdout, /Verify\s+passed · 1 run \/ 0 skipped/);
+  assert.match(run.stdout, /Verify\s+passed · 1 run \/ 0 not run/);
   assert.equal(git(repo, "status", "--porcelain"), status);
 });
 
