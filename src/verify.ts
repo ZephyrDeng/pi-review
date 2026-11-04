@@ -293,9 +293,10 @@ function sameArgv(a: string[], b: string[]): boolean {
 
 /**
  * Decide which steps may run. Without a plan, every whitelist command runs.
- * With a plan: an explicit matching rejection wins; then exact-argv whitelist
- * matches (no files, no cwd) are pre-approved; then a matching approval; a
- * decision for the same id with a different hash is `stale`.
+ * With a plan: an explicit matching rejection wins; a rejection recorded for a
+ * different version of the step makes it `stale` (never whitelist pre-approved);
+ * then exact-argv whitelist matches (no files, no cwd) are pre-approved; then a
+ * matching approval; any other decision for the same id is `stale`.
  */
 export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyRepoConfig, approvals: ApprovalRecord[]): ResolvedStep[] {
   const decisions = approvals.flatMap((record) => record.decisions);
@@ -323,6 +324,9 @@ export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyR
     const whitelisted = match !== undefined && (step.timeoutSec === undefined || step.timeoutSec <= whitelistTimeout!);
     let approval: VerificationApproval;
     if (matching.some((decision) => decision.decision === "rejected")) approval = "rejected";
+    // Fail closed: a human "no" recorded for an earlier version of this step is
+    // not overridden by the whitelist; it needs a fresh decision.
+    else if (forId.some((decision) => decision.decision === "rejected")) approval = "stale";
     else if (whitelisted) approval = "preapproved";
     else if (matching.some((decision) => decision.decision === "approved")) approval = "approved";
     else if (forId.length > 0) approval = "stale";
@@ -373,6 +377,8 @@ export interface CommandResult {
   outputTail: string;
   truncated: boolean;
   error?: string;
+  /** Informational; never changes the step status (e.g. output may be incomplete). */
+  note?: string;
 }
 
 /** Run argv without a shell in its own process group, with a timeout and a bounded output tail. */
@@ -440,7 +446,7 @@ export function runCommand(
     child.on("exit", (code, signal) => {
       // Reap anything the step left running in its group so the pipes close.
       killGroup("SIGKILL");
-      abandonPipes({ exitCode: code, ...(signal ? { signal } : {}), error: "output pipes were still held by an escaped descendant; output may be incomplete" });
+      abandonPipes({ exitCode: code, ...(signal ? { signal } : {}), note: "output pipes were still held by an escaped descendant; output may be incomplete" });
     });
     child.on("close", (code, signal) => finish({ exitCode: code, ...(signal ? { signal } : {}) }));
   });
@@ -474,12 +480,20 @@ export function resolveInside(root: string, rel: string): string {
   if (!isSafeRelativePath(rel)) throw new Error(`path escapes the isolated copy: ${rel}`);
   const realRoot = fs.realpathSync(root);
   const target = path.resolve(realRoot, rel);
+  const escape = () => new Error(`path escapes the isolated copy: ${rel}`);
+  // lstat, not exists: a dangling symlink "does not exist" for existsSync, yet
+  // writing to it follows the link out of the copy.
+  const entry = (p: string) => fs.lstatSync(p, { throwIfNoEntry: false });
+  if (entry(target)?.isSymbolicLink()) throw escape();
   let existing = target;
-  while (!fs.existsSync(existing)) existing = path.dirname(existing);
-  const realExisting = fs.realpathSync(existing);
-  if (realExisting !== realRoot && !realExisting.startsWith(realRoot + path.sep)) {
-    throw new Error(`path escapes the isolated copy: ${rel}`);
+  while (!entry(existing)) existing = path.dirname(existing);
+  let realExisting: string;
+  try {
+    realExisting = fs.realpathSync(existing);
+  } catch {
+    throw escape(); // dangling symlink in an ancestor
   }
+  if (realExisting !== realRoot && !realExisting.startsWith(realRoot + path.sep)) throw escape();
   return target;
 }
 
@@ -693,6 +707,7 @@ async function runVerificationUnguarded(options: RunVerificationOptions): Promis
         outputTail: result.outputTail,
         truncated: result.truncated,
         ...(result.error ? { error: result.error } : {}),
+        ...(result.note ? { note: result.note } : {}),
       });
       log(`pi-review: verify: ${r.step.id} -> ${status}`);
     }
@@ -780,7 +795,7 @@ export function formatVerificationSection(summary: VerificationSummary): string 
       continue;
     }
     const exit = step.exitCode === null || step.exitCode === undefined ? `no exit code${step.signal ? `, signal ${step.signal}` : ""}` : `exit ${step.exitCode}`;
-    lines.push(`- Result: ${exit} in ${step.durationMs}ms${step.status === "timed_out" ? " (timed out, killed)" : ""}${step.error ? `; error: ${oneLine(step.error)}` : ""}`);
+    lines.push(`- Result: ${exit} in ${step.durationMs}ms${step.status === "timed_out" ? " (timed out, killed)" : ""}${step.error ? `; error: ${oneLine(step.error)}` : ""}${step.note ? `; note: ${oneLine(step.note)}` : ""}`);
     if (step.outputTail) {
       lines.push(
         `<test-output step="${step.id}"${step.truncated ? ` truncated="true" note="last ${OUTPUT_TAIL_LIMIT} characters"` : ""}>`,

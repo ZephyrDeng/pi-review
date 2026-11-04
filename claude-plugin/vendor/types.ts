@@ -220,6 +220,8 @@ export interface VerificationStepResult {
   outputTail?: string;
   truncated?: boolean;
   error?: string;
+  /** Informational note that does not change `status` (e.g. output may be incomplete). */
+  note?: string;
 }
 
 /** Shared verification evidence injected into every reviewer prompt. */

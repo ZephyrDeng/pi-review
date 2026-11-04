@@ -122,7 +122,9 @@ and any change to an approved step voids its approval.
 - `cwd` is relative to the repo root and must stay inside it.
 - `files` are new test/repro files written **only into the isolated copy**
   right before the step runs; paths must be relative and inside the copy (also
-  after resolving symlinks, so they cannot land in a `link`ed directory). They
+  after resolving symlinks, so they cannot land in a `link`ed directory). A
+  path that is itself a symlink, or that passes through a dangling one, is
+  rejected (checked with `lstat`, so committed dangling links cannot redirect a write). They
   never touch the original tree. They stay in the copy for later steps of the
   same run, so order steps accordingly.
 - `timeoutSec` defaults to 300, clamped to 1800.
@@ -134,7 +136,9 @@ JSON (sorted keys, includes `files[].content`). Editing any field, including the
 purpose or a file's content, changes the hash, and the old approval no longer
 matches (`stale` → `skipped_unapproved`). Approval is per step so appending a
 follow-up round does not void round-1 approvals, while the new steps need their
-own decision. The record also stores the `planSha256` it was made for, for audit.
+own decision. A human rejection is fail-closed: if the rejected step is later
+edited, it becomes `stale` and is skipped, even when its argv is whitelisted.
+The record also stores the `planSha256` it was made for, for audit.
 
 ## Standing whitelist: `.pi-review.json`
 
@@ -196,7 +200,8 @@ editor writing to the tree during a long step also trips the guard (fail-closed)
   killed after normal exit so stray daemons do not outlive the step. If a
   descendant escaped the group (`setsid`) and keeps the output pipes open,
   pi-review stops reading 2s after the step's own exit (or 4s after the
-  timeout) and records the step with a note that output may be incomplete.
+  timeout) and records the step's real exit status plus a `note` that output
+  may be incomplete; the note never turns a passing step into an error.
   Without process groups (Windows) the child itself is signalled.
 - Output: stdout+stderr interleaved, only the last 4000 characters kept
   (`truncated` flag), passed through the same secret redaction as review events.

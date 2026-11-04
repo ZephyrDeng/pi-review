@@ -11,6 +11,7 @@ import {
   gitStatusSnapshot,
   parsePlan,
   parseRepoConfig,
+  resolveInside,
   resolveSteps,
   runCommand,
   runVerification,
@@ -146,6 +147,14 @@ test("per-step and reject decisions; reject wins even over the whitelist", () =>
   assert.throws(() => createApproval(basePlan, {}), /needs --all/);
 });
 
+test("a rejected whitelisted step stays blocked after any edit (stale, never preapproved)", () => {
+  const plan: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "p" }] };
+  const rejection = createApproval(plan, { reject: ["check"] });
+  assert.equal(resolveSteps(plan, whitelist, [rejection])[0]!.approval, "rejected");
+  const edited: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "reworded" }] };
+  assert.equal(resolveSteps(edited, whitelist, [rejection])[0]!.approval, "stale");
+});
+
 test("without a plan, a human rejection of a whitelist id is honoured", () => {
   const plan: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "p" }] };
   const rejection = createApproval(plan, { reject: ["check"] });
@@ -224,7 +233,8 @@ test("runCommand settles when an escaped descendant keeps the output pipes open"
   assert.ok(Date.now() - started < 8000, "must not wait for the escaped descendant");
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, false);
-  assert.match(result.error ?? "", /output pipes were still held/);
+  assert.equal(result.error, undefined, "exit 0 with an escaped descendant is not an error");
+  assert.match(result.note ?? "", /output pipes were still held/);
 });
 
 test("runCommand reports a missing binary as an error, not a crash", async () => {
@@ -366,6 +376,46 @@ test("linked dependency dirs are symlinked into the copy and never deleted on cl
   assert.equal(summary.status, "passed", JSON.stringify(summary));
   assert.match(summary.steps[0]!.outputTail ?? "", /dependency/);
   assert.equal(fs.readFileSync(path.join(repo, "ignored", "dep.txt"), "utf8"), "dependency");
+});
+
+test("resolveInside rejects symlinks, including dangling ones, as targets or ancestors", () => {
+  const root = tmp("pi-review-verify-inside-");
+  const outside = tmp("pi-review-verify-outside-");
+  fs.symlinkSync(path.join(outside, "new.txt"), path.join(root, "dangling"));
+  fs.symlinkSync(path.join(outside, "missing-dir"), path.join(root, "dangling-dir"));
+  fs.writeFileSync(path.join(root, "real.txt"), "x");
+  fs.symlinkSync(path.join(root, "real.txt"), path.join(root, "inner-link"));
+  assert.throws(() => resolveInside(root, "dangling"), /escapes the isolated copy/);
+  assert.throws(() => resolveInside(root, "dangling-dir/x.txt"), /escapes the isolated copy/);
+  assert.throws(() => resolveInside(root, "inner-link"), /escapes the isolated copy/);
+  assert.equal(resolveInside(root, "sub/new.txt"), path.join(root, "sub/new.txt"));
+});
+
+test("a committed dangling symlink cannot redirect a repro file outside the copy", async () => {
+  const outside = tmp("pi-review-verify-outside-");
+  const target = path.join(outside, "escaped.txt");
+  const repo = makeRepo();
+  fs.symlinkSync(target, path.join(repo, "repro.test.ts"));
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "dangling link");
+  const plan = parsePlan({ version: 1, steps: [{ id: "w", argv: [NODE, "-e", "1"], purpose: "p", files: [{ path: "repro.test.ts", content: "pwned" }] }] });
+  const summary = await runVerification({ cwd: repo, planFile: writeJson(repo, "p.json", plan), approvalFiles: [writeJson(repo, "a.json", createApproval(plan, { all: true }))] });
+  assert.equal(summary.steps[0]!.status, "error");
+  assert.match(summary.steps[0]!.error ?? "", /escapes the isolated copy/);
+  assert.equal(fs.existsSync(target), false, "nothing may be written outside the copy");
+});
+
+test("exit 0 with an escaped descendant holding the pipes stays passed, with a note", async () => {
+  const pidFile = path.join(tmp("pi-review-verify-pid-"), "pid");
+  const script = `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();require('fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid))`;
+  const repo = makeRepo({ verify: { commands: [{ id: "daemon", argv: [NODE, "-e", script] }] } });
+  const summary = await runVerification({ cwd: repo });
+  const pid = Number(fs.readFileSync(pidFile, "utf8"));
+  if (pid) process.kill(pid, "SIGKILL");
+  assert.equal(summary.steps[0]!.status, "passed");
+  assert.equal(summary.status, "passed");
+  assert.match(summary.steps[0]!.note ?? "", /output may be incomplete/);
+  assert.match(formatVerificationSection(summary), /note: output pipes were still held/);
 });
 
 test("plan files cannot be written through a linked dir into the original tree", async () => {
