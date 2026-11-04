@@ -38,4 +38,5 @@ Per-process overrides via environment variables (env wins over the config file):
 - On reviewer runtime failure, the panel footer and `reviewers[].runtimeError` keep a child stderr/stack tail for diagnosis
 - `--keep-session` stores only the child review session for explicit follow-up
 - The review session is read-only: no file edits, patches, commits, or deployments
+- `--verify` (opt-in) is the one path that executes repository code: pi-review's own code runs whitelisted (`.pi-review.json` committed at `HEAD`) or human-approved commands in a disposable worktree copy, with a filtered environment, timeouts, and capped output. Reviewers stay read-only. It protects the working tree, not the machine — see [Verify mode](verify-mode.md#safety-defaults).
 

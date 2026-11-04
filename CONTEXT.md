@@ -33,6 +33,14 @@
 
 **Claude rules context**: The `.claude/rules/` files a reviewer child consumes with Claude Code semantics — user-level `~/.claude/rules/` and project-level `<dir>/.claude/rules/` from the child's cwd upward. Rules without a `paths` frontmatter key append to the child system prompt (deduped by realpath against Pi's built-in context files); rules with `paths` inject into a matching `read` tool result once per file per process. Loaded by our own extension via explicit `--extension`, while host extensions stay off (`--no-extensions`); `--no-rules` / `PI_REVIEW_RULES=0` disables it. The consensus adjudicator, `screen`, and `classify` never load it.
 
+**Verification run**: An opt-in (`--verify`) step that runs approved commands once, before reviewers start, in a disposable git-worktree snapshot of the working tree (HEAD + uncommitted + untracked). Its summary is injected into every reviewer prompt as `test-output` evidence and written to meta as `verification`. Executed by CLI code; reviewers stay read-only.
+
+**Verification plan**: A JSON list of steps (argv, purpose, optional repro `files`) proposed by the host agent or by `pi-review verify propose` (read-only Pi child). Steps run only when pre-approved or human-approved.
+
+**Standing whitelist**: `verify.commands` in `.pi-review.json` as committed at `HEAD`; exact-argv matches are pre-approved. Uncommitted edits to the file never grant pre-approval.
+
+**Approval record**: The output of `pi-review verify approve`, binding approve/reject decisions to each step's content hash. Any edit to an approved step makes its approval `stale`.
+
 **Pi package**: The installable package shape that lets Pi load the `/rv` extension and the `pi-review` skill via `pi install`.
 
 **Shell CLI**: The npm `bin` entry exposed as `pi-review` for terminal, CI, and editor integration workflows.

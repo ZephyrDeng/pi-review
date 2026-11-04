@@ -21,6 +21,7 @@ pi-review screen <@files|paths...>
 pi-review screen-memory
 pi-review classify --baseline <text|@file> [--meta <path>]
 pi-review models [search]
+pi-review verify <propose|show|approve|run> [options]
 ```
 
 ## 参数
@@ -50,6 +51,9 @@ pi-review models [search]
 | `--consensus-model <model>` | 面板：语义共识裁决所用模型 |
 | `--concurrency <n>` | 面板：限制评审员并发（默认等于评审员数） |
 | `--output-format events-jsonl` | 面板：给渲染器适配器的归一化 `ReviewEvent v1` JSONL |
+| `--verify` | reviewer 启动前，在隔离副本里跑一次已提交 `.pi-review.json` 白名单命令（[验证模式](verify-mode.md)） |
+| `--verify-plan <file>` | 执行 agent 提出的验证计划；白名单外的步骤需批准（隐含 `--verify`） |
+| `--verify-approval <file>` | `pi-review verify approve` 生成的批准记录（可重复；隐含 `--verify`） |
 
 ## 各命令与参数的使用时机
 

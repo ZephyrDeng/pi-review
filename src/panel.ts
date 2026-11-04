@@ -36,6 +36,7 @@ import { currentConfig } from "./pi-config.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
 import { createPaneEventSink, launchPanelUi } from "./panel-ui.js";
+import { verificationForReview, withVerificationSection } from "./verify.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
 export function emitPanelFooter(meta: PanelReviewMeta): void {
@@ -483,6 +484,9 @@ export async function runPanelReviewOnce(
   emit("panel.started", { target: parsed.payload.join(" "), mode: parsed.mode, ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}), reviewers: reviewerIdentities });
   for (const reviewer of resolved.reviewers) emit("reviewer.queued", { reviewerId: reviewer.id });
 
+  // Opt-in verification: one shared run before any reviewer starts, never per
+  // reviewer. Its own durationMs lives in meta.verification, outside the review timer.
+  const verification = await verificationForReview(parsed, parsed.outputFormat === "events-jsonl");
   const startedAt = Date.now();
   const submissions = await mapWithConcurrency(
     resolved.reviewers,
@@ -495,7 +499,7 @@ export async function runPanelReviewOnce(
       }
       const reviewerStart = Date.now();
       emit("reviewer.started", { reviewerId: reviewer.id });
-      const prompt = buildReviewerPrompt(parsed.mode, preset, payload, stdinText, reviewer);
+      const prompt = withVerificationSection(buildReviewerPrompt(parsed.mode, preset, payload, stdinText, reviewer), verification);
       const progressLog = reviewerProgressLog(parsed.progressLog, reviewer.id);
       const submission = await runReviewerChild({
         config,
@@ -609,6 +613,7 @@ export async function runPanelReviewOnce(
     thinking: panelThinking,
     usage: sumPanelUsage(submissions.map((s) => s.usage)),
     ...(extensionHints && extensionHints.length > 0 ? { extensionHints } : {}),
+    ...(verification ? { verification } : {}),
     ...(resolved.presetName ? { panelPreset: resolved.presetName } : {}),
     // The engine is only meaningful when adjudication actually ran; read it
     // back from the wrapper so a Jev failure that fell back to Pi is reported

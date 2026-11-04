@@ -1,4 +1,4 @@
-import type { PanelReviewMeta, ReviewMeta, TokenUsage } from "./types.js";
+import type { PanelReviewMeta, ReviewMeta, TokenUsage, VerificationSummary } from "./types.js";
 
 const VERDICT_DISPLAY: Record<ReviewMeta["verdict"], { label: string; mark: string }> = {
   approve: { label: "APPROVE", mark: "✓" },
@@ -73,6 +73,7 @@ export function formatReviewMetaAscii(meta: ReviewMeta): string {
     lines.push(`  ${padLabel("Tokens", labelW)}  ${formatUsage(meta.usage)} · total ${formatTokens(meta.usage.totalTokens)}`);
     lines.push(`  ${padLabel("Cost", labelW)}  ${typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "n/a"}`);
   }
+  if (meta.verification) lines.push(`  ${padLabel("Verify", labelW)}  ${formatVerificationFooter(meta.verification)}`);
   lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
   if (meta.sessionHandle) {
     lines.push(`  ${padLabel("Session", labelW)}  ${meta.sessionHandle}`);
@@ -149,6 +150,7 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
   if (meta.adjudicationErrors?.length) {
     lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationErrors.join("; ")}`);
   }
+  if (meta.verification) lines.push(`  ${padLabel("Verify", labelW)}  ${formatVerificationFooter(meta.verification)}`);
   lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
   lines.push("  Reviewers:");
   for (const r of meta.reviewers) {
@@ -181,4 +183,10 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
   }
   lines.push("─".repeat(42));
   return lines.join("\n");
+}
+/** Short verification status, e.g. "failed · 2 run / 1 skipped". */
+export function formatVerificationFooter(summary: VerificationSummary): string {
+  // Executed steps carry a duration; skipped and setup-error steps never ran.
+  const ran = summary.steps.filter((s) => s.durationMs !== undefined).length;
+  return `${summary.status} · ${ran} run / ${summary.steps.length - ran} not run${summary.reason ? ` · ${summary.reason.replace(/\s+/g, " ")}` : ""}`;
 }
