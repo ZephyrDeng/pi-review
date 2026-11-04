@@ -28,7 +28,7 @@ reviewer 仍然只有只读工具（`read,grep,find,ls`）。命令由 pi-review
 ```
 
 - `argv` 不经 shell 执行；确实需要时显式写 `["sh", "-c", "..."]`。
-- `link` 把原树里被忽略的依赖目录软链进副本，免去重装依赖。经软链写入会落到原树对应（被忽略的）目录。
+- `link` 把原树里被忽略的依赖目录软链进副本，免去重装依赖。经软链写入会落到原树对应（被忽略的）目录。位于另一条目之下的条目已经能经父目录的软链访问，直接跳过。
 - `maxFollowUpRounds` 限制计划的追加轮数（默认 1，即 `round` 最大为 2）。
 
 ```bash
@@ -76,6 +76,8 @@ pi-review --verify-plan plan.json --verify-approval approval.json -- @src
 - `files: [{ "path", "content" }]` 新写的测试/复现文件**只写进隔离副本**（同一次运行里后续步骤也能看到）。
 - 未知字段一律拒绝。复用白名单 `argv` 的步骤只有在不带 `files`/`cwd`、且 `timeoutSec` 不超过白名单值时才算预批准。
 - 批准绑定每个步骤的内容哈希。批准后改动步骤的任何字段，该批准即失效（`stale`，跳过）。
+- 拒绝同时绑定命令本身（`argv`、`cwd`、`files`）：同一条命令换个 id 或改写说明重新提交，仍是 `rejected`，白名单命令也一样。
+- `verify show` 显示每步实际生效的超时（步骤自带值、白名单预算或默认 300s，上限 1800s）。
 - 追加验证：`pi-review verify run --plan plan.json --approval approval.json` 看到结果后，追加 `"round": 2` 的步骤，再走一遍 show → 询问 → approve。`--verify-approval` 可重复，第 1、2 轮的批准合并生效。
 
 ## reviewer 与脚本看到什么
@@ -91,7 +93,9 @@ reviewer prompt：多一节 `## Verification evidence (source type: test-output)
 | `passed` | 所有步骤都跑了且通过 |
 | `partial` | 跑了的步骤都通过，有步骤被跳过 |
 | `failed` | 有步骤失败、超时或出错 |
-| `unverified` | 一条都没跑（见 `reason`），或验证期间原工作树发生变化 |
+| `unverified` | 一条都没跑（见 `reason`）、验证期间原工作树发生变化，或审查目标不在 `repoRoot` 内 / 快照后 `HEAD` 已移动 |
+
+证据来自当前目录所在仓库（`repoRoot`，提交 `head`）。审查目标在别的仓库或不在任何仓库时拿不到证据：summary 降级为 `unverified` 并写明原因。只要是 `unverified`，reviewer prompt 里就不放任何命令输出。
 
 命令失败本身是证据，pi-review 照常完成；审查退出码仍由 reviewer 决定。`pi-review verify show` 用退出码 `5` 表示"需要批准"。
 

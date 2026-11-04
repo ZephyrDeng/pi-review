@@ -39,7 +39,7 @@
 
 **Standing whitelist**: `verify.commands` in `.pi-review.json` as committed at `HEAD`; exact-argv matches are pre-approved. Uncommitted edits to the file never grant pre-approval.
 
-**Approval record**: The output of `pi-review verify approve`, binding approve/reject decisions to each step's content hash. Any edit to an approved step makes its approval `stale`.
+**Approval record**: The output of `pi-review verify approve`, binding approve/reject decisions to each step's content hash. Any edit to an approved step makes its approval `stale`; a rejection also binds to the command (`commandSha256`), so a new id does not escape it.
 
 **Pi package**: The installable package shape that lets Pi load the `/rv` extension and the `pi-review` skill via `pi install`.
 

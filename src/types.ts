@@ -229,6 +229,10 @@ export interface VerificationSummary {
   source: "test-output";
   status: "passed" | "failed" | "partial" | "unverified";
   reason?: string;
+  /** Repository the evidence was produced in (`git rev-parse --show-toplevel`). */
+  repoRoot?: string;
+  /** Commit the isolated snapshot was based on. */
+  head?: string;
   proposer?: "host" | "pi" | "whitelist";
   planSha256?: string;
   approvals?: Array<{ planSha256: string; approvedBy?: string; approvedAt?: string }>;

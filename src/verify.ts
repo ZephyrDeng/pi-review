@@ -11,8 +11,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { redactReviewEventText } from "./review-events.js";
-import { formatVerificationFooter } from "./meta-footer.js";
-import type { ParsedArgs, VerificationApproval, VerificationStepResult, VerificationSummary } from "./types.js";
+import { formatVerificationFooter, stepExecuted } from "./meta-footer.js";
+import type { ParsedArgs, SplitPayload, VerificationApproval, VerificationStepResult, VerificationSummary } from "./types.js";
 
 export const VERIFY_CONFIG_FILE = ".pi-review.json";
 export const DEFAULT_STEP_TIMEOUT_SEC = 300;
@@ -62,6 +62,8 @@ export interface VerifyRepoConfig {
 export interface ApprovalDecision {
   id: string;
   stepSha256: string;
+  /** What the step executes (argv, cwd, files); absent in older records, which stay id-scoped. */
+  commandSha256?: string;
   decision: "approved" | "rejected";
 }
 
@@ -105,6 +107,15 @@ export function sha256(text: string): string {
 /** Content hash an approval binds to; any edit to the step changes it. */
 export function stepSha256(step: PlanStep): string {
   return sha256(JSON.stringify(canonical(step)));
+}
+
+/**
+ * Execution identity: what the step runs (argv, cwd, files), without its id or
+ * description. A human rejection binds to it, so re-proposing the same command
+ * under a new id or new wording is still rejected.
+ */
+export function commandSha256(step: Pick<PlanStep, "argv" | "cwd" | "files">): string {
+  return sha256(JSON.stringify(canonical({ argv: step.argv, cwd: step.cwd, files: step.files?.length ? step.files : undefined })));
 }
 
 export function planSha256(plan: VerificationPlan): string {
@@ -245,6 +256,7 @@ export function parseApproval(raw: unknown): ApprovalRecord {
     if (!d || typeof d.id !== "string" || typeof d.stepSha256 !== "string" || (d.decision !== "approved" && d.decision !== "rejected")) {
       throw new VerifyInputError("approval.decisions entries need id, stepSha256, and decision approved|rejected");
     }
+    if (d.commandSha256 !== undefined && typeof d.commandSha256 !== "string") throw new VerifyInputError("approval.decisions[].commandSha256 must be a string");
   }
   return raw as ApprovalRecord;
 }
@@ -274,7 +286,12 @@ export function createApproval(
     approvedAt: (options.now ?? new Date()).toISOString(),
     decisions: plan.steps
       .filter((step) => approve.has(step.id) || reject.has(step.id))
-      .map((step) => ({ id: step.id, stepSha256: stepSha256(step), decision: reject.has(step.id) ? "rejected" : "approved" })),
+      .map((step) => ({
+        id: step.id,
+        stepSha256: stepSha256(step),
+        commandSha256: commandSha256(step),
+        decision: reject.has(step.id) ? ("rejected" as const) : ("approved" as const),
+      })),
   };
 }
 
@@ -293,15 +310,17 @@ function sameArgv(a: string[], b: string[]): boolean {
 
 /**
  * Decide which steps may run. Without a plan, every whitelist command runs.
- * With a plan: an explicit matching rejection wins; a rejection recorded for a
+ * With a plan: a rejection of this exact step, or of the same command under
+ * any id or wording (commandSha256), wins; a rejection recorded for a
  * different version of the step makes it `stale` (never whitelist pre-approved);
  * then exact-argv whitelist matches (no files, no cwd) are pre-approved; then a
  * matching approval; any other decision for the same id is `stale`.
  */
 export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyRepoConfig, approvals: ApprovalRecord[]): ResolvedStep[] {
   const decisions = approvals.flatMap((record) => record.decisions);
+  const rejectedCommands = new Set(decisions.filter((d) => d.decision === "rejected" && d.commandSha256).map((d) => d.commandSha256));
   if (!plan) {
-    // Without a plan only rejections matter: a human "no" for a whitelist id is honoured.
+    // Without a plan only rejections matter: a human "no" for a whitelist command is honoured.
     const rejected = new Set(decisions.filter((d) => d.decision === "rejected").map((d) => d.id));
     return config.commands.map((command) => {
       const step: PlanStep = {
@@ -310,7 +329,7 @@ export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyR
         purpose: `Standing verification command from ${VERIFY_CONFIG_FILE}`,
         ...(command.timeoutSec !== undefined ? { timeoutSec: command.timeoutSec } : {}),
       };
-      const approval: VerificationApproval = rejected.has(command.id) ? "rejected" : "preapproved";
+      const approval: VerificationApproval = rejected.has(command.id) || rejectedCommands.has(commandSha256(step)) ? "rejected" : "preapproved";
       return { step, origin: "whitelist", approval, sha: stepSha256(step), timeoutSec: command.timeoutSec };
     });
   }
@@ -323,7 +342,7 @@ export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyR
     const whitelistTimeout = match ? match.timeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC : undefined;
     const whitelisted = match !== undefined && (step.timeoutSec === undefined || step.timeoutSec <= whitelistTimeout!);
     let approval: VerificationApproval;
-    if (matching.some((decision) => decision.decision === "rejected")) approval = "rejected";
+    if (matching.some((decision) => decision.decision === "rejected") || rejectedCommands.has(commandSha256(step))) approval = "rejected";
     // Fail closed: a human "no" recorded for an earlier version of this step is
     // not overridden by the whitelist; it needs a fresh decision.
     else if (forId.some((decision) => decision.decision === "rejected")) approval = "stale";
@@ -340,12 +359,14 @@ export function isRunnable(approval: VerificationApproval): boolean {
   return approval === "preapproved" || approval === "approved";
 }
 
-/** Overall status from step outcomes (tree guard and setup errors are applied by the caller). */
-/** True only for steps whose command was actually spawned (setup errors and skips have no duration). */
-export function stepExecuted(step: VerificationStepResult): boolean {
-  return step.durationMs !== undefined;
+/** Effective per-step timeout: own or whitelist budget, else the default, capped at the maximum. */
+export function effectiveTimeoutSec(resolved: Pick<ResolvedStep, "timeoutSec">): number {
+  return Math.min(resolved.timeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC, MAX_STEP_TIMEOUT_SEC);
 }
 
+export { stepExecuted };
+
+/** Overall status from step outcomes (tree guard and setup errors are applied by the caller). */
 export function overallStatus(steps: VerificationStepResult[]): VerificationSummary["status"] {
   const ran = steps.filter(stepExecuted);
   if (ran.length === 0) return "unverified";
@@ -394,9 +415,13 @@ export function runCommand(
     let timedOut = false;
     let settled = false;
     const timers: NodeJS.Timeout[] = [];
+    // Node reaps the group leader before emitting `exit`; from then on its pid
+    // (= our process-group id) may be recycled, so the group is signalled at
+    // most once more, synchronously in the exit handler, and never by a timer.
+    let reaped = false;
     const child = spawn(argv[0]!, argv.slice(1), { cwd: options.cwd, env: options.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const killGroup = (signal: NodeJS.Signals) => {
-      if (!child.pid) return;
+      if (!child.pid || reaped) return;
       try {
         process.kill(-child.pid, signal);
       } catch {
@@ -445,7 +470,10 @@ export function runCommand(
     child.on("error", (error) => finish({ exitCode: null, error: error.message }));
     child.on("exit", (code, signal) => {
       // Reap anything the step left running in its group so the pipes close.
+      // ponytail: a µs pid-reuse window remains between Node's reap and this
+      // kill; closing it needs a holder process that outlives the command.
       killGroup("SIGKILL");
+      reaped = true;
       abandonPipes({ exitCode: code, ...(signal ? { signal } : {}), note: "output pipes were still held by an escaped descendant; output may be incomplete" });
     });
     child.on("close", (code, signal) => finish({ exitCode: code, ...(signal ? { signal } : {}) }));
@@ -514,7 +542,7 @@ const SNAPSHOT_IDENTITY = {
  * throwaway index (the real index, tree, and stash stay untouched), then
  * check it out as a detached worktree with hooks disabled.
  */
-export function createIsolatedCopy(repoRoot: string, link: string[] = []): IsolatedCopy {
+export function createIsolatedCopy(repoRoot: string, link: string[] = [], base = "HEAD"): IsolatedCopy {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-verify-"));
   const dir = path.join(tmpRoot, "tree");
   const links: string[] = [];
@@ -536,19 +564,25 @@ export function createIsolatedCopy(repoRoot: string, link: string[] = []): Isola
   };
   try {
     const indexEnv = { ...process.env, GIT_INDEX_FILE: path.join(tmpRoot, "index") };
-    git(["read-tree", "HEAD"], repoRoot, indexEnv);
+    git(["read-tree", base], repoRoot, indexEnv);
     git(["add", "-A"], repoRoot, indexEnv);
     const tree = git(["write-tree"], repoRoot, indexEnv).trim();
-    const commit = git(["commit-tree", tree, "-p", "HEAD", "-m", "pi-review verify snapshot"], repoRoot, { ...process.env, ...SNAPSHOT_IDENTITY }).trim();
+    const commit = git(["commit-tree", tree, "-p", base, "-m", "pi-review verify snapshot"], repoRoot, { ...process.env, ...SNAPSHOT_IDENTITY }).trim();
     git(["-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", dir, commit], repoRoot);
     added = true;
-    for (const rel of link) {
+    // Parents first; an entry inside an already-linked dir is reachable through
+    // that link (resolving it would walk out of the copy), so it is skipped.
+    const ordered = link.map((rel) => path.normalize(rel)).sort((a, b) => a.split(path.sep).length - b.split(path.sep).length);
+    const linked: string[] = [];
+    for (const rel of ordered) {
+      if (linked.some((parent) => rel === parent || rel.startsWith(parent + path.sep))) continue;
       const source = path.join(repoRoot, rel);
       const dest = resolveInside(dir, rel);
       if (!fs.existsSync(source) || fs.existsSync(dest)) continue;
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.symlinkSync(source, dest);
       links.push(dest);
+      linked.push(rel);
     }
     return { dir, cleanup };
   } catch (error) {
@@ -622,9 +656,10 @@ async function runVerificationUnguarded(options: RunVerificationOptions): Promis
   });
 
   let repoRoot: string;
+  let head: string;
   try {
     repoRoot = git(["rev-parse", "--show-toplevel"], options.cwd).trim();
-    git(["rev-parse", "--verify", "HEAD"], repoRoot);
+    head = git(["rev-parse", "--verify", "HEAD"], repoRoot).trim();
   } catch (error) {
     return summary({ status: "unverified", reason: `not a git repository with a HEAD commit: ${(error as Error).message}` });
   }
@@ -641,6 +676,8 @@ async function runVerificationUnguarded(options: RunVerificationOptions): Promis
   }
 
   const provenance: Partial<VerificationSummary> = {
+    repoRoot,
+    head,
     proposer: plan ? plan.proposer ?? "host" : "whitelist",
     ...(plan ? { planSha256: planSha256(plan) } : {}),
     ...(approvals.length > 0
@@ -660,10 +697,10 @@ async function runVerificationUnguarded(options: RunVerificationOptions): Promis
   let copy: IsolatedCopy;
   try {
     before = gitStatusSnapshot(repoRoot);
-    copy = createIsolatedCopy(repoRoot, config.link);
+    copy = createIsolatedCopy(repoRoot, config.link, head);
   } catch (error) {
     const reason = `failed to create isolated copy: ${(error as Error).message}`;
-    const steps = resolved.map((r) => (isRunnable(r.approval) ? { ...stepBase(r), status: "error" as const, error: "not run: isolation failed" } : skippedStep(r)));
+    const steps = resolved.map((r) => (isRunnable(r.approval) ? { ...stepBase(r), status: "error" as const, error: "isolation failed" } : skippedStep(r)));
     return summary({ ...provenance, status: "unverified", reason, steps });
   }
 
@@ -689,7 +726,7 @@ async function runVerificationUnguarded(options: RunVerificationOptions): Promis
         continue;
       }
       log(`pi-review: verify: ${r.step.id} (${r.approval}): ${r.step.argv.join(" ")}`);
-      const timeoutSec = Math.min(r.timeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC, MAX_STEP_TIMEOUT_SEC);
+      const timeoutSec = effectiveTimeoutSec(r);
       let result: CommandResult;
       try {
         result = await runCommand(r.step.argv, { cwd, env, timeoutMs: timeoutSec * 1000, outputLimit: options.outputLimit });
@@ -751,7 +788,6 @@ const APPROVAL_TEXT: Record<VerificationApproval, string> = {
   stale: "approval no longer matches the step content; not run",
 };
 
-/** Reviewer-prompt section carrying the shared verification evidence. */
 /**
  * Plan-controlled metadata (argv, purpose, cwd, paths, errors) rendered as one
  * line: newlines cannot open a fake heading or instruction block in the prompt.
@@ -765,17 +801,20 @@ function argvText(argv: string[]): string {
   return oneLine(JSON.stringify(argv), 1000);
 }
 
+/** Reviewer-prompt section carrying the shared verification evidence. */
 export function formatVerificationSection(summary: VerificationSummary): string {
   const header = "## Verification evidence (source type: test-output)";
   const ran = summary.steps.filter(stepExecuted).length;
-  if (ran === 0) {
+  // `unverified` with executed steps (tree changed, target mismatch): their
+  // output is withheld so it cannot be cited as evidence.
+  if (ran === 0 || summary.status === "unverified") {
+    const notUsable = (s: VerificationStepResult) =>
+      stepExecuted(s) ? `ran (${s.status}); result withheld, not usable as evidence` : s.error ? `not run: ${oneLine(s.error)}` : APPROVAL_TEXT[s.approval];
     return [
       header,
-      `Verification was requested but no command produced evidence: ${oneLine(summary.reason ?? "unverified")}.`,
+      `Verification was requested but produced no usable evidence${summary.reason ? `: ${oneLine(summary.reason)}` : ""}.`,
       "Treat build, type-check, lint, and test status as UNVERIFIED. Do not claim that tests pass or fail.",
-      ...(summary.steps.length > 0
-        ? ["Steps that did not run:", ...summary.steps.map((s) => `- ${s.id}: ${argvText(s.argv)} — ${s.error ? `not run: ${oneLine(s.error)}` : APPROVAL_TEXT[s.approval]}`)]
-        : []),
+      ...(summary.steps.length > 0 ? ["Steps:", ...summary.steps.map((s) => `- ${s.id}: ${argvText(s.argv)} — ${notUsable(s)}`)] : []),
     ].join("\n");
   }
   const lines = [
@@ -807,18 +846,60 @@ export function formatVerificationSection(summary: VerificationSummary): string 
   return lines.join("\n");
 }
 
+function repoIdentity(target: string): { root: string; head: string } | undefined {
+  try {
+    let dir = target;
+    while (!fs.existsSync(dir)) dir = path.dirname(dir);
+    if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir);
+    const root = fs.realpathSync(git(["rev-parse", "--show-toplevel"], dir).trim());
+    return { root, head: git(["rev-parse", "--verify", "HEAD"], root).trim() };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Evidence applies only to targets in the verified repository at the verified
+ * HEAD. A target in another repository (or none), or a HEAD that moved since
+ * the snapshot, degrades the summary to `unverified` with the reason.
+ * `cwd` is always checked, so a text-only target still catches a moved HEAD.
+ */
+export function bindVerificationToTargets(summary: VerificationSummary, targets: string[], cwd = process.cwd()): VerificationSummary {
+  if (!summary.repoRoot || !summary.head || summary.status === "unverified") return summary;
+  const verifiedRoot = repoIdentity(summary.repoRoot)?.root ?? summary.repoRoot;
+  for (const target of [".", ...targets]) {
+    const id = repoIdentity(path.resolve(cwd, target));
+    const reason = !id
+      ? `review target ${target} is not in a git repository; evidence is from ${summary.repoRoot}`
+      : id.root !== verifiedRoot
+        ? `review target ${target} is in ${id.root}, but verification ran in ${summary.repoRoot}`
+        : id.head !== summary.head
+          ? `HEAD moved from ${summary.head.slice(0, 12)} to ${id.head.slice(0, 12)} after verification`
+          : undefined;
+    if (reason) return { ...summary, status: "unverified", reason };
+  }
+  return summary;
+}
+
+/** Review targets (file refs and path targets) that evidence must match. */
+export function payloadTargets(payload: Pick<SplitPayload, "fileRefs" | "attachableFileRefs" | "pathTargets">): string[] {
+  return [...(payload.attachableFileRefs ?? payload.fileRefs).map((ref) => (ref.startsWith("@") ? ref.slice(1) : ref)), ...(payload.pathTargets ?? [])];
+}
+
 /** Run verification for a review/loop round when it was requested; undefined otherwise. */
 export async function verificationForReview(
   parsed: Pick<ParsedArgs, "verify" | "verifyPlan" | "verifyApprovals">,
   quiet = false,
+  targets: string[] = [],
 ): Promise<VerificationSummary | undefined> {
   if (!parsed.verify) return undefined;
-  const summary = await runVerification({
+  const raw = await runVerification({
     cwd: process.cwd(),
     ...(parsed.verifyPlan ? { planFile: parsed.verifyPlan } : {}),
     ...(parsed.verifyApprovals ? { approvalFiles: parsed.verifyApprovals } : {}),
     ...(quiet ? {} : { onLog: (line: string) => process.stderr.write(`${line}\n`) }),
   });
+  const summary = bindVerificationToTargets(raw, targets);
   if (!quiet) process.stderr.write(`pi-review: verify: ${formatVerificationFooter(summary)}\n`);
   return summary;
 }

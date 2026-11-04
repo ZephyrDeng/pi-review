@@ -3,13 +3,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 import {
   OUTPUT_TAIL_LIMIT,
+  bindVerificationToTargets,
   createApproval,
   formatVerificationSection,
   gitStatusSnapshot,
   parsePlan,
+  parseApproval,
   parseRepoConfig,
   resolveInside,
   resolveSteps,
@@ -20,10 +22,13 @@ import {
   type VerificationPlan,
 } from "./verify.js";
 import { parseReviewCommand } from "./args.js";
+import { formatVerificationFooter } from "./meta-footer.js";
 
 const NODE = process.execPath;
 const temps: string[] = [];
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -147,12 +152,35 @@ test("per-step and reject decisions; reject wins even over the whitelist", () =>
   assert.throws(() => createApproval(basePlan, {}), /needs --all/);
 });
 
-test("a rejected whitelisted step stays blocked after any edit (stale, never preapproved)", () => {
+test("a rejected whitelisted step stays blocked after any edit (rejected or stale, never preapproved)", () => {
   const plan: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "p" }] };
   const rejection = createApproval(plan, { reject: ["check"] });
   assert.equal(resolveSteps(plan, whitelist, [rejection])[0]!.approval, "rejected");
-  const edited: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "reworded" }] };
-  assert.equal(resolveSteps(edited, whitelist, [rejection])[0]!.approval, "stale");
+  const reworded: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "reworded" }] };
+  assert.equal(resolveSteps(reworded, whitelist, [rejection])[0]!.approval, "rejected", "same command, new wording");
+  const changed: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check", "--", "x"], purpose: "p" }] };
+  assert.equal(resolveSteps(changed, whitelist, [rejection])[0]!.approval, "stale", "same id, different command");
+});
+
+test("a rejection binds to the command, so a new id for the same whitelisted argv is still rejected", () => {
+  const plan: VerificationPlan = { version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "p" }] };
+  const rejection = createApproval(plan, { reject: ["check"] });
+  const renamed: VerificationPlan = {
+    version: 1,
+    steps: [
+      { id: "typecheck-again", argv: ["npm", "run", "check"], purpose: "different words", timeoutSec: 60 },
+      { id: "unit", argv: ["npx", "vitest", "run", "x.test.ts"], purpose: "other command" },
+    ],
+  };
+  assert.deepEqual(resolveSteps(renamed, whitelist, [rejection]).map((r) => r.approval), ["rejected", "unapproved"]);
+  // Plan-less run: the whitelist entry is the rejected command even under another plan id.
+  const otherId = createApproval({ version: 1, steps: [{ id: "x", argv: ["npm", "run", "check"], purpose: "p" }] }, { reject: ["x"] });
+  assert.equal(resolveSteps(undefined, whitelist, [otherId])[0]!.approval, "rejected");
+  // Records written before commandSha256 existed stay id-scoped.
+  const legacy = { ...rejection, decisions: rejection.decisions.map(({ commandSha256: _drop, ...d }) => d) };
+  assert.equal(parseApproval(legacy).decisions[0]!.commandSha256, undefined);
+  assert.deepEqual(resolveSteps(renamed, whitelist, [legacy]).map((r) => r.approval), ["preapproved", "unapproved"]);
+  assert.throws(() => parseApproval({ ...rejection, decisions: [{ ...rejection.decisions[0], commandSha256: 1 }] }), /commandSha256 must be a string/);
 });
 
 test("without a plan, a human rejection of a whitelist id is honoured", () => {
@@ -188,22 +216,51 @@ test("--verify is opt-in: parsed args carry no verify keys unless a verify flag 
 // Process execution
 // ---------------------------------------------------------------------------
 
-test("runCommand kills a hanging command at the timeout", async () => {
+// Timeout and grace tests drive runCommand's timers by hand (child processes
+// stay real), so they never race the wall clock or a slow child start-up.
+
+/** Spin on the event loop (not on timers, which may be faked) until `check` holds. */
+async function until(check: () => boolean): Promise<void> {
+  while (!check()) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Fake setTimeout only, and record the signals sent to process groups. */
+function fakeClock(): { groupSignals: () => unknown[] } {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const kill = vi.spyOn(process, "kill");
+  return { groupSignals: () => kill.mock.calls.filter(([pid]) => typeof pid === "number" && pid < 0).map(([, signal]) => signal) };
+}
+
+/** A node -e script that writes `file` once it is past start-up (after `prelude`). */
+function readyScript(file: string, prelude: string, rest = "setInterval(() => {}, 1000)"): string[] {
+  return [NODE, "-e", `${prelude};require('fs').writeFileSync(${JSON.stringify(file)},'1');${rest}`];
+}
+
+test("runCommand SIGTERMs the process group exactly at the deadline", async () => {
   const dir = tmp("pi-review-verify-cmd-");
-  const started = Date.now();
-  const result = await runCommand([NODE, "-e", "setTimeout(() => {}, 60000)"], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  const clock = fakeClock();
+  const pending = runCommand([NODE, "-e", "setTimeout(() => {}, 60000)"], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  vi.advanceTimersByTime(299);
+  assert.deepEqual(clock.groupSignals(), [], "nothing before the deadline");
+  vi.advanceTimersByTime(1);
+  assert.deepEqual(clock.groupSignals(), ["SIGTERM"], "SIGTERM at the deadline, not only the SIGKILL fallback");
+  const result = await pending;
   assert.equal(result.timedOut, true);
-  // SIGTERM at the deadline, not only the SIGKILL fallback 2s later.
-  assert.ok(Date.now() - started < 1500, "timeout must SIGTERM the process group at the deadline");
+  assert.equal(result.signal, "SIGTERM");
 });
 
 test("runCommand SIGKILLs a command that ignores SIGTERM", async () => {
   const dir = tmp("pi-review-verify-cmd-");
-  const started = Date.now();
-  const result = await runCommand([NODE, "-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  const ready = path.join(dir, "ready");
+  const clock = fakeClock();
+  const pending = runCommand(readyScript(ready, "process.on('SIGTERM', () => {})"), { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  await until(() => fs.existsSync(ready)); // the SIGTERM handler is installed
+  vi.advanceTimersByTime(300);
+  vi.advanceTimersByTime(2000);
+  assert.deepEqual(clock.groupSignals().slice(0, 2), ["SIGTERM", "SIGKILL"]);
+  const result = await pending;
   assert.equal(result.timedOut, true);
   assert.equal(result.signal, "SIGKILL");
-  assert.ok(Date.now() - started < 5000);
 });
 
 test("runCommand keeps only a bounded output tail", async () => {
@@ -226,15 +283,42 @@ test("runCommand keeps only a bounded output tail", async () => {
 test("runCommand settles when an escaped descendant keeps the output pipes open", async () => {
   const dir = tmp("pi-review-verify-cmd-");
   const script = "const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();console.log('main done '+c.pid)";
-  const started = Date.now();
-  const result = await runCommand([NODE, "-e", script], { cwd: dir, env: verificationEnv(), timeoutMs: 20_000 });
+  const clock = fakeClock();
+  let settled = false;
+  const pending = runCommand([NODE, "-e", script], { cwd: dir, env: verificationEnv(), timeoutMs: 20_000 }).finally(() => (settled = true));
+  await until(() => clock.groupSignals().length === 1); // leader exited; its group was reaped
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, "the pipes are still held, so `close` has not fired");
+  vi.advanceTimersByTime(2000); // grace after exit: stop waiting for the escaped descendant
+  const result = await pending;
   const pid = Number(/main done (\d+)/.exec(result.outputTail)?.[1]);
   if (pid) process.kill(pid, "SIGKILL");
-  assert.ok(Date.now() - started < 8000, "must not wait for the escaped descendant");
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, false);
   assert.equal(result.error, undefined, "exit 0 with an escaped descendant is not an error");
   assert.match(result.note ?? "", /output pipes were still held/);
+});
+
+test("after the step's leader is reaped, its process-group id is never signalled again", async () => {
+  const dir = tmp("pi-review-verify-cmd-");
+  const ready = path.join(dir, "ready");
+  // Leader leaves an escaped descendant holding the pipes, then hangs until timed out.
+  const script = `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();require('fs').writeFileSync(${JSON.stringify(ready)},String(c.pid));setInterval(()=>{},1000)`;
+  const { groupSignals } = fakeClock();
+  try {
+    const pending = runCommand([NODE, "-e", script], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+    await until(() => fs.existsSync(ready) && fs.readFileSync(ready, "utf8").length > 0);
+    vi.advanceTimersByTime(300); // deadline: SIGTERM the group; the leader exits
+    await until(() => groupSignals().length === 2); // exit handler: one final SIGKILL
+    vi.advanceTimersByTime(5000); // SIGKILL escalation, pipe abandon, hard deadline all come due
+    const result = await pending;
+    assert.equal(result.timedOut, true);
+    assert.deepEqual(groupSignals(), ["SIGTERM", "SIGKILL"], "no group signal after the leader was reaped (its pid may be reused)");
+  } finally {
+    vi.useRealTimers();
+    const pid = Number(fs.readFileSync(ready, "utf8"));
+    if (pid) process.kill(pid, "SIGKILL");
+  }
 });
 
 test("runCommand reports a missing binary as an error, not a crash", async () => {
@@ -366,6 +450,53 @@ test("a command that touches the original tree trips the status guard -> unverif
   assert.equal(summary.treeUnchanged, false);
   assert.equal(summary.status, "unverified");
   assert.match(summary.reason ?? "", /original working tree changed/);
+  // Untrustworthy output is withheld from reviewers, never presented as evidence.
+  const section = formatVerificationSection({ ...summary, steps: [{ ...summary.steps[0]!, outputTail: "LEAKED_OUTPUT" }] });
+  assert.doesNotMatch(section, /LEAKED_OUTPUT|<test-output/);
+  assert.match(section, /- escape: .* — ran \(passed\); result withheld, not usable as evidence/);
+});
+
+test("an unverified summary without a reason never prints the status word as the cause", () => {
+  const section = formatVerificationSection({ source: "test-output", status: "unverified", durationMs: 1, steps: [] });
+  assert.match(section, /produced no usable evidence\.\n/);
+  assert.doesNotMatch(section, /: unverified/);
+});
+
+test("summary records the repository and HEAD it verified", async () => {
+  const repo = makeRepo({ verify: { commands: [{ id: "ok", argv: [NODE, "-e", "1"] }] } });
+  const summary = await runVerification({ cwd: path.join(repo) });
+  assert.equal(summary.status, "passed");
+  assert.equal(fs.realpathSync(summary.repoRoot!), repo);
+  assert.equal(summary.head, git(repo, "rev-parse", "HEAD").trim());
+});
+
+test("evidence binds to its repository and HEAD: other repo, no repo, or moved HEAD -> unverified", async () => {
+  const repo = makeRepo({ verify: { commands: [{ id: "ok", argv: [NODE, "-e", "console.log('EVI'+'DENCE')"] }] } });
+  const summary = await runVerification({ cwd: repo });
+  assert.equal(summary.status, "passed");
+  assert.equal(bindVerificationToTargets(summary, ["a.txt", ".", "missing/dir/file.ts"], repo), summary, "same repo keeps the evidence");
+
+  const other = makeRepo();
+  const elsewhere = bindVerificationToTargets(summary, ["a.txt", path.join(other, "a.txt")], repo);
+  assert.equal(elsewhere.status, "unverified");
+  assert.match(elsewhere.reason ?? "", new RegExp(`is in ${other}.*verification ran in`));
+  assert.doesNotMatch(formatVerificationSection(elsewhere), /EVIDENCE/);
+
+  const nested = path.join(repo, "vendor-repo");
+  fs.mkdirSync(nested);
+  git(nested, "init", "-q");
+  assert.equal(bindVerificationToTargets(summary, ["vendor-repo"], repo).status, "unverified", "a nested repository is another repository");
+
+  const outside = tmp("pi-review-verify-norepo-");
+  assert.match(bindVerificationToTargets(summary, [outside], repo).reason ?? "", /not in a git repository/);
+
+  git(repo, "commit", "-qam", "moved");
+  const moved = bindVerificationToTargets(summary, [], repo);
+  assert.equal(moved.status, "unverified");
+  assert.match(moved.reason ?? "", /HEAD moved from/);
+
+  const already = { ...summary, status: "unverified" as const, reason: "kept" };
+  assert.equal(bindVerificationToTargets(already, [outside], repo).reason, "kept");
 });
 
 test("linked dependency dirs are symlinked into the copy and never deleted on cleanup", async () => {
@@ -376,6 +507,18 @@ test("linked dependency dirs are symlinked into the copy and never deleted on cl
   assert.equal(summary.status, "passed", JSON.stringify(summary));
   assert.match(summary.steps[0]!.outputTail ?? "", /dependency/);
   assert.equal(fs.readFileSync(path.join(repo, "ignored", "dep.txt"), "utf8"), "dependency");
+});
+
+test("a link entry nested in another link entry is covered by the parent link, in any order", async () => {
+  for (const link of [["ignored", "ignored/sub"], ["ignored/sub", "ignored"]]) {
+    const repo = makeRepo({ verify: { commands: [{ id: "dep", argv: [NODE, "-e", "const fs=require('fs');console.log(fs.readFileSync('ignored/dep.txt','utf8')+fs.readFileSync('ignored/sub/x.txt','utf8'))"] }], link } });
+    fs.mkdirSync(path.join(repo, "ignored", "sub"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "ignored", "dep.txt"), "dep-");
+    fs.writeFileSync(path.join(repo, "ignored", "sub", "x.txt"), "sub");
+    const summary = await runVerification({ cwd: repo });
+    assert.equal(summary.status, "passed", `${JSON.stringify(link)}: ${summary.reason}`);
+    assert.match(summary.steps[0]!.outputTail ?? "", /dep-sub/);
+  }
 });
 
 test("resolveInside rejects symlinks, including dangling ones, as targets or ancestors", () => {
@@ -409,7 +552,12 @@ test("exit 0 with an escaped descendant holding the pipes stays passed, with a n
   const pidFile = path.join(tmp("pi-review-verify-pid-"), "pid");
   const script = `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();require('fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid))`;
   const repo = makeRepo({ verify: { commands: [{ id: "daemon", argv: [NODE, "-e", script] }] } });
-  const summary = await runVerification({ cwd: repo });
+  const clock = fakeClock();
+  const pending = runVerification({ cwd: repo });
+  await until(() => clock.groupSignals().length === 1); // step leader exited
+  vi.advanceTimersByTime(2000);
+  const summary = await pending;
+  vi.useRealTimers();
   const pid = Number(fs.readFileSync(pidFile, "utf8"));
   if (pid) process.kill(pid, "SIGKILL");
   assert.equal(summary.steps[0]!.status, "passed");
@@ -460,10 +608,10 @@ test("steps that never executed are reported as not run, never as results", () =
     status: "unverified",
     reason: "failed to create isolated copy: boom",
     durationMs: 1,
-    steps: [{ id: "a", argv: ["npm", "test"], round: 1, origin: "plan", approval: "approved", stepSha256: "h", status: "error", error: "not run: isolation failed" }],
+    steps: [{ id: "a", argv: ["npm", "test"], round: 1, origin: "plan", approval: "approved", stepSha256: "h", status: "error", error: "isolation failed" }],
   });
-  assert.match(notRun, /no command produced evidence: failed to create isolated copy: boom/);
-  assert.match(notRun, /- a: \["npm","test"\] — not run: not run: isolation failed/);
+  assert.match(notRun, /produced no usable evidence: failed to create isolated copy: boom\./);
+  assert.match(notRun, /- a: \["npm","test"\] — not run: isolation failed/);
   assert.doesNotMatch(notRun, /Result:/);
 
   const mixed = formatVerificationSection({
@@ -495,4 +643,21 @@ test("prompt section labels source, approval provenance, and fences output as un
   assert.match(section, /<test-output step="unit">/);
   assert.equal(section.match(/<\s*\/?\s*test-output\b[^>]*>/gi)?.length, 2, "only the real open/close tags survive; embedded variants are escaped");
   assert.match(section, /Cite these results in a finding's Evidence as `test-output <step id>`/);
+});
+
+test("footer counts only executed steps as run and collapses the reason to one line", () => {
+  const step = { argv: ["x"], round: 1, origin: "plan" as const, approval: "approved" as const, stepSha256: "h" };
+  const summary = {
+    source: "test-output" as const,
+    status: "partial" as const,
+    reason: "two\n  lines",
+    durationMs: 1,
+    steps: [
+      { ...step, id: "ran", status: "failed" as const, exitCode: 1, durationMs: 0 },
+      { ...step, id: "setup", status: "error" as const, error: "path escapes the isolated copy" },
+      { ...step, id: "skip", status: "skipped_unapproved" as const },
+    ],
+  };
+  assert.equal(formatVerificationFooter(summary), "partial · 1 run / 2 not run · two lines");
+  assert.equal(formatVerificationFooter({ ...summary, reason: undefined, steps: [] }), "partial · 0 run / 0 not run");
 });
