@@ -159,6 +159,7 @@ Review children still run isolated (`--no-extensions`, issue #8); the rules load
 | [Fast screening](docs/guide/screening.md) | The `screen` workflow, gate outcomes, machine output, and CI placement |
 | [Panel review](docs/guide/panel-review.md) | Consensus policies, aggregation, Jev, `classify`, `screen`, live UI, web dashboard |
 | [Loop review](docs/guide/loop-review.md) | Bounded rounds, `--until clean`, cross-round comparison, convergence stop |
+| [Verify mode](docs/guide/verify-mode.md) | `--verify`: run whitelisted or human-approved tests once in an isolated copy and hand reviewers the results |
 | [Output & integration](docs/guide/output-and-integration.md) | Markdown shape, `PI_REVIEW_META_JSON` schema, exit codes, sessions, progress logs |
 | [Configuration](docs/guide/configuration.md) | Config file, environment variables, security model |
 | [Providers](docs/guide/providers.md) | OrcaRouter and other provider setup |

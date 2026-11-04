@@ -86,6 +86,8 @@ CLI 在 **stdout** 追加一段可读的 ASCII 页脚：
 | `3` | `needs_human`——需要澄清或人工决策 |
 | `4` | `blocked`——子进程 / 运行时失败，或审查无法进行 |
 
+`pi-review verify show` 另用退出码 `5` 表示验证计划需要人批准。带 `--verify` 时 meta 多一个可选 `verification` 对象（`metaVersion: 1` 下的附加字段），见[验证模式](verify-mode.md)。验证命令失败不改变审查退出码。
+
 `3` 和 `4` 故意与 `1` 分开：门禁"没过"和门禁"没跑成"是两回事，别把 `4` 当成"代码有问题"。
 
 ## 会话管理

@@ -10,6 +10,7 @@ export function usage(exitCode = 0): never {
   pi-review classify --baseline <text|@file> [--meta <path>]   Classify a previous review's findings against the frozen baseline (Jev required)
   pi-review screen <@files|paths...>           Gate-grade Jev screening: typed defect judgments, no LLM generation (Jev required)
   pi-review screen-memory                     Show accumulated screen signals and the effective pattern catalog
+  pi-review verify <propose|show|approve|run> [options]   Draft, inspect, approve, or dry-run a verification plan
   pi-review update                      Update package, Claude Code plugin + agent skill content
   pi-review install [options]           Pi package, Claude Code plugin + agent skills (one-shot)
   pi-review install-skill [options]     Install skill to AI agents only
@@ -42,6 +43,9 @@ Options:
   --ui-url-file <path>                        Panel: also write the dashboard URL to this file (atomic; with --ui web)
   --ui-ttl <seconds>                          Panel: dashboard idle TTL after completion (default: 900; with --ui web)
   --no-ui-open                                Panel: do not auto-open the dashboard in a browser (with --ui web)
+  --verify                                    Run verification once in an isolated copy before reviewers (opt-in)
+  --verify-plan <file>                        Agent-proposed verification plan (implies --verify)
+  --verify-approval <file>                    Approval record from \`verify approve\` (repeatable; implies --verify)
   -h, --help                                  Show help
 
 Session (single review only; rejected by loop and panel):
@@ -239,6 +243,17 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
       case "--no-ui-open":
         options.uiOpen = false;
         break;
+      case "--verify":
+        options.verify = true;
+        break;
+      case "--verify-plan":
+        options.verifyPlan = requireValue(arg, argv);
+        options.verify = true;
+        break;
+      case "--verify-approval":
+        options.verifyApprovals = [...(options.verifyApprovals ?? []), requireValue(arg, argv)];
+        options.verify = true;
+        break;
       default:
         if (arg.startsWith("--")) {
           throw new ArgsParseError(`unknown option: ${arg}`);
@@ -375,6 +390,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
   if (argv[0] === "uninstall-skill") {
     return { command: "uninstall-skill", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };
+  }
+  if (argv[0] === "verify") {
+    return { command: "verify", extraArgs: argv.slice(1), mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
   if (argv[0] === "update") {
     return { command: "update", mode: "code", skills: [], payload: [], keepSession: false, stream: true };

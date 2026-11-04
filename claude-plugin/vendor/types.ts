@@ -50,7 +50,7 @@ export interface StructuredReviewResult extends VerdictInfo {
 }
 
 export interface ParsedArgs {
-  command: "review" | "loop" | "classify" | "screen" | "screen-memory" | "models" | "install" | "install-skill" | "uninstall-skill" | "update";
+  command: "review" | "loop" | "classify" | "screen" | "screen-memory" | "models" | "install" | "install-skill" | "uninstall-skill" | "update" | "verify";
   /** For `install`: run `pi install npm:@zephyrdeng/pi-review` */
   installPi?: boolean;
   /** For `install`: run agent skill install (skills CLI / Claude + agy direct fallback) */
@@ -126,6 +126,12 @@ export interface ParsedArgs {
   metaFile?: string;
   /** Screen: files to screen (@file or bare path). */
   screenPaths?: string[];
+  /** Run verification before reviewers (opt-in; set by --verify / --verify-plan / --verify-approval). */
+  verify?: boolean;
+  /** Verification plan file (agent-proposed). */
+  verifyPlan?: string;
+  /** Approval record files from `pi-review verify approve` (repeatable). */
+  verifyApprovals?: string[];
 }
 
 export interface ReviewPreset {
@@ -182,6 +188,55 @@ export interface ReviewMeta extends StructuredReviewResult {
    * in the environment) before retrying.
    */
   extensionHint?: ExtensionHint;
+  /**
+   * Present only when `--verify` / `--verify-plan` / `--verify-approval` was
+   * passed. Additive optional field within metaVersion 1 (no bump); see
+   * docs/design/verify-mode.md.
+   */
+  verification?: VerificationSummary;
+}
+
+/** Outcome of one verification step. */
+export type VerificationStepStatus = "passed" | "failed" | "timed_out" | "error" | "skipped_unapproved" | "skipped_rejected";
+/** How a step was authorised to run (or why not). */
+export type VerificationApproval = "preapproved" | "approved" | "rejected" | "unapproved" | "stale";
+
+export interface VerificationStepResult {
+  id: string;
+  argv: string[];
+  cwd?: string;
+  purpose?: string;
+  round: number;
+  origin: "whitelist" | "plan";
+  approval: VerificationApproval;
+  stepSha256: string;
+  /** Files written only into the isolated copy before this step ran. */
+  files?: Array<{ path: string; sha256: string }>;
+  status: VerificationStepStatus;
+  exitCode?: number | null;
+  signal?: string;
+  durationMs?: number;
+  /** Last characters of interleaved stdout+stderr, secret-redacted. */
+  outputTail?: string;
+  truncated?: boolean;
+  error?: string;
+  /** Informational note that does not change `status` (e.g. output may be incomplete). */
+  note?: string;
+}
+
+/** Shared verification evidence injected into every reviewer prompt. */
+export interface VerificationSummary {
+  source: "test-output";
+  status: "passed" | "failed" | "partial" | "unverified";
+  reason?: string;
+  proposer?: "host" | "pi" | "whitelist";
+  planSha256?: string;
+  approvals?: Array<{ planSha256: string; approvedBy?: string; approvedAt?: string }>;
+  isolation?: "git-worktree";
+  /** False when the original tree's git status changed while verifying. */
+  treeUnchanged?: boolean;
+  durationMs: number;
+  steps: VerificationStepResult[];
 }
 
 export interface ReviewRunResult {

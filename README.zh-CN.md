@@ -158,6 +158,7 @@ pi-review models                                           # 我能用哪些模�
 | [筛查流程](docs/guide/zh-CN/screening.md) | `screen` 的中文流程图、门禁结果、退出码与流水线位置 |
 | [Panel 审查](docs/guide/zh-CN/panel-review.md) | 共识策略、聚合、Jev、`classify`、`screen`、实时 UI、网页看板 |
 | [Loop 审查](docs/guide/zh-CN/loop-review.md) | 有限轮次、`--until clean`、跨轮对比、收敛停止 |
+| [验证模式](docs/guide/zh-CN/verify-mode.md) | `--verify`：在隔离副本里跑一次白名单或经人批准的测试，把结果交给 reviewer |
 | [输出与集成](docs/guide/zh-CN/output-and-integration.md) | Markdown 结构、`PI_REVIEW_META_JSON` schema、退出码、会话、进度日志 |
 | [配置](docs/guide/zh-CN/configuration.md) | 配置文件、环境变量、安全模型 |
 | [Provider](docs/guide/zh-CN/providers.md) | OrcaRouter 等 provider 接入 |

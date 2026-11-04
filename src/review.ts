@@ -21,6 +21,7 @@ import { splitModelProvider } from "./panel-config.js";
 import { formatReviewMetaAscii, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { currentConfig, resolveChildExtensions } from "./pi-config.js";
 import type { PiReviewConfig } from "./pi-config.js";
+import { verificationForReview, withVerificationSection } from "./verify.js";
 
 export function readReviewStdin(): string {
   if (process.stdin.isTTY) return "";
@@ -372,7 +373,9 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     return { meta, exitCode: reviewExitCode(meta.status) };
   }
 
-  args.push(...(payload.attachableFileRefs ?? payload.fileRefs), prompt);
+  // Opt-in verification runs once here, before the reviewer child starts.
+  const verification = await verificationForReview(parsed);
+  args.push(...(payload.attachableFileRefs ?? payload.fileRefs), withVerificationSection(prompt, verification));
 
   let progressWriter: ProgressLogWriter | undefined;
   if (parsed.progressLog) {
@@ -502,6 +505,7 @@ export async function runReviewOnce(parsed: ParsedArgs, stdinText = readReviewSt
     ...(thinking ? { thinking } : {}),
     ...(extractedUsage ? { usage: extractedUsage } : {}),
     sessionHandle: sessionHandle || undefined,
+    ...(verification ? { verification } : {}),
   };
 
   // In streaming mode text was forwarded live; the ASCII footer starts on its

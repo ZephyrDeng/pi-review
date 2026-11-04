@@ -1,0 +1,9 @@
+{
+  "verify": {
+    "commands": [
+      { "id": "check", "argv": ["npm", "run", "check"], "timeoutSec": 600 }
+    ],
+    "link": ["node_modules"],
+    "maxFollowUpRounds": 1
+  }
+}

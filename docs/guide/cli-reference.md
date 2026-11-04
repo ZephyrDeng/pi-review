@@ -9,6 +9,7 @@ pi-review screen <@files|paths...>
 pi-review screen-memory
 pi-review classify --baseline <text|@file> [--meta <path>]
 pi-review models [search]
+pi-review verify <propose|show|approve|run> [options]
 ```
 
 | Option | Description |
@@ -36,6 +37,9 @@ pi-review models [search]
 | `--consensus-model <model>` | Panel: model for semantic consensus adjudication |
 | `--concurrency <n>` | Panel: bounded reviewer concurrency (default: reviewer count) |
 | `--output-format events-jsonl` | Panel: normalized `ReviewEvent v1` JSONL for renderer adapters |
+| `--verify` | Run the committed `.pi-review.json` whitelist once in an isolated copy before reviewers ([Verify mode](verify-mode.md)) |
+| `--verify-plan <file>` | Run an agent-proposed verification plan; non-whitelisted steps need an approval (implies `--verify`) |
+| `--verify-approval <file>` | Approval record from `pi-review verify approve` (repeatable; implies `--verify`) |
 
 ### When to use each command & argument
 
@@ -49,6 +53,7 @@ pi-review models [search]
 - **`--consensus-model <model>`** — Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters.
 - **`--consensus <policy>` / `--min-agree <n>`** — Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts.
 - **`--progress-log <path>`** — Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor.
+- **`--verify` / `--verify-plan` + `pi-review verify …`** — Ground the review in executed tests: whitelisted commands run as-is; agent-proposed steps run only after a human approved them. See [Verify mode](verify-mode.md).
 - **`--ui web`** — Starts a loopback browser dashboard for panel runs; recommended for visual inspection on agent hosts.
   With `PI_REVIEW_UI=pane` (set by the Claude Code plugin) the flag is skipped: the plugin pane draws the run.
 
