@@ -28,7 +28,7 @@ Anything else is recorded as `skipped_unapproved` and never runs. In CI there is
 ```
 
 - `argv` runs without a shell. Use `["sh", "-c", "..."]` explicitly when you need one.
-- `link` symlinks ignored dependency dirs from your tree into the copy so commands work without reinstalling. Writes through the link land in your real (ignored) directory.
+- `link` symlinks ignored dependency dirs from your tree into the copy so commands work without reinstalling. Writes through the link land in your real (ignored) directory. An entry inside another entry is already covered by the parent link and is skipped.
 - `maxFollowUpRounds` caps follow-up rounds in plans (default 1 → highest `round` is 2).
 
 ```bash
@@ -76,6 +76,8 @@ Plan steps (full schema in the [design doc](../design/verify-mode.md#plan-schema
 - `files: [{ "path", "content" }]` adds a new test/repro file **only inside the isolated copy** (it stays there for later steps of the same run).
 - Unknown fields are rejected. A step reusing a whitelisted `argv` is pre-approved only without `files`/`cwd` and without a longer `timeoutSec`.
 - Approvals bind to each step's content hash. Editing any field of an approved step voids its approval (`stale`, skipped).
+- Rejections also bind to the command itself (`argv`, `cwd`, `files`): the same command re-proposed under another id or wording stays `rejected`, even if it is whitelisted.
+- `verify show` prints each step's effective timeout (own value, whitelist budget, or the 300s default, capped at 1800s).
 - Follow-ups: after `pi-review verify run --plan plan.json --approval approval.json` shows the results, append steps with `"round": 2` and repeat show → ask → approve. `--verify-approval` is repeatable, so round-1 and round-2 approvals combine.
 
 ## What reviewers and scripts see
@@ -87,7 +89,7 @@ Footer: `Verify  passed · 2 run / 0 not run`.
 `PI_REVIEW_META_JSON` gains an optional `verification` object (single and panel; `metaVersion` stays `1`):
 
 ```json
-{"verification":{"source":"test-output","status":"passed","proposer":"host","planSha256":"…","approvals":[{"planSha256":"…","approvedBy":"user via AskUserQuestion","approvedAt":"2026-11-04T08:00:00.000Z"}],"isolation":"git-worktree","treeUnchanged":true,"durationMs":5120,"steps":[{"id":"unit-gate","argv":["npx","vitest","run","src/cli-exit.test.ts"],"purpose":"…","round":1,"origin":"plan","approval":"approved","stepSha256":"…","status":"passed","exitCode":0,"durationMs":4980,"outputTail":"…","truncated":false}]}}
+{"verification":{"source":"test-output","status":"passed","repoRoot":"/path/to/repo","head":"<commit sha>","proposer":"host","planSha256":"…","approvals":[{"planSha256":"…","approvedBy":"user via AskUserQuestion","approvedAt":"2026-11-04T08:00:00.000Z"}],"isolation":"git-worktree","treeUnchanged":true,"durationMs":5120,"steps":[{"id":"unit-gate","argv":["npx","vitest","run","src/cli-exit.test.ts"],"purpose":"…","round":1,"origin":"plan","approval":"approved","stepSha256":"…","status":"passed","exitCode":0,"durationMs":4980,"outputTail":"…","truncated":false}]}}
 ```
 
 | `status` | Meaning |
@@ -95,7 +97,9 @@ Footer: `Verify  passed · 2 run / 0 not run`.
 | `passed` | every step ran and passed |
 | `partial` | every executed step passed, some were skipped |
 | `failed` | an executed step failed, timed out, or errored |
-| `unverified` | nothing ran (see `reason`), or the original tree changed while verifying |
+| `unverified` | nothing ran (see `reason`), the original tree changed while verifying, or a review target is outside `repoRoot` / `HEAD` moved after the snapshot |
+
+Evidence comes from the repository of the current directory (`repoRoot`, at commit `head`). A review target in another repository, or outside any, gets no evidence: the summary becomes `unverified` with the reason. For any `unverified` summary the reviewer prompt withholds all output.
 
 A failing command is evidence, not a pi-review failure; the review exit code still comes from the reviewers. `pi-review verify show` uses exit `5` for "approval required".
 

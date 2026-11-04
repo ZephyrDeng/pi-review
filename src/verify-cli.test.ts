@@ -87,7 +87,7 @@ function counterStep(counter: string) {
 }
 
 test("verify show exits 5 when approval is needed and 0 when everything is pre-approved", () => {
-  const repo = makeRepo({ verify: { commands: [{ id: "check", argv: ["npm", "run", "check"] }] } });
+  const repo = makeRepo({ verify: { commands: [{ id: "check", argv: ["npm", "run", "check"], timeoutSec: 600 }] } });
   const io = tmp("pi-review-verify-cli-io-");
   const plan = path.join(io, "plan.json");
   fs.writeFileSync(plan, JSON.stringify({ version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "types" }, { id: "unit", argv: ["npm", "test"], purpose: "tests", sideEffects: "none", idempotent: true }] }));
@@ -96,6 +96,11 @@ test("verify show exits 5 when approval is needed and 0 when everything is pre-a
   assert.match(needs.stdout, /\[check\] round 1 · pre-approved/);
   assert.match(needs.stdout, /\[unit\] round 1 · NEEDS APPROVAL/);
   assert.match(needs.stdout, /self-assessed \(not a gate\)/);
+  // The displayed timeout is the one that will run: whitelist budget, default, or the cap.
+  assert.match(needs.stdout, /\[check\][^[]*timeout:  600s\n/);
+  assert.match(needs.stdout, /\[unit\][^[]*timeout:  300s\n/);
+  fs.writeFileSync(plan, JSON.stringify({ version: 1, steps: [{ id: "long", argv: ["npm", "test"], purpose: "p", timeoutSec: 99999, expectedDurationSec: 30 }] }));
+  assert.match(cli(repo, ["verify", "show", plan]).stdout, /timeout:  1800s \(expected ~30s\)/);
   fs.writeFileSync(plan, JSON.stringify({ version: 1, steps: [{ id: "check", argv: ["npm", "run", "check"], purpose: "types" }] }));
   assert.equal(cli(repo, ["verify", "show", plan]).status, 0);
   fs.writeFileSync(plan, JSON.stringify({ version: 1, steps: [{ id: "x", argv: ["a"], purpose: "p", isolated: false }] }));
@@ -130,6 +135,8 @@ test("plan -> approve -> single review: reviewer prompt carries approved results
   assert.equal(m.verification.steps[0].approval, "approved");
   assert.equal(m.verification.steps[0].stepSha256, JSON.parse(approve.stdout).decisions[0].stepSha256);
   assert.match(run.stdout, /Verify\s+passed · 1 run \/ 0 not run/);
+  assert.equal(m.verification.repoRoot, repo);
+  assert.equal(m.verification.head, git(repo, "rev-parse", "HEAD").trim());
   assert.equal(git(repo, "status", "--porcelain"), status);
 });
 
@@ -221,4 +228,27 @@ test("proposer prompt lists the standing whitelist; JSON extraction tolerates fe
   assert.match(prompt, /\["npm","run","check"\]/);
   assert.match(prompt, /Do not run, edit, or write anything/);
   assert.deepEqual(extractJsonObject("```json\n{\"a\":1}\n```"), { a: 1 });
+});
+
+test("a review target outside the verified repository gets no evidence (single and panel)", () => {
+  const repo = makeRepo();
+  const other = makeRepo();
+  const io = tmp("pi-review-verify-cli-io-");
+  const counter = path.join(io, "count");
+  const plan = path.join(io, "plan.json");
+  fs.writeFileSync(plan, JSON.stringify({ version: 1, steps: [counterStep(counter)] }));
+  const approval = path.join(io, "approval.json");
+  fs.writeFileSync(approval, cli(repo, ["verify", "approve", plan, "--all"]).stdout);
+  for (const extra of [[], ["--reviewers", "2"]]) {
+    const fake = writeFakePi(tmp("pi-review-verify-cli-io-"), APPROVE);
+    const run = cli(repo, ["--no-stream", ...extra, "--verify-plan", plan, "--verify-approval", approval, "--", `@${path.join(other, "a.txt")}`], { PI_BIN: fake.bin });
+    assert.equal(run.status, 0, run.stderr);
+    const m = meta(run.stderr);
+    assert.equal(m.verification.status, "unverified", JSON.stringify(extra));
+    assert.match(m.verification.reason, /verification ran in/);
+    for (const prompt of prompts(fake.argvDir)) {
+      assert.doesNotMatch(prompt, /VERIFY_OK hello/, "output from another repository must not reach reviewers");
+      assert.match(prompt, /Treat build, type-check, lint, and test status as UNVERIFIED/);
+    }
+  }
 });

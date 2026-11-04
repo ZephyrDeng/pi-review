@@ -17,6 +17,7 @@ import {
   VERIFY_CONFIG_FILE,
   VerifyInputError,
   createApproval,
+  effectiveTimeoutSec,
   isRunnable,
   loadRepoConfig,
   parsePlan,
@@ -70,11 +71,12 @@ export function formatPlanListing(plan: VerificationPlan, config: VerifyRepoConf
   const resolved = resolveSteps(plan, config, []);
   const lines = [`Verification plan (proposer: ${plan.proposer ?? "host"}, sha256 ${planSha256(plan)})`];
   if (plan.summary) lines.push(plan.summary);
-  for (const { step, approval, sha } of resolved) {
+  for (const r of resolved) {
+    const { step, approval, sha } = r;
     lines.push("", `[${step.id}] round ${step.round ?? 1} · ${approval === "preapproved" ? `pre-approved (${VERIFY_CONFIG_FILE} at HEAD)` : "NEEDS APPROVAL"}`);
     lines.push(`  command:  ${step.argv.map((a) => (/[\s"'$`\\]/.test(a) ? JSON.stringify(a) : a)).join(" ")}${step.cwd ? `   (cwd ${step.cwd})` : ""}`);
     lines.push(`  purpose:  ${step.purpose}`);
-    if (step.expectedDurationSec !== undefined) lines.push(`  expected: ~${step.expectedDurationSec}s (timeout ${step.timeoutSec ?? 300}s)`);
+    lines.push(`  timeout:  ${effectiveTimeoutSec(r)}s${step.expectedDurationSec !== undefined ? ` (expected ~${step.expectedDurationSec}s)` : ""}`);
     if (step.sideEffects !== undefined || step.idempotent !== undefined) {
       lines.push(`  self-assessed (not a gate): side effects: ${step.sideEffects ?? "unstated"}; idempotent: ${step.idempotent ?? "unstated"}`);
     }

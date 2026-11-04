@@ -36,7 +36,7 @@ import { currentConfig } from "./pi-config.js";
 import { formatPanelMetaAscii, formatPanelFindingsMarkdown, formatReviewMetaJsonLine } from "./meta-footer.js";
 import { createReviewEventEmitter, redactReviewEventPayload, redactReviewMetaPayload, type ReviewEvent, type ReviewEventListener } from "./review-events.js";
 import { createPaneEventSink, launchPanelUi } from "./panel-ui.js";
-import { verificationForReview, withVerificationSection } from "./verify.js";
+import { payloadTargets, verificationForReview, withVerificationSection } from "./verify.js";
 
 /** Emit the aggregate panel footer (ASCII + JSON) like a single review. */
 export function emitPanelFooter(meta: PanelReviewMeta): void {
@@ -486,7 +486,7 @@ export async function runPanelReviewOnce(
 
   // Opt-in verification: one shared run before any reviewer starts, never per
   // reviewer. Its own durationMs lives in meta.verification, outside the review timer.
-  const verification = await verificationForReview(parsed, parsed.outputFormat === "events-jsonl");
+  const verification = await verificationForReview(parsed, parsed.outputFormat === "events-jsonl", payloadTargets(payload));
   const startedAt = Date.now();
   const submissions = await mapWithConcurrency(
     resolved.reviewers,

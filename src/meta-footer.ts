@@ -1,4 +1,4 @@
-import type { PanelReviewMeta, ReviewMeta, TokenUsage, VerificationSummary } from "./types.js";
+import type { PanelReviewMeta, ReviewMeta, TokenUsage, VerificationStepResult, VerificationSummary } from "./types.js";
 
 const VERDICT_DISPLAY: Record<ReviewMeta["verdict"], { label: string; mark: string }> = {
   approve: { label: "APPROVE", mark: "✓" },
@@ -184,9 +184,13 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
   lines.push("─".repeat(42));
   return lines.join("\n");
 }
-/** Short verification status, e.g. "failed · 2 run / 1 skipped". */
+/** True only for steps whose command was actually spawned (setup errors and skips have no duration). */
+export function stepExecuted(step: VerificationStepResult): boolean {
+  return step.durationMs !== undefined;
+}
+
+/** Short verification status, e.g. "failed · 2 run / 1 not run". */
 export function formatVerificationFooter(summary: VerificationSummary): string {
-  // Executed steps carry a duration; skipped and setup-error steps never ran.
-  const ran = summary.steps.filter((s) => s.durationMs !== undefined).length;
+  const ran = summary.steps.filter(stepExecuted).length;
   return `${summary.status} · ${ran} run / ${summary.steps.length - ran} not run${summary.reason ? ` · ${summary.reason.replace(/\s+/g, " ")}` : ""}`;
 }

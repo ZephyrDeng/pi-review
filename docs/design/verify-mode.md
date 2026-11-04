@@ -136,8 +136,12 @@ JSON (sorted keys, includes `files[].content`). Editing any field, including the
 purpose or a file's content, changes the hash, and the old approval no longer
 matches (`stale` → `skipped_unapproved`). Approval is per step so appending a
 follow-up round does not void round-1 approvals, while the new steps need their
-own decision. A human rejection is fail-closed: if the rejected step is later
-edited, it becomes `stale` and is skipped, even when its argv is whitelisted.
+own decision. A human rejection is fail-closed and binds to what the step
+runs as well as to its id: each decision also stores `commandSha256` = SHA-256
+of the step's canonical `{argv, cwd, files}` (no id, no description). Any step
+with that fingerprint is `rejected`, under any id or wording, even when its argv
+is whitelisted; a rejected id whose command was changed becomes `stale` and is
+skipped. Records written before `commandSha256` existed stay id-scoped.
 The record also stores the `planSha256` it was made for, for audit.
 
 ## Standing whitelist: `.pi-review.json`
@@ -160,8 +164,10 @@ The record also stores the `planSha256` it was made for, for audit.
 - `link`: ignored paths (typically dependency dirs) symlinked from the original
   tree into the copy so commands work without a reinstall. Writes through a
   link land in the original (ignored) directory; keep it to dependency caches.
+  An entry inside another entry (`node_modules/.bin` next to `node_modules`)
+  is already reachable through the parent link and is skipped.
 - `--verify` without a plan runs exactly these commands, all pre-approved,
-  except ids a human explicitly rejected in a passed approval record.
+  except ids or commands a human rejected in a passed approval record.
 - The file is validated strictly: `verify` must be an object with only
   `commands`, `link`, `maxFollowUpRounds`; a typo such as `links` is an error
   (reported as `unverified` with the reason), never silently ignored.
@@ -178,7 +184,8 @@ Snapshot: `GIT_INDEX_FILE=<tmp> git read-tree HEAD && git add -A && git write-tr
 then `git commit-tree -p HEAD`. This uses a throwaway index, so the real index,
 working tree, and stash stack are untouched; it honours `.gitignore`. The
 worktree is added with `core.hooksPath=/dev/null` so repo `post-checkout` hooks
-do not run. After all steps: `git worktree remove --force`, `git worktree prune`,
+do not run. `HEAD` is resolved once; the snapshot is built on that commit and
+the summary records it as `head`, with the repository as `repoRoot`. After all steps: `git worktree remove --force`, `git worktree prune`,
 delete temp dirs.
 
 Guard: `git status --porcelain=v1 -z --untracked-files=all` of the original
@@ -191,13 +198,27 @@ are outside the guard. `treeUnchanged: true` means "tracked and untracked
 files of the original tree are as before", nothing stronger. A concurrent
 editor writing to the tree during a long step also trips the guard (fail-closed).
 
+Target binding: verification runs in the repository of the current directory,
+so its evidence applies only to review targets in that repository at that
+commit. Before the section is built, every `@file` / path target and the
+current directory are resolved to their repository (`git rev-parse
+--show-toplevel`) and `HEAD`. A target outside any repository, in a different
+repository (including a nested one), or a `HEAD` that moved after the snapshot
+makes the summary `unverified` with a reason naming the mismatch.
+
 ## Execution and safety defaults
 
 - Sequential, once per review run, before any reviewer starts; one summary is
   shared by every reviewer (single and panel). No per-reviewer execution.
 - `spawn(argv[0], argv.slice(1), { shell: false, detached: true, stdin: ignore })`;
   on timeout SIGTERM the process group, SIGKILL after 2s; the group is also
-  killed after normal exit so stray daemons do not outlive the step. If a
+  killed after normal exit so stray daemons do not outlive the step. Node
+  reaps the group leader before it reports the exit, after which its pid (the
+  group id) may be recycled; so that final SIGKILL is sent synchronously in the
+  exit handler and no pending timer signals the group afterwards. A
+  microsecond window between the reap and that kill remains; closing it would
+  need a holder process that outlives the command, which is not worth one extra
+  process per step for a pid wrap-around inside that window. If a
   descendant escaped the group (`setsid`) and keeps the output pipes open,
   pi-review stops reading 2s after the step's own exit (or 4s after the
   timeout) and records the step's real exit status plus a `note` that output
@@ -226,7 +247,7 @@ Overall status:
 
 | Status | When |
 |---|---|
-| `unverified` | no command executed (no plan and no whitelist, all skipped, setup error) or the tree guard tripped |
+| `unverified` | no command executed (no plan and no whitelist, all skipped, setup error), the tree guard tripped, or a review target does not match `repoRoot`/`head` |
 | `failed` | any executed step failed, timed out, or errored |
 | `partial` | every executed step passed, some steps did not run |
 | `passed` | every step ran and passed |
@@ -245,7 +266,9 @@ metadata is rendered on one line (argv as a JSON array; newlines in purpose,
 cwd, paths, and errors flattened; purpose capped at 1000 characters) so a plan
 cannot open a fake heading or instruction block in the reviewer prompt. Reviewers are told to
 cite `test-output <step id>` in `Evidence:` and never to claim verification
-beyond the listed steps. For `unverified`, the section says so with the reason.
+beyond the listed steps. For `unverified`, the section says so with the reason
+(if any) and withholds every output tail: steps that ran are listed as "result
+withheld, not usable as evidence".
 
 Meta: optional `verification` field on `ReviewMeta` (single and panel). Additive
 within `REVIEW_META_VERSION = 1`: no bump, matching the rule in `src/types.ts`
@@ -278,6 +301,8 @@ accidental edits; it does **not** contain a malicious command (it can read
 | Malicious committed whitelist on an untrusted branch | Opt-in only; docs: do not use `--verify` on checkouts you would not run `npm test` on. `verify show` prints every command before anything runs. |
 | LLM proposer smuggles a dangerous command | Proposer output is a plan; every non-whitelisted step needs a human approval bound to its exact content. |
 | Plan edited after approval | Per-step hashes; changed steps are `stale` and skipped. |
+| Rejected command re-proposed under a new id | Rejections also bind to `commandSha256` (argv, cwd, files). |
+| Evidence from another tree used for the target | `repoRoot`/`head` recorded; mismatched targets degrade to `unverified`. |
 | Secrets leaked to commands or into prompts | Env allowlist + secret-name deny; output tails redacted before prompt/meta. |
 | Prompt injection via test output | Output wrapped in tagged blocks declared as untrusted data. |
 | Command mutates the original tree | Runs in the copy; `git status` guard downgrades to `unverified` if the tree changed. |
@@ -287,7 +312,6 @@ accidental edits; it does **not** contain a malicious command (it can read
 ## Follow-ups
 
 - Remove a step's `files` after it runs (today they persist for later steps in the same run).
-- Skip the post-exit process-group kill once the group is known to be empty (pid-reuse window).
 - Widen the tree guard to refs (`git for-each-ref`) and report ignored-path writes through `link`.
 - Suggest whitelist candidates from `package.json` scripts / CI config (still require approval).
 - `/rv` Pi panel: native confirm dialog for the handshake and a verification row in the dashboard.
