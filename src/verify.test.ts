@@ -27,6 +27,8 @@ import { formatVerificationFooter } from "./meta-footer.js";
 const NODE = process.execPath;
 const temps: string[] = [];
 afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -214,22 +216,51 @@ test("--verify is opt-in: parsed args carry no verify keys unless a verify flag 
 // Process execution
 // ---------------------------------------------------------------------------
 
-test("runCommand kills a hanging command at the timeout", async () => {
+// Timeout and grace tests drive runCommand's timers by hand (child processes
+// stay real), so they never race the wall clock or a slow child start-up.
+
+/** Spin on the event loop (not on timers, which may be faked) until `check` holds. */
+async function until(check: () => boolean): Promise<void> {
+  while (!check()) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Fake setTimeout only, and record the signals sent to process groups. */
+function fakeClock(): { groupSignals: () => unknown[] } {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const kill = vi.spyOn(process, "kill");
+  return { groupSignals: () => kill.mock.calls.filter(([pid]) => typeof pid === "number" && pid < 0).map(([, signal]) => signal) };
+}
+
+/** A node -e script that writes `file` once it is past start-up (after `prelude`). */
+function readyScript(file: string, prelude: string, rest = "setInterval(() => {}, 1000)"): string[] {
+  return [NODE, "-e", `${prelude};require('fs').writeFileSync(${JSON.stringify(file)},'1');${rest}`];
+}
+
+test("runCommand SIGTERMs the process group exactly at the deadline", async () => {
   const dir = tmp("pi-review-verify-cmd-");
-  const started = Date.now();
-  const result = await runCommand([NODE, "-e", "setTimeout(() => {}, 60000)"], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  const clock = fakeClock();
+  const pending = runCommand([NODE, "-e", "setTimeout(() => {}, 60000)"], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  vi.advanceTimersByTime(299);
+  assert.deepEqual(clock.groupSignals(), [], "nothing before the deadline");
+  vi.advanceTimersByTime(1);
+  assert.deepEqual(clock.groupSignals(), ["SIGTERM"], "SIGTERM at the deadline, not only the SIGKILL fallback");
+  const result = await pending;
   assert.equal(result.timedOut, true);
-  // SIGTERM at the deadline, not only the SIGKILL fallback 2s later.
-  assert.ok(Date.now() - started < 1500, "timeout must SIGTERM the process group at the deadline");
+  assert.equal(result.signal, "SIGTERM");
 });
 
 test("runCommand SIGKILLs a command that ignores SIGTERM", async () => {
   const dir = tmp("pi-review-verify-cmd-");
-  const started = Date.now();
-  const result = await runCommand([NODE, "-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  const ready = path.join(dir, "ready");
+  const clock = fakeClock();
+  const pending = runCommand(readyScript(ready, "process.on('SIGTERM', () => {})"), { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
+  await until(() => fs.existsSync(ready)); // the SIGTERM handler is installed
+  vi.advanceTimersByTime(300);
+  vi.advanceTimersByTime(2000);
+  assert.deepEqual(clock.groupSignals().slice(0, 2), ["SIGTERM", "SIGKILL"]);
+  const result = await pending;
   assert.equal(result.timedOut, true);
   assert.equal(result.signal, "SIGKILL");
-  assert.ok(Date.now() - started < 5000);
 });
 
 test("runCommand keeps only a bounded output tail", async () => {
@@ -252,30 +283,28 @@ test("runCommand keeps only a bounded output tail", async () => {
 test("runCommand settles when an escaped descendant keeps the output pipes open", async () => {
   const dir = tmp("pi-review-verify-cmd-");
   const script = "const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();console.log('main done '+c.pid)";
-  const started = Date.now();
-  const result = await runCommand([NODE, "-e", script], { cwd: dir, env: verificationEnv(), timeoutMs: 20_000 });
+  const clock = fakeClock();
+  let settled = false;
+  const pending = runCommand([NODE, "-e", script], { cwd: dir, env: verificationEnv(), timeoutMs: 20_000 }).finally(() => (settled = true));
+  await until(() => clock.groupSignals().length === 1); // leader exited; its group was reaped
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, "the pipes are still held, so `close` has not fired");
+  vi.advanceTimersByTime(2000); // grace after exit: stop waiting for the escaped descendant
+  const result = await pending;
   const pid = Number(/main done (\d+)/.exec(result.outputTail)?.[1]);
   if (pid) process.kill(pid, "SIGKILL");
-  assert.ok(Date.now() - started < 8000, "must not wait for the escaped descendant");
   assert.equal(result.exitCode, 0);
   assert.equal(result.timedOut, false);
   assert.equal(result.error, undefined, "exit 0 with an escaped descendant is not an error");
   assert.match(result.note ?? "", /output pipes were still held/);
 });
 
-/** Spin on the event loop (not on timers, which may be faked) until `check` holds. */
-async function until(check: () => boolean): Promise<void> {
-  while (!check()) await new Promise((resolve) => setImmediate(resolve));
-}
-
 test("after the step's leader is reaped, its process-group id is never signalled again", async () => {
   const dir = tmp("pi-review-verify-cmd-");
   const ready = path.join(dir, "ready");
   // Leader leaves an escaped descendant holding the pipes, then hangs until timed out.
   const script = `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();require('fs').writeFileSync(${JSON.stringify(ready)},String(c.pid));setInterval(()=>{},1000)`;
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  const kill = vi.spyOn(process, "kill");
-  const groupSignals = () => kill.mock.calls.filter(([pid]) => typeof pid === "number" && pid < 0).map(([, signal]) => signal);
+  const { groupSignals } = fakeClock();
   try {
     const pending = runCommand([NODE, "-e", script], { cwd: dir, env: verificationEnv(), timeoutMs: 300 });
     await until(() => fs.existsSync(ready) && fs.readFileSync(ready, "utf8").length > 0);
@@ -286,7 +315,6 @@ test("after the step's leader is reaped, its process-group id is never signalled
     assert.equal(result.timedOut, true);
     assert.deepEqual(groupSignals(), ["SIGTERM", "SIGKILL"], "no group signal after the leader was reaped (its pid may be reused)");
   } finally {
-    kill.mockRestore();
     vi.useRealTimers();
     const pid = Number(fs.readFileSync(ready, "utf8"));
     if (pid) process.kill(pid, "SIGKILL");
@@ -524,7 +552,12 @@ test("exit 0 with an escaped descendant holding the pipes stays passed, with a n
   const pidFile = path.join(tmp("pi-review-verify-pid-"), "pid");
   const script = `const c=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{detached:true,stdio:['ignore','inherit','inherit']});c.unref();require('fs').writeFileSync(${JSON.stringify(pidFile)},String(c.pid))`;
   const repo = makeRepo({ verify: { commands: [{ id: "daemon", argv: [NODE, "-e", script] }] } });
-  const summary = await runVerification({ cwd: repo });
+  const clock = fakeClock();
+  const pending = runVerification({ cwd: repo });
+  await until(() => clock.groupSignals().length === 1); // step leader exited
+  vi.advanceTimersByTime(2000);
+  const summary = await pending;
+  vi.useRealTimers();
   const pid = Number(fs.readFileSync(pidFile, "utf8"));
   if (pid) process.kill(pid, "SIGKILL");
   assert.equal(summary.steps[0]!.status, "passed");
