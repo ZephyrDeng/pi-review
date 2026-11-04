@@ -41,3 +41,4 @@
 - 评审员运行失败时，面板页脚和 `reviewers[].runtimeError` 保留子进程 stderr / 堆栈尾部用于诊断
 - `--keep-session` 只存储子审查会话，供显式追问
 - 审查会话是只读的：不改文件、不打补丁、不提交、不部署
+- `--verify`（需显式开启）是唯一会执行仓库代码的路径：由 pi-review 自身代码在一次性 worktree 副本里执行白名单（`HEAD` 已提交的 `.pi-review.json`）或经人批准的命令，过滤环境变量、有超时、输出有上限。reviewer 仍然只读。它保护工作树，保护不了本机——见[验证模式](verify-mode.md#安全默认)。

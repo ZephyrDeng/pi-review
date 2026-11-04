@@ -17,6 +17,7 @@ import { runUpdate } from "./update.js";
 import { runInstall } from "./install.js";
 import { runClassify } from "./classify.js";
 import { runScreen, runScreenMemory } from "./screen.js";
+import { runVerifyCommand } from "./verify-cli.js";
 
 const parsed = parseArgs(process.argv.slice(2));
 if (isInstallHelp(parsed)) usage(0);
@@ -53,6 +54,8 @@ function loopMatcher(parsed: ParsedArgs): FindingMatcher {
 if (parsed.command === "models") {
   const config = resolveConfig();
   runModels(config.piBin, parsed.search || []);
+} else if (parsed.command === "verify") {
+  await runVerifyCommand(parsed.extraArgs ?? []);
 } else if (parsed.command === "update") {
   runUpdate();
 } else if (parsed.command === "classify") {

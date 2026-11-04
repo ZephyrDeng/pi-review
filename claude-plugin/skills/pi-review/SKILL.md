@@ -156,6 +156,29 @@ Use this protocol when the host is closing out implementation work and may edit 
 
 The shell exit policy is: `0` clean, `1` status is `has_findings`, `2` usage error, `3` needs human, `4` blocked/runtime failure. A non-zero loop result is a gate signal, not permission for the child reviewer to edit.
 
+## Verification before review (`--verify`)
+
+Opt-in. pi-review runs verification commands once, in a disposable isolated copy of the working tree, before reviewers start, and gives every reviewer the results as `test-output` evidence. Reviewers stay read-only; pi-review's own code runs the commands. Guide: [docs/guide/verify-mode.md](https://github.com/ZephyrDeng/pi-review/blob/main/docs/guide/verify-mode.md).
+
+**When to use it:** the user asks for a review that should rest on executed tests/type checks, or the change makes claims (a bug fix, a behavior change) that a test can confirm. Skip it for plan/design reviews and for untrusted checkouts.
+
+**Trust boundary:** verification executes repository code on this machine with the user's privileges. The isolated copy protects the working tree, not the machine. Never add `--verify` on a repository the user would not run its tests on.
+
+**What runs without asking:** only `verify.commands` from `.pi-review.json` committed at `HEAD` (standing pre-approval). `pi-review --verify -- <target>` runs exactly those. Everything else needs a human decision.
+
+**Agent-proposed verification — host steps (mandatory order):**
+
+1. **Propose.** Write `plan.json` yourself (default: you know the session, the issue, the design docs, and what you changed). Pick the smallest set of commands that confirms or refutes the change's claims; add a minimal repro test via `files` when a key claim has no test. Every step needs `id`, `argv` (no shell), and `purpose`; add `expectedDurationSec`, `sideEffects`, `idempotent` as your honest self-assessment. Fallback when you lack context: `pi-review verify propose -- <target> > plan.json` (read-only Pi child, same format).
+2. **Show.** Run `pi-review verify show plan.json`. Exit `0` = everything is pre-approved, go to step 5 without `--verify-approval`. Exit `5` = a human must decide. Exit `2` = invalid plan; fix it.
+3. **Ask the user.** Present every step that says `NEEDS APPROVAL` — command, purpose, new files, your self-assessment — with your host's question tool (Claude Code `AskUserQuestion`; Codex/Cursor approval prompt). Offer approve all / choose steps / reject. **Never approve on the user's behalf, never skip the question, and never run a step yourself in the shell instead.**
+4. **Record.** `pi-review verify approve plan.json --all | --steps a,b [--reject c] --by "<user> via <tool>" > approval.json`. The record binds to each step's content hash; editing a step afterwards voids its approval, so re-ask after any edit.
+5. **Review.** `pi-review [loop] --verify-plan plan.json --verify-approval approval.json [panel flags] -- <target>`. Unapproved steps show up as `skipped_unapproved` in the prompt and meta.
+6. **Iterate (optional, capped).** To see results without a full review: `pi-review verify run --plan plan.json --approval approval.json`. After a failure you may append `"round": 2` steps (e.g. a minimal repro), then repeat steps 2-4 for the new steps only and pass both approval files (`--verify-approval` is repeatable). The default cap is one follow-up round (`verify.maxFollowUpRounds`).
+
+CI / non-interactive callers: pass `--verify` (whitelist) or a plan without approval; only pre-approved steps run.
+
+**Reading results:** the footer shows `Verify  <status> · N run / M skipped`; `PI_REVIEW_META_JSON.verification` carries `status` (`passed | partial | failed | unverified`), `reason`, per-step `approval`, `status`, `exitCode`, `stepSha256`, and the redacted output tail. A failing command is evidence, not a pi-review failure. Report `unverified` honestly; never describe it as passing.
+
 ## Gate-grade fast screening (`pi-review screen`)
 
 `pi-review screen <@files|paths...>` is a sub-second gate check that completely skips LLM prose generation. It slices files at declaration boundaries into hunks, evaluates each hunk against defect patterns via single-call typed Jev judgments, and assembles findings from catalog templates in **~1.0–1.2s**:
@@ -197,6 +220,8 @@ A finding whose summary ends `matched no known pattern` is an unmatched signal: 
 | `--until clean` | In `loop` mode, automates iterative convergence (stops when confirmed actionable issues drop to 0 or hard `--max-rounds` cap is hit). |
 | `--progress-log <path>` | Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor. |
 | `--ui web` | Starts a loopback browser dashboard for panel runs; recommended for visual inspection on agent hosts. |
+| `--verify` / `--verify-plan <file>` / `--verify-approval <file>` | Run whitelisted or human-approved verification once in an isolated copy before reviewers; see [Verification before review](#verification-before-review---verify). |
+| `verify propose\|show\|approve\|run` | The host-side handshake for agent-proposed verification plans. `show` exits `5` when the user must approve. |
 
 
 ## Panel review

@@ -82,6 +82,8 @@ The parser prefers the exact `### F1` shape above but also accepts legacy `###` 
 | `3` | `needs_human` — clarification or a decision is required |
 | `4` | `blocked` — child/runtime failure or review cannot proceed |
 
+`pi-review verify show` additionally exits `5` when a verification plan needs human approval. With `--verify`, meta carries an optional `verification` object (additive under `metaVersion: 1`); see [Verify mode](verify-mode.md#what-reviewers-and-scripts-see). Failing verification commands never change the review exit code.
+
 ## Session Management
 
 ```bash
