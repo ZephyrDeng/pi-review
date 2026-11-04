@@ -112,9 +112,24 @@ export function planSha256(plan: VerificationPlan): string {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+const PLAN_KEYS = new Set(["version", "proposer", "summary", "steps"]);
+const STEP_KEYS = new Set(["id", "argv", "purpose", "cwd", "expectedDurationSec", "sideEffects", "idempotent", "isolated", "timeoutSec", "round", "files"]);
+const FILE_KEYS = new Set(["path", "content"]);
+const COMMAND_KEYS = new Set(["id", "argv", "timeoutSec"]);
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+/** argv for spawn without a shell: non-empty, no empty program, no NUL bytes. */
+function isArgv(value: unknown): value is string[] {
+  return isStringArray(value) && value.length > 0 && value[0]!.length > 0 && value.every((item) => !item.includes("\0"));
+}
+
+/** Unknown keys are rejected: a typo (e.g. `file` for `files`) must not be approved and silently ignored. */
+function rejectUnknownKeys(value: Record<string, unknown>, allowed: Set<string>, where: string): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) throw new VerifyInputError(`${where}: unknown field(s) ${unknown.join(", ")}`);
 }
 
 /** A relative path that stays inside its root (no absolute paths, no `..`). */
@@ -136,6 +151,8 @@ function optionalPositive(step: Record<string, unknown>, key: string, where: str
 export function parsePlan(raw: unknown, maxFollowUpRounds = DEFAULT_MAX_FOLLOW_UP_ROUNDS): VerificationPlan {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new VerifyInputError("plan must be a JSON object");
   const plan = raw as Record<string, unknown>;
+  rejectUnknownKeys(plan, PLAN_KEYS, "plan");
+  if (plan.summary !== undefined && typeof plan.summary !== "string") throw new VerifyInputError("plan.summary must be a string");
   if (plan.version !== 1) throw new VerifyInputError("plan.version must be 1");
   if (plan.proposer !== undefined && plan.proposer !== "host" && plan.proposer !== "pi") {
     throw new VerifyInputError('plan.proposer must be "host" or "pi"');
@@ -147,12 +164,13 @@ export function parsePlan(raw: unknown, maxFollowUpRounds = DEFAULT_MAX_FOLLOW_U
     const where = `plan.steps[${index}]`;
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new VerifyInputError(`${where} must be an object`);
     const step = value as Record<string, unknown>;
+    rejectUnknownKeys(step, STEP_KEYS, where);
     if (typeof step.id !== "string" || !ID_PATTERN.test(step.id)) throw new VerifyInputError(`${where}.id must match ${ID_PATTERN}`);
     if (ids.has(step.id)) throw new VerifyInputError(`${where}.id "${step.id}" is duplicated`);
     ids.add(step.id);
-    if (!isStringArray(step.argv) || step.argv.length === 0 || !step.argv[0]) {
-      throw new VerifyInputError(`${where}.argv must be a non-empty string array (no shell)`);
-    }
+    if (!isArgv(step.argv)) throw new VerifyInputError(`${where}.argv must be a non-empty string array without NUL bytes (no shell)`);
+    if (step.sideEffects !== undefined && typeof step.sideEffects !== "string") throw new VerifyInputError(`${where}.sideEffects must be a string`);
+    if (step.idempotent !== undefined && typeof step.idempotent !== "boolean") throw new VerifyInputError(`${where}.idempotent must be a boolean`);
     if (typeof step.purpose !== "string" || !step.purpose.trim()) throw new VerifyInputError(`${where}.purpose is required`);
     if (step.cwd !== undefined && !isSafeRelativePath(step.cwd)) throw new VerifyInputError(`${where}.cwd must be a relative path inside the repo`);
     if (step.isolated === false) throw new VerifyInputError(`${where}.isolated=false is not supported; every step runs in the isolated copy`);
@@ -168,6 +186,7 @@ export function parsePlan(raw: unknown, maxFollowUpRounds = DEFAULT_MAX_FOLLOW_U
       if (!Array.isArray(step.files)) throw new VerifyInputError(`${where}.files must be an array`);
       for (const file of step.files as unknown[]) {
         const f = file as Record<string, unknown> | null;
+        if (f && typeof f === "object") rejectUnknownKeys(f, FILE_KEYS, `${where}.files[]`);
         if (!f || !isSafeRelativePath(f.path) || typeof f.content !== "string") {
           throw new VerifyInputError(`${where}.files entries need a relative in-repo path and string content`);
         }
@@ -196,9 +215,8 @@ export function parseRepoConfig(text: string): VerifyRepoConfig {
       throw new VerifyInputError(`${where}.id must be unique and match ${ID_PATTERN}`);
     }
     ids.add(command.id);
-    if (!isStringArray(command.argv) || command.argv.length === 0 || !command.argv[0]) {
-      throw new VerifyInputError(`${where}.argv must be a non-empty string array`);
-    }
+    rejectUnknownKeys(command, COMMAND_KEYS, where);
+    if (!isArgv(command.argv)) throw new VerifyInputError(`${where}.argv must be a non-empty string array without NUL bytes`);
     optionalPositive(command, "timeoutSec", where);
     return { id: command.id, argv: command.argv, ...(command.timeoutSec !== undefined ? { timeoutSec: command.timeoutSec as number } : {}) };
   });
@@ -259,6 +277,8 @@ export interface ResolvedStep {
   origin: "whitelist" | "plan";
   approval: VerificationApproval;
   sha: string;
+  /** Effective timeout: the step's own, else the matching whitelist entry's. */
+  timeoutSec?: number;
 }
 
 function sameArgv(a: string[], b: string[]): boolean {
@@ -280,7 +300,7 @@ export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyR
         purpose: `Standing verification command from ${VERIFY_CONFIG_FILE}`,
         ...(command.timeoutSec !== undefined ? { timeoutSec: command.timeoutSec } : {}),
       };
-      return { step, origin: "whitelist", approval: "preapproved", sha: stepSha256(step) };
+      return { step, origin: "whitelist", approval: "preapproved", sha: stepSha256(step), timeoutSec: command.timeoutSec };
     });
   }
   const decisions = approvals.flatMap((record) => record.decisions);
@@ -288,14 +308,18 @@ export function resolveSteps(plan: VerificationPlan | undefined, config: VerifyR
     const sha = stepSha256(step);
     const forId = decisions.filter((decision) => decision.id === step.id);
     const matching = forId.filter((decision) => decision.stepSha256 === sha);
-    const whitelisted = !step.files?.length && step.cwd === undefined && config.commands.some((command) => sameArgv(command.argv, step.argv));
+    // Pre-approval covers the whitelisted argv and its timeout budget, nothing more.
+    const match = step.files?.length || step.cwd !== undefined ? undefined : config.commands.find((command) => sameArgv(command.argv, step.argv));
+    const whitelistTimeout = match ? match.timeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC : undefined;
+    const whitelisted = match !== undefined && (step.timeoutSec === undefined || step.timeoutSec <= whitelistTimeout!);
     let approval: VerificationApproval;
     if (matching.some((decision) => decision.decision === "rejected")) approval = "rejected";
     else if (whitelisted) approval = "preapproved";
     else if (matching.some((decision) => decision.decision === "approved")) approval = "approved";
     else if (forId.length > 0) approval = "stale";
     else approval = "unapproved";
-    return { step, origin: "plan", approval, sha };
+    const timeoutSec = step.timeoutSec ?? (whitelisted ? match!.timeoutSec : undefined);
+    return { step, origin: "plan", approval, sha, ...(timeoutSec !== undefined ? { timeoutSec } : {}) };
   });
 }
 
@@ -349,21 +373,36 @@ export function runCommand(
     let total = 0;
     let timedOut = false;
     let settled = false;
-    let killTimer: NodeJS.Timeout | undefined;
+    const timers: NodeJS.Timeout[] = [];
     const child = spawn(argv[0]!, argv.slice(1), { cwd: options.cwd, env: options.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const killGroup = (signal: NodeJS.Signals) => {
       if (!child.pid) return;
       try {
         process.kill(-child.pid, signal);
       } catch {
-        // group already gone
+        // Group already gone, or no process groups (Windows): signal the child itself.
+        try {
+          child.kill(signal);
+        } catch {
+          // already exited
+        }
       }
+    };
+    // Settle even when a descendant that escaped the group (setsid, daemons)
+    // still holds the inherited pipes open, so `close` would never fire.
+    const abandonPipes = (result: Omit<CommandResult, "durationMs" | "outputTail" | "truncated" | "timedOut">) => {
+      timers.push(
+        setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(result);
+        }, KILL_GRACE_MS),
+      );
     };
     const finish = (result: Omit<CommandResult, "durationMs" | "outputTail" | "truncated" | "timedOut">) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      for (const t of timers) clearTimeout(t);
       const truncated = total > limit;
       resolve({ ...result, timedOut, durationMs: Date.now() - startedAt, outputTail: redactReviewEventText(tail.slice(-limit)), truncated });
     };
@@ -374,14 +413,21 @@ export function runCommand(
     };
     child.stdout!.setEncoding("utf8").on("data", onData);
     child.stderr!.setEncoding("utf8").on("data", onData);
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killGroup("SIGTERM");
-      killTimer = setTimeout(() => killGroup("SIGKILL"), KILL_GRACE_MS);
-    }, options.timeoutMs);
+    timers.push(
+      setTimeout(() => {
+        timedOut = true;
+        killGroup("SIGTERM");
+        timers.push(setTimeout(() => killGroup("SIGKILL"), KILL_GRACE_MS));
+        // Hard deadline: if even SIGKILL does not end the step, stop waiting.
+        timers.push(setTimeout(() => abandonPipes({ exitCode: null, error: "process did not exit after SIGKILL" }), KILL_GRACE_MS * 2));
+      }, options.timeoutMs),
+    );
     child.on("error", (error) => finish({ exitCode: null, error: error.message }));
-    // Reap anything the step left running in its group so the pipes close.
-    child.on("exit", () => killGroup("SIGKILL"));
+    child.on("exit", (code, signal) => {
+      // Reap anything the step left running in its group so the pipes close.
+      killGroup("SIGKILL");
+      abandonPipes({ exitCode: code, ...(signal ? { signal } : {}), error: "output pipes were still held by an escaped descendant; output may be incomplete" });
+    });
     child.on("close", (code, signal) => finish({ exitCode: code, ...(signal ? { signal } : {}) }));
   });
 }
@@ -445,23 +491,20 @@ export function createIsolatedCopy(repoRoot: string, link: string[] = []): Isola
   const dir = path.join(tmpRoot, "tree");
   const links: string[] = [];
   let added = false;
+  // Best effort and never throws: a cleanup failure must not crash the review
+  // or skip the tree guard. Links go first so nothing follows them.
+  const attempt = (fn: () => void) => {
+    try {
+      fn();
+    } catch {
+      // leftover temp state is harmless; `git worktree prune` reaps registry entries later
+    }
+  };
   const cleanup = () => {
-    for (const entry of links) fs.rmSync(entry, { force: true });
-    if (added) {
-      try {
-        git(["worktree", "remove", "--force", dir], repoRoot);
-      } catch {
-        // fall through to rm + prune
-      }
-    }
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-    if (added) {
-      try {
-        git(["worktree", "prune"], repoRoot);
-      } catch {
-        // best effort
-      }
-    }
+    for (const entry of links) attempt(() => fs.rmSync(entry, { force: true }));
+    if (added) attempt(() => git(["worktree", "remove", "--force", dir], repoRoot));
+    attempt(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+    if (added) attempt(() => git(["worktree", "prune"], repoRoot));
   };
   try {
     const indexEnv = { ...process.env, GIT_INDEX_FILE: path.join(tmpRoot, "index") };
@@ -532,6 +575,15 @@ function skippedStep(resolved: ResolvedStep): VerificationStepResult {
  * `status: "unverified"` with a reason so the review still runs and says so.
  */
 export async function runVerification(options: RunVerificationOptions): Promise<VerificationSummary> {
+  const startedAt = Date.now();
+  try {
+    return await runVerificationUnguarded(options);
+  } catch (error) {
+    return { source: "test-output", status: "unverified", reason: `verification failed internally: ${(error as Error).message}`, durationMs: Date.now() - startedAt, steps: [] };
+  }
+}
+
+async function runVerificationUnguarded(options: RunVerificationOptions): Promise<VerificationSummary> {
   const startedAt = Date.now();
   const log = options.onLog ?? (() => {});
   const summary = (fields: Partial<VerificationSummary> & Pick<VerificationSummary, "status">): VerificationSummary => ({
@@ -609,8 +661,14 @@ export async function runVerification(options: RunVerificationOptions): Promise<
         continue;
       }
       log(`pi-review: verify: ${r.step.id} (${r.approval}): ${r.step.argv.join(" ")}`);
-      const timeoutSec = Math.min(r.step.timeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC, MAX_STEP_TIMEOUT_SEC);
-      const result = await runCommand(r.step.argv, { cwd, env, timeoutMs: timeoutSec * 1000, outputLimit: options.outputLimit });
+      const timeoutSec = Math.min(r.timeoutSec ?? DEFAULT_STEP_TIMEOUT_SEC, MAX_STEP_TIMEOUT_SEC);
+      let result: CommandResult;
+      try {
+        result = await runCommand(r.step.argv, { cwd, env, timeoutMs: timeoutSec * 1000, outputLimit: options.outputLimit });
+      } catch (error) {
+        steps.push({ ...base, status: "error", error: (error as Error).message });
+        continue;
+      }
       const status = result.timedOut ? "timed_out" : result.error ? "error" : result.exitCode === 0 ? "passed" : "failed";
       steps.push({
         ...base,
@@ -653,7 +711,7 @@ export async function runVerification(options: RunVerificationOptions): Promise<
 // ---------------------------------------------------------------------------
 
 function escapeOutput(text: string): string {
-  return text.replace(/<\/test-output>/gi, "<\\/test-output>");
+  return text.replace(/<\s*\/?\s*test-output\b[^>]*>/gi, (tag) => tag.replace("<", "&lt;"));
 }
 
 const APPROVAL_TEXT: Record<VerificationApproval, string> = {

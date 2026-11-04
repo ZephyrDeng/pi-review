@@ -73,7 +73,8 @@ Plan steps (full schema in the [design doc](../design/verify-mode.md#plan-schema
 ```
 
 - `purpose` is required. `expectedDurationSec`, `sideEffects`, `idempotent` are the proposer's self-assessment for the human; they never gate anything.
-- `files: [{ "path", "content" }]` adds a new test/repro file **only inside the isolated copy**.
+- `files: [{ "path", "content" }]` adds a new test/repro file **only inside the isolated copy** (it stays there for later steps of the same run).
+- Unknown fields are rejected. A step reusing a whitelisted `argv` is pre-approved only without `files`/`cwd` and without a longer `timeoutSec`.
 - Approvals bind to each step's content hash. Editing any field of an approved step voids its approval (`stale`, skipped).
 - Follow-ups: after `pi-review verify run --plan plan.json --approval approval.json` shows the results, append steps with `"round": 2` and repeat show → ask → approve. `--verify-approval` is repeatable, so round-1 and round-2 approvals combine.
 

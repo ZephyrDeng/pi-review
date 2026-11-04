@@ -73,7 +73,8 @@ pi-review --verify-plan plan.json --verify-approval approval.json -- @src
 ```
 
 - `purpose` 必填。`expectedDurationSec`、`sideEffects`、`idempotent` 是提案者自评，仅供人参考，从不作为放行依据。
-- `files: [{ "path", "content" }]` 新写的测试/复现文件**只写进隔离副本**。
+- `files: [{ "path", "content" }]` 新写的测试/复现文件**只写进隔离副本**（同一次运行里后续步骤也能看到）。
+- 未知字段一律拒绝。复用白名单 `argv` 的步骤只有在不带 `files`/`cwd`、且 `timeoutSec` 不超过白名单值时才算预批准。
 - 批准绑定每个步骤的内容哈希。批准后改动步骤的任何字段，该批准即失效（`stale`，跳过）。
 - 追加验证：`pi-review verify run --plan plan.json --approval approval.json` 看到结果后，追加 `"round": 2` 的步骤，再走一遍 show → 询问 → approve。`--verify-approval` 可重复，第 1、2 轮的批准合并生效。
 

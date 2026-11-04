@@ -109,6 +109,8 @@ and any change to an approved step voids its approval.
 }
 ```
 
+- Unknown fields (plan, step, file, whitelist command) are rejected, so a typo
+  such as `file` for `files` cannot be approved and then silently ignored.
 - `id` `[A-Za-z0-9_.-]{1,64}`, unique. `argv` is a non-empty string array,
   executed **without a shell** (no pipes, globbing, `&&`); use `sh -c` explicitly
   if needed, which the human then sees and approves.
@@ -119,8 +121,10 @@ and any change to an approved step voids its approval.
   runs in the isolated copy.
 - `cwd` is relative to the repo root and must stay inside it.
 - `files` are new test/repro files written **only into the isolated copy**
-  right before the step runs; paths must be relative and inside the copy. They
-  never touch the original tree.
+  right before the step runs; paths must be relative and inside the copy (also
+  after resolving symlinks, so they cannot land in a `link`ed directory). They
+  never touch the original tree. They stay in the copy for later steps of the
+  same run, so order steps accordingly.
 - `timeoutSec` defaults to 300, clamped to 1800.
 - `round` defaults to 1. Follow-up rounds (after seeing results) use 2, 3, …;
   the maximum is `1 + verify.maxFollowUpRounds` (default 1 → max round 2).
@@ -146,6 +150,9 @@ own decision. The record also stores the `planSha256` it was made for, for audit
 
 - Read with `git show HEAD:.pi-review.json`: uncommitted edits to the file never
   grant pre-approval. A diff under review cannot whitelist its own commands.
+- Pre-approval covers the whitelisted `argv` **and** its timeout budget: a plan
+  step with the same argv is pre-approved only when it has no `files`/`cwd` and
+  its `timeoutSec` is absent (it then inherits the whitelist value) or not larger.
 - `link`: ignored paths (typically dependency dirs) symlinked from the original
   tree into the copy so commands work without a reinstall. Writes through a
   link land in the original (ignored) directory; keep it to dependency caches.
@@ -169,7 +176,12 @@ delete temp dirs.
 Guard: `git status --porcelain=v1 -z --untracked-files=all` of the original
 tree is captured before and after. A difference marks the whole summary
 `unverified` with reason `original working tree changed during verification`
-and `treeUnchanged: false`.
+and `treeUnchanged: false`. Coverage limits: the copy is a linked worktree that
+shares refs and objects, so a step running `git tag` / `git update-ref` in the
+copy, writes through `link`ed (ignored) directories, and any other ignored path
+are outside the guard. `treeUnchanged: true` means "tracked and untracked
+files of the original tree are as before", nothing stronger. A concurrent
+editor writing to the tree during a long step also trips the guard (fail-closed).
 
 ## Execution and safety defaults
 
@@ -177,7 +189,11 @@ and `treeUnchanged: false`.
   shared by every reviewer (single and panel). No per-reviewer execution.
 - `spawn(argv[0], argv.slice(1), { shell: false, detached: true, stdin: ignore })`;
   on timeout SIGTERM the process group, SIGKILL after 2s; the group is also
-  killed after normal exit so stray daemons do not outlive the step.
+  killed after normal exit so stray daemons do not outlive the step. If a
+  descendant escaped the group (`setsid`) and keeps the output pipes open,
+  pi-review stops reading 2s after the step's own exit (or 4s after the
+  timeout) and records the step with a note that output may be incomplete.
+  Without process groups (Windows) the child itself is signalled.
 - Output: stdout+stderr interleaved, only the last 4000 characters kept
   (`truncated` flag), passed through the same secret redaction as review events.
 - Environment: allowlist only — `PATH HOME USER LOGNAME SHELL LANG LC_ALL
@@ -188,7 +204,9 @@ and `treeUnchanged: false`.
   is still decided by the reviewers.
 - Setup failures (not a git repo, no `HEAD`, worktree add failed, invalid plan
   file) degrade to `status: "unverified"` with `reason`, printed to stderr and
-  injected into the prompt. Never silently clean.
+  injected into the prompt. `runVerification` never throws: an internal error
+  becomes `unverified`, a failing step becomes `status: "error"`, and cleanup is
+  best effort. Never silently clean.
 
 ## Summary, statuses, prompt, meta
 
@@ -251,6 +269,8 @@ accidental edits; it does **not** contain a malicious command (it can read
 
 ## Follow-ups
 
+- Remove a step's `files` after it runs (today they persist for later steps in the same run).
+- Widen the tree guard to refs (`git for-each-ref`) and report ignored-path writes through `link`.
 - Suggest whitelist candidates from `package.json` scripts / CI config (still require approval).
 - `/rv` Pi panel: native confirm dialog for the handshake and a verification row in the dashboard.
 - `verify.passEnv` for non-secret toolchain variables (e.g. `JAVA_HOME`).
