@@ -15,6 +15,7 @@ import type {
   SemanticAdjudicator,
 } from "./matcher.js";
 import type { ConfigSource, PiReviewConfig } from "./pi-config.js";
+import { redactReviewEventText } from "./review-events.js";
 
 export const DEFAULT_JEV_BASE_URL = "https://api.typesafe.ai";
 export const DEFAULT_JEV_MODEL = "jev-latest";
@@ -136,10 +137,17 @@ async function callSystemOne(
   state: unknown,
   questionBody: Record<string, unknown>,
   fetchImpl: JevFetch,
+  signal?: AbortSignal,
 ): Promise<SystemOneEnvelope> {
   const payload = JSON.stringify({ model: connection.model, state, questions: questionBody });
   let response: Response | undefined;
   for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) {
+      throw new Error("panel review cancelled before Jev adjudication");
+    }
+    const reqSignal = signal
+      ? AbortSignal.any([AbortSignal.timeout(JEV_TIMEOUT_MS), signal])
+      : AbortSignal.timeout(JEV_TIMEOUT_MS);
     try {
       response = await fetchImpl(`${connection.baseUrl}/v1/systemone`, {
         method: "POST",
@@ -148,9 +156,12 @@ async function callSystemOne(
           "content-type": "application/json",
         },
         body: payload,
-        signal: AbortSignal.timeout(JEV_TIMEOUT_MS),
+        signal: reqSignal,
       });
     } catch (error) {
+      if (signal?.aborted) {
+        throw new Error("panel review cancelled during Jev adjudication");
+      }
       if (attempt + 1 < MAX_ATTEMPTS) {
         await sleep(RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1]!);
         continue;
@@ -158,6 +169,9 @@ async function callSystemOne(
       throw new JevError(`typesafe api request failed: ${(error as Error).message}`);
     }
     if (!response.ok && RETRYABLE_HTTP.has(response.status) && attempt + 1 < MAX_ATTEMPTS) {
+      if (signal?.aborted) {
+        throw new Error("panel review cancelled during Jev adjudication");
+      }
       await sleep(RETRY_BACKOFF_MS[attempt] ?? RETRY_BACKOFF_MS[RETRY_BACKOFF_MS.length - 1]!);
       continue;
     }
@@ -201,6 +215,7 @@ export async function evaluateNouls(
   questions: Record<string, string>,
   fetchImpl: JevFetch = fetch,
   criteria: { readonly true: string; readonly false: string } = NOUL_CRITERIA,
+  signal?: AbortSignal,
 ): Promise<JevNoulResult> {
   const questionBody = Object.fromEntries(
     Object.entries(questions).map(([id, instructions]) => [
@@ -208,7 +223,7 @@ export async function evaluateNouls(
       { type: "noul", instructions, criteria: { ...criteria } },
     ]),
   );
-  const envelope = await callSystemOne(connection, state, questionBody, fetchImpl);
+  const envelope = await callSystemOne(connection, state, questionBody, fetchImpl, signal);
   const probabilities: Record<string, number> = {};
   const missing: string[] = [];
   for (const id of Object.keys(questions)) {
@@ -302,7 +317,7 @@ export async function evaluateChoices(
  */
 export function createJevAdjudicator(
   connection: JevConnection,
-  options: { fetchImpl?: JevFetch } = {},
+  options: { fetchImpl?: JevFetch; signal?: AbortSignal } = {},
 ): SemanticAdjudicator {
   return {
     async adjudicate(request: AdjudicationRequest): Promise<AdjudicationResponse> {
@@ -328,17 +343,24 @@ export function createJevAdjudicator(
 
       const state = {
         candidates: request.candidates.map((candidate) => ({
-          anchorPath: candidate.anchorPath,
+          anchorPath: redactReviewEventText(candidate.anchorPath),
           findings: candidate.findings.map((sf) => ({
             id: sf.id,
             reviewer: sf.reviewerId,
-            path: sf.finding.path ?? null,
-            summary: sf.finding.summary,
+            path: sf.finding.path ? redactReviewEventText(sf.finding.path) : null,
+            summary: redactReviewEventText(sf.finding.summary),
             actionable: sf.finding.actionable,
           })),
         })),
       };
-      const result = await evaluateNouls(connection, state, questions, options.fetchImpl);
+      const result = await evaluateNouls(
+        connection,
+        state,
+        questions,
+        options.fetchImpl,
+        NOUL_CRITERIA,
+        options.signal,
+      );
       const merges = [];
       for (const [questionId, [aId, bId]] of pairs) {
         const probability = result.probabilities[questionId];
@@ -361,42 +383,120 @@ function pairKey(ids: string[]): string {
   return [...ids].sort().join("\u0000");
 }
 
+function hasSemanticErrorsInResponse(
+  response: AdjudicationResponse,
+  candidates: AdjudicationRequest["candidates"],
+): boolean {
+  if (response.errors && response.errors.length > 0) return true;
+  if (!Array.isArray(response.merges)) return true;
+  const idToGroup = new Map<string, number>();
+  candidates.forEach((candidate, groupIdx) => {
+    for (const sf of candidate.findings) idToGroup.set(sf.id, groupIdx);
+  });
+  for (const merge of response.merges) {
+    if (!merge || typeof merge !== "object" || Array.isArray(merge)) return true;
+    if (!Array.isArray(merge.sourceFindingIds)) return true;
+    for (const id of merge.sourceFindingIds) {
+      if (!idToGroup.has(id)) return true;
+    }
+    const groups = new Set(merge.sourceFindingIds.map((id) => idToGroup.get(id)!));
+    if (groups.size > 1) return true;
+    if (merge.sourceFindingIds.length >= 2) {
+      if (
+        typeof merge.confidence !== "number" ||
+        !Number.isFinite(merge.confidence) ||
+        merge.confidence < 0 ||
+        merge.confidence > 1
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Cascade wrapper: run the fast Jev tier over every pair, then re-judge only
  * the borderline band with the strong (Pi) tier in a single extra call.
  * Clear cases never pay for an LLM; uncertain cases get a second opinion.
- * A strong-tier failure keeps the fast tier's judgments — escalation is an
- * accuracy upgrade, never a new failure mode.
+ * A strong-tier failure (runtime throw or exhausted semantic retries) keeps
+ * the fast tier's judgments — escalation is an accuracy upgrade, never a new
+ * failure mode, except when the run itself was cancelled via AbortSignal.
  */
 export function withUncertaintyEscalation(
   fast: SemanticAdjudicator,
   strong: SemanticAdjudicator,
   onEscalation?: (message: string) => void,
+  options: { maxRetries?: number; signal?: AbortSignal } = {},
 ): SemanticAdjudicator {
+  let cachedFast:
+    | {
+        response: AdjudicationResponse;
+        kept: AdjudicationResponse["merges"];
+        subCandidates: AdjudicationRequest["candidates"];
+        borderlineCount: number;
+      }
+    | undefined;
+
   return {
     async adjudicate(request: AdjudicationRequest): Promise<AdjudicationResponse> {
-      const response = await fast.adjudicate(request);
-      const borderline = response.merges.filter(
-        (merge) => merge.confidence >= JEV_ESCALATION_BAND.low && merge.confidence <= JEV_ESCALATION_BAND.high,
-      );
-      if (borderline.length === 0) return response;
+      if (!request.previousErrors?.length) {
+        cachedFast = undefined;
+      }
+      let fastState = request.previousErrors?.length ? cachedFast : undefined;
+      if (!fastState) {
+        const response = await fast.adjudicate(request);
+        const borderline = response.merges.filter(
+          (merge) => merge.confidence >= JEV_ESCALATION_BAND.low && merge.confidence <= JEV_ESCALATION_BAND.high,
+        );
+        if (borderline.length === 0) return response;
 
-      const escalatedIds = new Set(borderline.flatMap((merge) => merge.sourceFindingIds));
-      // Pairs never span candidate groups by construction, so filtering each
-      // group to the escalated findings preserves the no-cross-anchor rule.
-      const subCandidates = request.candidates
-        .map((candidate) => ({ ...candidate, findings: candidate.findings.filter((sf) => escalatedIds.has(sf.id)) }))
-        .filter((candidate) => candidate.findings.length > 0);
-      try {
-        const strongResponse = await strong.adjudicate({ candidates: subCandidates });
+        const escalatedIds = new Set(borderline.flatMap((merge) => merge.sourceFindingIds));
+        // Pairs never span candidate groups by construction, so filtering each
+        // group to the escalated findings preserves the no-cross-anchor rule.
+        const subCandidates = request.candidates
+          .map((candidate) => ({ ...candidate, findings: candidate.findings.filter((sf) => escalatedIds.has(sf.id)) }))
+          .filter((candidate) => candidate.findings.length > 0);
         const replaced = new Set(borderline.map((merge) => pairKey(merge.sourceFindingIds)));
         const kept = response.merges.filter((merge) => !replaced.has(pairKey(merge.sourceFindingIds)));
-        onEscalation?.(
-          `escalated ${borderline.length} borderline pair(s) (probability ${JEV_ESCALATION_BAND.low}-${JEV_ESCALATION_BAND.high}) to the Pi adjudicator`,
-        );
-        return { merges: [...kept, ...strongResponse.merges] };
-      } catch {
-        return response;
+        fastState = { response, kept, subCandidates, borderlineCount: borderline.length };
+        cachedFast = fastState;
+      }
+
+      try {
+        const strongRequest: AdjudicationRequest = {
+          candidates: fastState.subCandidates,
+          ...(request.previousErrors ? { previousErrors: request.previousErrors } : {}),
+          ...(request.attempt !== undefined ? { attempt: request.attempt } : {}),
+          ...(request.priorAttempts ? { priorAttempts: request.priorAttempts } : {}),
+        };
+        const strongResponse = await strong.adjudicate(strongRequest);
+        // When maxRetries is provided by the panel orchestrator and all retries
+        // are exhausted, fall back to Jev's fast-tier judgments instead of
+        // degrading a valid Jev panel into needs_human.
+        const attempt = request.attempt ?? 1;
+        if (
+          options.maxRetries !== undefined &&
+          attempt > options.maxRetries &&
+          hasSemanticErrorsInResponse(strongResponse, request.candidates)
+        ) {
+          onEscalation?.(
+            "Pi escalation returned invalid output after retries; kept Jev judgments",
+          );
+          return fastState.response;
+        }
+        if (!request.previousErrors?.length) {
+          onEscalation?.(
+            `escalated ${fastState.borderlineCount} borderline pair(s) (probability ${JEV_ESCALATION_BAND.low}-${JEV_ESCALATION_BAND.high}) to the Pi adjudicator`,
+          );
+        }
+        return {
+          merges: [...fastState.kept, ...strongResponse.merges],
+          ...(strongResponse.errors?.length ? { errors: strongResponse.errors } : {}),
+        };
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        return fastState.response;
       }
     },
   };
@@ -418,6 +518,7 @@ export function withAdjudicationFallback(
   primary: SemanticAdjudicator,
   fallback: SemanticAdjudicator,
   onFallback?: (message: string) => void,
+  signal?: AbortSignal,
 ): AdjudicatorWithEngine {
   let engine: "jev" | "pi" = "jev";
   let note: string | undefined;
@@ -426,9 +527,16 @@ export function withAdjudicationFallback(
     note: () => note,
     adjudicator: {
       async adjudicate(request: AdjudicationRequest): Promise<AdjudicationResponse> {
+        if (signal?.aborted) {
+          throw new Error("panel review cancelled before adjudication");
+        }
+        if (engine === "pi") {
+          return fallback.adjudicate(request);
+        }
         try {
           return await primary.adjudicate(request);
         } catch (error) {
+          if (signal?.aborted) throw error;
           engine = "pi";
           note = `jev adjudication failed (${(error as Error).message}); fell back to the Pi adjudicator`;
           onFallback?.(note);

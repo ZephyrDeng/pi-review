@@ -41,6 +41,8 @@
 
 **Approval record**: The output of `pi-review verify approve`, binding approve/reject decisions to each step's content hash. Any edit to an approved step makes its approval `stale`; a rejection also binds to the command (`commandSha256`), so a new id does not escape it.
 
+**Panel run artifact**: The per-run directory (`~/.pi/pi-review/panel-runs/<timestamp>_<pid>_<runId>` by default, or `--run-dir <path>`) storing redacted `manifest.json`, `reviewers/<id>.json`, and `meta.json`. Consumed by `pi-review panel reaggregate` (zero reviewer runs, consensus re-adjudication only) and `--reuse-reviewers` (`--rerun-failed` / `--only-reviewers`) for selective recovery.
+
 **Pi package**: The installable package shape that lets Pi load the `/rv` extension and the `pi-review` skill via `pi install`.
 
 **Shell CLI**: The npm `bin` entry exposed as `pi-review` for terminal, CI, and editor integration workflows.

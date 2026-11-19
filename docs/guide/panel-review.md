@@ -30,6 +30,8 @@ Singleton (uncorroborated) findings remain visible as **advisories** but do not 
 
 Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may not invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
 
+**Automatic adjudication retry (`--consensus-retries`).** When the semantic adjudicator returns invalid output (such as unparseable JSON, non-array `merges`, invented source IDs, cross-path merges, or invalid confidence), `pi-review` automatically retries the adjudicator with the previous validation error(s) injected into the prompt (`--consensus-retries <n>`, default `1`; pass `0` to disable). Only when retries are exhausted does the panel degrade to `panelHealth: "needs_human"` with `fallbackClusters` and `adjudicationErrors`. Retry counts (`adjudicationRetries`) and per-attempt errors (`adjudicationAttemptErrors`) are recorded in panel metadata.
+
 **Adjudication engine (Jev enhancement mode).** When `TYPESAFE_API_KEY` is present (or `{ "jev": true }` is set in the config file), the adjudication decision is routed to [TypeSafe Jev](https://typesafe.ai) — a System One model that returns typed probabilities — instead of spawning a review-only Pi child. Each ambiguous finding pair becomes one Noul question ("same underlying issue?"), fanned out in a single call; the pair probability is used as the merge confidence and flows through the same threshold and provenance validation as LLM merges. This replaces a full child session with one ~100 ms typed call.
 
 - **Complete-Linkage Clustering**: Built-in complete-linkage algorithm ensures 100% clustering precision, eliminating false-merge chains across findings in the same function.
@@ -73,7 +75,20 @@ Who produces each `ReviewFinding` field: `id`/`path`/`location` come from the sl
 
 ### Cost and failure
 
-Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication call may run per round when `--consensus-model` is set. Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean. Panel review rejects `--keep-session`, `--continue`, and `--name` (reviewers run `--no-session`); the host agent remains the only editor.
+Reviewer runs = `--reviewers <n>` × `--max-rounds` (loop); one adjudication call may run per round when `--consensus-model` is set (plus up to `--consensus-retries` retry calls if adjudication returns invalid output). Use `--concurrency <n>` to bound provider/machine pressure (default: reviewer count, never exceeds it). Reviewer runtime failure → `blocked`; unstructured dirty output or unresolved clarification → `needs_human`; never silently clean. Panel review rejects `--keep-session`, `--continue`, and `--name` (reviewers run `--no-session`); the host agent remains the only editor.
+
+### Reaggregation & partial reruns
+
+Every panel run persists its manifest, per-reviewer `ReviewerSubmission` files, and final metadata under `~/.pi/pi-review/panel-runs/<run>` (override with `--run-dir <path>` or `PI_REVIEW_PANEL_RUNS_DIR`; set `PI_REVIEW_PANEL_ARTIFACTS=0` to disable default persistence). Reviewer files are written incrementally as each reviewer finishes, so healthy results survive even if another reviewer crashes or adjudication fails.
+
+```bash
+# Re-run consensus adjudication from a saved run dir (or meta.json) with zero reviewer calls
+pi-review panel reaggregate ~/.pi/pi-review/panel-runs/<run> --consensus-model openai/gpt-5.6
+
+# Equivalent via --reuse-reviewers, or selectively rerun only failed / named reviewers
+pi-review --reuse-reviewers /path/to/run-dir --rerun-failed -- @src
+pi-review --reuse-reviewers /path/to/run-dir --only-reviewers r2,security -- @src
+```
 
 When the panel finishes, the CLI appends a panel ASCII footer on **stdout** with gate status, health, consensus, confirmed/advisory counts, mixed model/thinking when reviewers differ, aggregate tokens/cost, adjudicator use, and a per-reviewer line:
 
@@ -81,7 +96,7 @@ When the panel finishes, the CLI appends a panel ASCII footer on **stdout** with
 
 ### Machine output
 
-A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, and per-`reviewers` outcomes. Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields. The panel-level `model` is each reviewer's effective model (configured, else the provider-reported `responseModel`) when they all agree, and the literal sentinel `"mixed"` when reviewers ran on different models — machine consumers parsing `model` must expect that value; per-reviewer entries keep their own `model`/`responseModel`.
+A panel evaluation emits **one** aggregate `PI_REVIEW_META_JSON` record with additive fields: `strategy: "panel"`, `configuredReviewers`, `successfulReviewers`, `consensusPolicy`, `consensusThreshold`, `panelHealth`, `confirmedClusters`, `advisories`, per-`reviewers` outcomes (including `startedAt`, `completedAt`, `durationMs`, and `reused` when loaded from an artifact), panel/adjudication timestamps (`startedAt`, `completedAt`, `adjudicationStartedAt`, `adjudicationCompletedAt`, `adjudicationDurationMs`), retry provenance (`adjudicationRetries`, `adjudicationAttemptErrors`), and artifact provenance (`runDir`, `reusedFrom`). Top-level `findings` contain confirmed clusters only; advisories remain separate. Existing single-review keys remain unchanged, so older consumers can ignore the new fields. The panel-level `model` is each reviewer's effective model (configured, else the provider-reported `responseModel`) when they all agree, and the literal sentinel `"mixed"` when reviewers ran on different models — machine consumers parsing `model` must expect that value; per-reviewer entries keep their own `model`/`responseModel`.
 
 Panel machine metadata additionally carries `sourceFindings`: every contributing reviewer's raw findings, each tagged with its globally unique `id` (e.g. `"r1#F1"`) and `reviewerId`. This resolves every id referenced by `confirmedClusters[].sourceFindingIds` and `advisories[].sourceFindingIds` to its full enriched finding — including `details`/`recommendation`/`location` when the reviewer's Markdown supplied them (see [Machine finding schema](output-and-integration.md#machine-finding-schema)). Cluster-level summaries stay as they are today: `summary`/`severity`/`path` only, no enrichment fields.
 

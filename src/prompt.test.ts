@@ -73,4 +73,32 @@ test("adjudicator prompt enforces aggregation-only constraints and the strict cl
   // Adjudicator receives structured findings, not free repo access.
   assert.match(prompt, /r1#F1/);
   assert.match(prompt, /loop bound is wrong/);
+  assert.doesNotMatch(prompt, /validation errors/);
+});
+
+test("adjudicator prompt injects previous validation errors on retry", () => {
+  const findings: SourceFinding[] = [
+    { id: "r1#F1", reviewerId: "r1", finding: { summary: "loop bound is wrong", actionable: true, path: "src/cli.ts" } },
+    { id: "r2#F1", reviewerId: "r2", finding: { summary: "off-by-one iteration", actionable: true, path: "src/cli.ts" } },
+  ];
+  const singleRetry = buildAdjudicatorPrompt(
+    [{ anchorPath: "src/cli.ts", findings }],
+    ["adjudicator invented source finding ids: r9#F1"],
+  );
+  assert.match(singleRetry, /validation errors and was rejected/);
+  assert.match(singleRetry, /adjudicator invented source finding ids: r9#F1/);
+  assert.match(singleRetry, /only reference exact `id` values from Candidate findings/);
+
+  const multiRetry = buildAdjudicatorPrompt(
+    [{ anchorPath: "src/cli.ts", findings }],
+    ["adjudicator merged findings across different path anchors: r1#F1, r2#F2"],
+    [
+      { attempt: 1, errors: ["adjudicator invented source finding ids: r9#F1"] },
+      { attempt: 2, errors: ["adjudicator merged findings across different path anchors: r1#F1, r2#F2"] },
+    ],
+  );
+  assert.match(multiRetry, /Attempt 1:/);
+  assert.match(multiRetry, /Attempt 2:/);
+  assert.match(multiRetry, /r9#F1/);
+  assert.match(multiRetry, /different path anchors/);
 });

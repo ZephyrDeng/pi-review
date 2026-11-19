@@ -34,6 +34,8 @@ pi-review loop --reviewers 3 --consensus quorum --max-rounds 2 -- @src
 
 三个评审员各自写"`cli.ts` 第 42 行退出码不对"，措辞不同但是同一个问题，得合并成一条才能数票。聚合分两阶段：先按稳定锚点（路径 + 归一化摘要）做确定性匹配；只有同路径下仍然歧义的候选才交给受限的**语义裁决器**（用 `--consensus-model` 启用）。裁决器只负责把 findings 聚成簇，不能新造 finding、不能删 finding、不能补证据，也不能充当另一个评审员——它没有任何写工具。低置信度的匹配会保持为独立 advisory，避免"看起来有点像"被拿来凑票。
 
+**裁决自动重试（`--consensus-retries`）。** 当语义裁决器返回非法输出（如无法解析的 JSON、`merges` 非数组、编造 source finding id、跨路径合并或置信度越界）时，`pi-review` 会自动重试裁决器，并把上一次的校验错误注入 prompt（`--consensus-retries <n>`，默认 `1`；传 `0` 关闭）。只有重试耗尽仍然失败时，才会降级为 `panelHealth: "needs_human"`、`fallbackClusters` 与 `adjudicationErrors`。元数据会记录重试次数（`adjudicationRetries`）与各次尝试的错误（`adjudicationAttemptErrors`）。
+
 ### 裁决引擎（Jev 增强模式）
 
 当 `TYPESAFE_API_KEY` 存在（或配置文件里设了 `{ "jev": true }`）时，裁决决策改由 [TypeSafe Jev](https://typesafe.ai) 处理——它是一个返回类型化概率的 System One 模型——而不是再起一个只读的 Pi 子会话。每对歧义 finding 变成一个 Noul 问题（"是同一个底层问题吗？"），一次调用内全部并发发出；配对概率作为合并置信度，走和 LLM 合并完全相同的阈值和来源校验。一次完整子会话被一个约 100 ms 的类型化调用取代。
@@ -83,7 +85,20 @@ files ─► 1. deterministic slice            (local, ms — declaration-bounda
 
 ## 成本与失败
 
-评审员运行次数 = `--reviewers <n>` × `--max-rounds`（loop）；设了 `--consensus-model` 时每轮可能多一次裁决调用。用 `--concurrency <n>` 限制对 provider / 机器的压力（默认等于评审员数，不会超过）。评审员运行失败 → `blocked`；输出无结构的脏内容或有未解决的澄清 → `needs_human`；绝不静默 clean。面板审查拒绝 `--keep-session`、`--continue`、`--name`（评审员以 `--no-session` 运行）；宿主 agent 始终是唯一的编辑者。
+评审员运行次数 = `--reviewers <n>` × `--max-rounds`（loop）；设了 `--consensus-model` 时每轮可能多一次裁决调用（若裁决输出不合法，还会有最多 `--consensus-retries` 次重试）。用 `--concurrency <n>` 限制对 provider / 机器的压力（默认等于评审员数，不会超过）。评审员运行失败 → `blocked`；输出无结构的脏内容或有未解决的澄清 → `needs_human`；绝不静默 clean。面板审查拒绝 `--keep-session`、`--continue`、`--name`（评审员以 `--no-session` 运行）；宿主 agent 始终是唯一的编辑者。
+
+## 复用结论与局部重跑
+
+每次面板运行都会把 manifest、各评审员的 `ReviewerSubmission` 文件以及最终元数据落盘到 `~/.pi/pi-review/panel-runs/<run>`（可用 `--run-dir <path>` 或 `PI_REVIEW_PANEL_RUNS_DIR` 覆盖；设为 `PI_REVIEW_PANEL_ARTIFACTS=0` 可关闭默认落盘）。每个评审员一完成就会增量落盘，因此即使个别评审员崩溃或裁决失败，健康评审员的结果也不会丢失。
+
+```bash
+# 直接基于已落盘的运行目录（或 meta.json）重新做共识合并，不调用任何评审员
+pi-review panel reaggregate ~/.pi/pi-review/panel-runs/<run> --consensus-model openai/gpt-5.6
+
+# 也可通过 --reuse-reviewers，或配合 --rerun-failed / --only-reviewers 仅重跑指定或失败角色
+pi-review --reuse-reviewers /path/to/run-dir --rerun-failed -- @src
+pi-review --reuse-reviewers /path/to/run-dir --only-reviewers r2,security -- @src
+```
 
 面板结束后，CLI 在 **stdout** 追加一段面板 ASCII 页脚：门禁状态、健康度、共识、confirmed / advisory 数量、评审员不一致时的 mixed 模型 / 思考等级、合计 token / 费用、是否用了裁决器，以及每位评审员一行：
 
@@ -91,7 +106,7 @@ files ─► 1. deterministic slice            (local, ms — declaration-bounda
 
 ## 机器输出
 
-一次面板评估输出**一条**聚合的 `PI_REVIEW_META_JSON` 记录，附加字段有：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories`，以及逐 `reviewers` 的结果。顶层 `findings` 只包含 confirmed clusters；advisories 单独存放。原有单评审员的 key 保持不变，老消费者可以忽略新字段。面板级 `model` 在所有评审员一致时是各自的有效模型（配置的，否则是 provider 报告的 `responseModel`），评审员跑在不同模型上时是字面哨兵值 `"mixed"`——解析 `model` 的程序必须预期这个值；每位评审员条目保留各自的 `model`/`responseModel`。
+一次面板评估输出**一条**聚合的 `PI_REVIEW_META_JSON` 记录，附加字段有：`strategy: "panel"`、`configuredReviewers`、`successfulReviewers`、`consensusPolicy`、`consensusThreshold`、`panelHealth`、`confirmedClusters`、`advisories`、逐 `reviewers` 结果（含 `startedAt`、`completedAt`、`durationMs` 以及复用时的 `reused`）、面板与裁决耗时时间戳（`startedAt`、`completedAt`、`adjudicationStartedAt`、`adjudicationCompletedAt`、`adjudicationDurationMs`）、重试记录（`adjudicationRetries`、`adjudicationAttemptErrors`）以及产物路径（`runDir`、`reusedFrom`）。顶层 `findings` 只包含 confirmed clusters；advisories 单独存放。原有单评审员的 key 保持不变，老消费者可以忽略新字段。面板级 `model` 在所有评审员一致时是各自的有效模型（配置的，否则是 provider 报告的 `responseModel`），评审员跑在不同模型上时是字面哨兵值 `"mixed"`——解析 `model` 的程序必须预期这个值；每位评审员条目保留各自的 `model`/`responseModel`。
 
 面板机器元数据另外携带 `sourceFindings`：每位参与评审员的原始 findings，各自打上全局唯一 `id`（如 `"r1#F1"`）和 `reviewerId`。这样 `confirmedClusters[].sourceFindingIds` 与 `advisories[].sourceFindingIds` 引用的每个 id 都能解析到完整的富化 finding——评审员 Markdown 提供了的话，包含 `details`/`recommendation`/`location`（见[机器 finding schema](output-and-integration.md#机器-finding-schema)）。cluster 级摘要保持现状：只有 `summary`/`severity`/`path`，没有富化字段。
 

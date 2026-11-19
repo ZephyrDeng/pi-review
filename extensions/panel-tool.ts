@@ -57,7 +57,11 @@ function compactText(state: PanelViewState, theme: Theme, now = Date.now()): str
     const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
     const active = reviewer.activeTool ? ` · ${reviewer.activeTool}` : "";
     const activeSummary = reviewer.activeToolSummary ? ` · ${reviewer.activeToolSummary}` : "";
-    const reviewerElapsed = reviewer.startedAt ? ` · ${duration((reviewer.completedAt ?? now) - reviewer.startedAt)}` : "";
+    const reviewerElapsedMs =
+      reviewer.startedAt !== undefined
+        ? (reviewer.completedAt ?? now) - reviewer.startedAt
+        : reviewer.submission?.durationMs;
+    const reviewerElapsed = reviewerElapsedMs !== undefined ? ` · ${duration(reviewerElapsedMs)}` : "";
     const idle = reviewer.status === "running" && reviewer.activityAt ? ` · idle ${duration(now - reviewer.activityAt)}` : "";
     const tokens = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok` : "";
     const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
@@ -133,7 +137,10 @@ function reviewerSummaryLines(state: PanelViewState): string[] {
     const thinking = reviewer.thinking ? ` · ${reviewer.thinking}` : "";
     const status = reviewer.submission?.result.status ?? reviewer.status;
     const verdict = reviewer.submission?.result.verdict ? ` · ${reviewer.submission.result.verdict}` : "";
-    const durationMs = reviewer.startedAt ? (reviewer.completedAt ?? Date.now()) - reviewer.startedAt : undefined;
+    const durationMs =
+      reviewer.startedAt !== undefined
+        ? (reviewer.completedAt ?? Date.now()) - reviewer.startedAt
+        : reviewer.submission?.durationMs;
     const usage = reviewer.usage ? ` · ${formatTokens(reviewer.usage.totalTokens)} tok · ${formatUsage(reviewer.usage)}` : "";
     const cost = reviewer.usage ? ` · cost ${typeof reviewer.usage.costTotal === "number" ? formatCost(reviewer.usage.costTotal) : "n/a"}` : "";
     const head = `- ${reviewer.reviewerId}${role}${model}${thinking} · ${status}${verdict}${durationMs !== undefined ? ` · ${formatDurationMs(durationMs)}` : ""}${usage}${cost}`;

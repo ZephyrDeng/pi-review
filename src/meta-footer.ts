@@ -142,7 +142,14 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
     lines.push(`  ${padLabel("Cost", labelW)}  ${typeof meta.usage.costTotal === "number" ? formatCost(meta.usage.costTotal) : "n/a"}`);
   }
   if (meta.adjudicationUsed) {
-    lines.push(`  ${padLabel("Adjudicator", labelW)}  used${meta.adjudicationEngine ? ` (${meta.adjudicationEngine})` : ""}`);
+    const details = [
+      ...(meta.adjudicationEngine ? [meta.adjudicationEngine] : []),
+      ...(meta.adjudicationRetries
+        ? [`${meta.adjudicationRetries} ${meta.adjudicationRetries === 1 ? "retry" : "retries"}`]
+        : []),
+      ...(meta.adjudicationDurationMs !== undefined ? [formatDurationMs(meta.adjudicationDurationMs)] : []),
+    ];
+    lines.push(`  ${padLabel("Adjudicator", labelW)}  used${details.length > 0 ? ` (${details.join(" · ")})` : ""}`);
   }
   if (meta.adjudicationFallbackNote) {
     lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationFallbackNote}`);
@@ -151,6 +158,7 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
     lines.push(`  ${padLabel("Note", labelW)}  ${meta.adjudicationErrors.join("; ")}`);
   }
   if (meta.verification) lines.push(`  ${padLabel("Verify", labelW)}  ${formatVerificationFooter(meta.verification)}`);
+  if (meta.runDir) lines.push(`  ${padLabel("Run dir", labelW)}  ${meta.runDir}`);
   lines.push(`  ${padLabel("Duration", labelW)}  ${formatDurationMs(meta.durationMs)}`);
   lines.push("  Reviewers:");
   for (const r of meta.reviewers) {
@@ -166,6 +174,7 @@ export function formatPanelMetaAscii(meta: PanelReviewMeta): string {
       ...(r.thinking ? [`think:${r.thinking}`] : []),
       ...(r.usage ? [`total:${formatTokens(r.usage.totalTokens)}`, formatUsage(r.usage)] : []),
       ...(r.usage && typeof r.usage.costTotal === "number" ? [`cost:${formatCost(r.usage.costTotal)}`] : []),
+      ...(r.reused ? ["reused"] : []),
       formatDurationMs(r.durationMs),
     ];
     lines.push(`    - ${bits.join(" | ")}`);

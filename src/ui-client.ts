@@ -59,7 +59,10 @@ export function headerTitle(state: PanelViewState): string {
 
 /** Pure reviewer detail line; excludes recent activity, which renders as its own block. */
 export function reviewerDetailLine(reviewer: PanelReviewerView, now: number): string {
-  const durationMs = reviewer.startedAt !== undefined ? (reviewer.completedAt ?? now) - reviewer.startedAt : undefined;
+  const durationMs =
+    reviewer.startedAt !== undefined
+      ? (reviewer.completedAt ?? now) - reviewer.startedAt
+      : reviewer.submission?.durationMs;
   const activityAgeMs = reviewer.status === "running" && reviewer.activityAt !== undefined ? now - reviewer.activityAt : undefined;
   return [
     reviewer.model ?? "default model",
@@ -102,15 +105,17 @@ export function createClientExtras(): ClientExtras {
 
 export function reduceClientExtras(extras: ClientExtras, event: ReviewEvent): ClientExtras {
   if (event.type === "reviewer.tool.started") {
+    const prev = Object.hasOwn(extras.toolCalls, event.reviewerId) ? extras.toolCalls[event.reviewerId]! : 0;
     return {
       ...extras,
-      toolCalls: { ...extras.toolCalls, [event.reviewerId]: (extras.toolCalls[event.reviewerId] ?? 0) + 1 },
+      toolCalls: { ...extras.toolCalls, [event.reviewerId]: prev + 1 },
     };
   }
   if (event.type === "reviewer.text.delta") {
+    const prev = Object.hasOwn(extras.fullText, event.reviewerId) ? extras.fullText[event.reviewerId]! : "";
     return {
       ...extras,
-      fullText: { ...extras.fullText, [event.reviewerId]: (extras.fullText[event.reviewerId] ?? "") + event.text },
+      fullText: { ...extras.fullText, [event.reviewerId]: prev + event.text },
     };
   }
   return extras;
@@ -337,7 +342,10 @@ function updateCard(refs: CardRefs, reviewer: PanelReviewerView, toolCalls: numb
     refs.root.classList.toggle("is-done", reviewer.status === "completed");
   }
 
-  const durationMs = reviewer.startedAt !== undefined ? (reviewer.completedAt ?? now) - reviewer.startedAt : undefined;
+  const durationMs =
+    reviewer.startedAt !== undefined
+      ? (reviewer.completedAt ?? now) - reviewer.startedAt
+      : reviewer.submission?.durationMs;
   refs.duration.textContent = durationMs !== undefined ? formatDuration(durationMs) : "–";
   refs.tokens.set(reviewer.usage?.totalTokens ?? 0);
   refs.tools.set(toolCalls);

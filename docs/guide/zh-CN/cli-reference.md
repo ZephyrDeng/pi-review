@@ -17,6 +17,7 @@
 ```
 pi-review [review] [options] -- <@files|text...>
 pi-review loop [options] -- <@files|text...>
+pi-review panel reaggregate <run-dir|meta-file> [options]
 pi-review screen <@files|paths...>
 pi-review screen-memory
 pi-review classify --baseline <text|@file> [--meta <path>]
@@ -49,6 +50,11 @@ pi-review verify <propose|show|approve|run> [options]
 | `--min-agree <n>` | 面板：quorum 的最低同意评审员数（默认 `2`；仅 quorum） |
 | `--reviewer-model <id=model[:thinking]>` | 面板：逐评审员覆盖模型（可重复，如 `r1=openai/gpt-5.6:high`） |
 | `--consensus-model <model>` | 面板：语义共识裁决所用模型 |
+| `--consensus-retries <n>` | 面板：裁决器返回非法输出时的自动重试次数（默认 `1`；`0` 关闭） |
+| `--run-dir <path>` | 面板：持久化 manifest、评审员提交结果与 meta 的目录 |
+| `--reuse-reviewers <path>` | 面板：复用已有运行目录或 meta 文件中的评审员结论 |
+| `--only-reviewers <ids>` | 面板：逗号分隔的需重跑评审员 ID（需配合 `--reuse-reviewers`） |
+| `--rerun-failed` | 面板：自动只重跑失败 / 未贡献的评审员（需配合 `--reuse-reviewers`） |
 | `--concurrency <n>` | 面板：限制评审员并发（默认等于评审员数） |
 | `--output-format events-jsonl` | 面板：给渲染器适配器的归一化 `ReviewEvent v1` JSONL |
 | `--verify` | reviewer 启动前，在隔离副本里跑一次已提交 `.pi-review.json` 白名单命令（[验证模式](verify-mode.md)） |
@@ -65,6 +71,8 @@ pi-review verify <propose|show|approve|run> [options]
 - **`--reviewer-model <id=model[:thinking]>`**——面板模式下给单个评审员指定模型或思考强度（如 `r1=openai/gpt-5:high`、`r2=zenmux/deepseek/deepseek-v4.1-flash:low`）。跨厂商异构面板必备。
 - **`--concurrency <n>`**——限制评审员并行数。不传就全速（默认全部并发）。只有 provider 账号有严格并发限制时才传 `<n>`。
 - **`--consensus-model <model>`**——显式强制用一个 LLM 子会话当裁决器，而不是 Jev System One。想要对 finding 簇做全文 LLM 推理时用。
+- **`--consensus-retries <n>`**——裁决器返回校验错误（如编造 id、JSON 无法解析）时自动重试并把上次错误注入 prompt（默认 `1`）。
+- **`pi-review panel reaggregate <run-dir|meta-file>` / `--reuse-reviewers <path>`**——在不重跑评审员的情况下直接重新执行共识合并；配合 `--only-reviewers` 或 `--rerun-failed` 可仅重跑指定或失败角色。
 - **`--consensus <policy>` / `--min-agree <n>`**——微调面板法定人数。默认 `quorum`、`min-agree: 2`。零容忍的安全发布用 `unanimous`，广撒网找 bug 用 `any`。
 - **`--progress-log <path>`**——把精简 JSON 事件流写到文件；在 Claude Code、Codex、Cursor 这类缓冲输出的宿主里后台运行时很有用。
 - **`--ui web`**——为面板运行启动本地回环浏览器看板；在 agent 宿主里做可视化检查时推荐。

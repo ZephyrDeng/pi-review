@@ -12,6 +12,7 @@
 
 import {
   DEFAULT_PANEL_MIN_AGREE,
+  type AdjudicationAttemptRecord,
   type ConsensusPolicy,
   type FindingCluster,
   type PanelAggregationResult,
@@ -69,7 +70,7 @@ function classifyReviewer(sub: ReviewerSubmission): {
   kind: ReviewerKind;
   contributed: boolean;
 } {
-  const { result, reviewerId, role, model, responseModel, thinking, usage, durationMs } = sub;
+  const { result, reviewerId, role, model, responseModel, thinking, usage, startedAt, completedAt, durationMs, reused, extensionHint } = sub;
   const outcome: ReviewerOutcome = {
     reviewerId,
     ...(role ? { role } : {}),
@@ -77,7 +78,10 @@ function classifyReviewer(sub: ReviewerSubmission): {
     ...(responseModel ? { responseModel } : {}),
     ...(thinking ? { thinking } : {}),
     ...(usage ? { usage } : {}),
+    ...(startedAt !== undefined ? { startedAt } : {}),
+    ...(completedAt !== undefined ? { completedAt } : {}),
     durationMs,
+    ...(reused ? { reused: true } : {}),
     status: result.status,
     verdict: result.verdict,
     verdictSource: result.verdictSource,
@@ -88,6 +92,7 @@ function classifyReviewer(sub: ReviewerSubmission): {
     ...(result.verdictSource !== "runtime_error" && result.parseError
       ? { parseError: result.parseError }
       : {}),
+    ...(extensionHint ? { extensionHint } : {}),
   };
 
   if (result.verdictSource === "runtime_error" || result.status === "blocked") {
@@ -103,13 +108,22 @@ function classifyReviewer(sub: ReviewerSubmission): {
   // malformed conclusion: the reviewer asked for changes but produced no safe
   // structured finding. It must not become a clean vote (issue #2 Decision 30).
   if (result.status === "has_findings" && result.findings.length === 0) {
+    const dirtyNote = "dirty verdict with no parseable findings";
+    const parseError = outcome.parseError?.includes(dirtyNote)
+      ? outcome.parseError
+      : [outcome.parseError, dirtyNote].filter(Boolean).join("; ");
     return {
-      outcome: { ...outcome, parseError: [outcome.parseError, "dirty verdict with no parseable findings"].filter(Boolean).join("; ") },
+      outcome: { ...outcome, parseError },
       kind: "needs_human",
       contributed: false,
     };
   }
   return { outcome: { ...outcome, contributed: true }, kind: "ok", contributed: true };
+}
+
+/** True when a reviewer submission is valid and contributes findings to panel consensus. */
+export function isContributingSubmission(sub: ReviewerSubmission): boolean {
+  return classifyReviewer(sub).contributed;
 }
 
 function verdictForStatus(status: ReviewStatus): Verdict {
@@ -210,9 +224,12 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
   const byId = new Map(sourceFindings.map((sf) => [sf.id, sf] as const));
   const allSourceIds = new Set(sourceFindings.map((sf) => sf.id));
 
+  const adjudicationStartedAt = Date.now();
   let groups: string[][] = [];
   let matcherErrors: string[] = [];
   let adjudicationUsed = false;
+  let adjudicationRetries: number | undefined;
+  let adjudicationAttemptErrors: AdjudicationAttemptRecord[] | undefined;
   let aggregationRuntimeFailure = false;
 
   if (sourceFindings.length > 0) {
@@ -221,6 +238,8 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
       groups = match.groups;
       matcherErrors = [...(match.errors ?? [])];
       adjudicationUsed = match.adjudicationUsed;
+      adjudicationRetries = match.adjudicationRetries;
+      adjudicationAttemptErrors = match.adjudicationAttemptErrors;
     } catch (error) {
       aggregationRuntimeFailure = true;
       matcherErrors = [`matcher runtime failure: ${(error as Error).message}`];
@@ -263,6 +282,8 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
       buildCluster(`C${index + 1}`, group.map((id) => byId.get(id)!).filter(Boolean), threshold),
     );
   }
+  const adjudicationCompletedAt = Date.now();
+  const adjudicationDurationMs = Math.max(0, adjudicationCompletedAt - adjudicationStartedAt);
 
   const confirmedClusters = clusters.filter((c) => c.confirmed);
   const advisories = clusters.filter((c) => !c.confirmed);
@@ -314,6 +335,11 @@ export async function aggregatePanel(input: PanelAggregationInput): Promise<Pane
     advisories,
     reviewers: reviewerOutcomes,
     adjudicationUsed,
+    ...(adjudicationRetries !== undefined && adjudicationRetries > 0 ? { adjudicationRetries } : {}),
+    ...(adjudicationAttemptErrors && adjudicationAttemptErrors.length > 0 ? { adjudicationAttemptErrors } : {}),
+    adjudicationStartedAt,
+    adjudicationCompletedAt,
+    adjudicationDurationMs,
     ...(matcherErrors.length > 0 ? { adjudicationErrors: matcherErrors } : {}),
     // Resolves every FindingCluster.sourceFindingIds entry (confirmed and
     // advisory alike) to its full reviewer identity + enriched finding.

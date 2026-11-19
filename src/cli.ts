@@ -6,7 +6,7 @@ import { readReviewStdin, runModels, runReview, runReviewOnce } from "./review.j
 import { normalizePayloadRefs, splitPayload } from "./prompt.js";
 import path from "node:path";
 import { formatLoopSummary, runReviewLoop } from "./loop.js";
-import { runPanelReview, runPanelReviewInPane, runPanelReviewOnce, runPanelReviewWithUi } from "./panel.js";
+import { runPanelReaggregate, runPanelReview, runPanelReviewInPane, runPanelReviewOnce, runPanelReviewWithUi } from "./panel.js";
 import { createPaneEventSink, isPaneUi } from "./panel-ui.js";
 import { resolveConfig } from "./config.js";
 import { currentConfig } from "./pi-config.js";
@@ -58,6 +58,14 @@ if (parsed.command === "models") {
   await runVerifyCommand(parsed.extraArgs ?? []);
 } else if (parsed.command === "update") {
   runUpdate();
+} else if (parsed.command === "panel-reaggregate") {
+  if (isPaneUi()) {
+    await runPanelReviewInPane(parsed);
+  } else if (parsed.ui === "web") {
+    await runPanelReviewWithUi(parsed);
+  } else {
+    await runPanelReaggregate(parsed);
+  }
 } else if (parsed.command === "classify") {
   await runClassify(parsed, readReviewStdin());
 } else if (parsed.command === "screen") {

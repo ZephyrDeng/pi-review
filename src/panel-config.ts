@@ -5,8 +5,10 @@
 // impossible quorum, concurrency bounds).
 
 import { ArgsParseError } from "./args.js";
+import { isValidReviewerId, type LoadedPanelArtifact } from "./panel-artifacts.js";
 import {
   CONSENSUS_POLICIES,
+  DEFAULT_CONSENSUS_RETRIES,
   DEFAULT_PANEL_MIN_AGREE,
   MAX_REVIEWERS,
   type ConsensusPolicy,
@@ -22,6 +24,7 @@ export interface ResolvedPanelConfig {
   consensus: ConsensusPolicy;
   minAgree?: number;
   consensusModel?: string;
+  consensusRetries: number;
   concurrency: number;
   /** True when a consensus model enables semantic adjudication. */
   semanticEnabled: boolean;
@@ -130,7 +133,7 @@ export function parseReviewerModelOverrides(values: string[] | undefined): Map<s
     }
     const id = raw.slice(0, eq).trim();
     const token = raw.slice(eq + 1).trim();
-    if (!/^[A-Za-z0-9_.-]+$/.test(id) || !token) {
+    if (!isValidReviewerId(id) || !token) {
       throw new ArgsParseError(`--reviewer-model must look like id=provider/model[:thinking]; got ${raw}`);
     }
     map.set(id, splitModelThinking(token));
@@ -210,6 +213,7 @@ export function resolvePanelConfig(
   let consensus: ConsensusPolicy;
   let minAgree: number | undefined;
   let consensusModel: string | undefined;
+  let consensusRetries: number | undefined;
   let concurrency: number | undefined;
 
   if (parsed.panel) {
@@ -236,8 +240,8 @@ export function resolvePanelConfig(
       if (seenReviewerIds.has(reviewer.id)) {
         throw new ArgsParseError(`panel preset ${parsed.panel} has duplicate reviewer id: ${reviewer.id}`);
       }
-      if (!/^[A-Za-z0-9_.-]+$/.test(reviewer.id)) {
-        throw new ArgsParseError(`panel preset ${parsed.panel} reviewer id "${reviewer.id}" must be alphanumeric/dot/dash/underscore`);
+      if (!isValidReviewerId(reviewer.id)) {
+        throw new ArgsParseError(`panel preset ${parsed.panel} reviewer id "${reviewer.id}" must be a safe alphanumeric identifier`);
       }
       seenReviewerIds.add(reviewer.id);
     }
@@ -248,6 +252,12 @@ export function resolvePanelConfig(
     }
     if (preset.minAgree !== undefined && (!Number.isSafeInteger(preset.minAgree) || preset.minAgree < 1)) {
       throw new ArgsParseError(`panel preset ${parsed.panel} minAgree must be a positive integer`);
+    }
+    if (
+      preset.consensusRetries !== undefined &&
+      (!Number.isSafeInteger(preset.consensusRetries) || preset.consensusRetries < 0)
+    ) {
+      throw new ArgsParseError(`panel preset ${parsed.panel} consensusRetries must be a non-negative integer`);
     }
     const presetConsensus = (explicitConsensus ?? preset.consensus ?? "quorum") as ConsensusPolicy;
     if (preset.minAgree !== undefined && presetConsensus !== "quorum") {
@@ -262,6 +272,7 @@ export function resolvePanelConfig(
     const inheritMinAgree = consensus === "quorum" ? preset.minAgree : undefined;
     minAgree = parsed.minAgree ?? inheritMinAgree ?? defaultMinAgree(consensus);
     consensusModel = parsed.consensusModel ?? preset.consensusModel;
+    consensusRetries = parsed.consensusRetries ?? preset.consensusRetries ?? DEFAULT_CONSENSUS_RETRIES;
     concurrency = parsed.concurrency ?? preset.concurrency;
   } else {
     // Generic panel: --reviewers N (parser guarantees N in 2..MAX). Shared
@@ -277,10 +288,123 @@ export function resolvePanelConfig(
     consensus = (explicitConsensus ?? "quorum") as ConsensusPolicy;
     minAgree = parsed.minAgree ?? defaultMinAgree(consensus);
     consensusModel = parsed.consensusModel;
+    consensusRetries = parsed.consensusRetries ?? DEFAULT_CONSENSUS_RETRIES;
     concurrency = parsed.concurrency;
   }
 
-  reviewers = applyReviewerModelOverrides(reviewers, parseReviewerModelOverrides(parsed.reviewerModels));
+  return finalizePanelConfig({
+    presetName,
+    reviewers: applyReviewerModelOverrides(reviewers, parseReviewerModelOverrides(parsed.reviewerModels)),
+    consensus,
+    minAgree,
+    consensusModel,
+    consensusRetries,
+    concurrency,
+  });
+}
+
+/** Resolve panel configuration from a persisted run artifact plus CLI overrides. */
+export function resolveReusedPanelConfig(
+  parsed: ParsedArgs,
+  artifact: LoadedPanelArtifact,
+  panelPresets: Record<string, PanelPreset> = {},
+): ResolvedPanelConfig {
+  const explicitConsensus = parsed.consensus;
+  if (explicitConsensus !== undefined && !isPolicy(explicitConsensus)) {
+    throw new ArgsParseError(
+      `unknown consensus policy: ${explicitConsensus}. Available: ${CONSENSUS_POLICIES.join(", ")}`,
+    );
+  }
+
+  const artifactById = new Map(artifact.manifest.reviewers.map((r) => [r.id, r]));
+
+  if (parsed.panel) {
+    const base = resolvePanelConfig(parsed, panelPresets);
+    if (parsed.panel !== artifact.manifest.panelPreset) {
+      return base;
+    }
+    const consensus = (explicitConsensus ?? artifact.manifest.consensusPolicy ?? base.consensus) as ConsensusPolicy;
+    const inheritMinAgree = consensus === "quorum" ? (artifact.manifest.minAgree ?? base.minAgree) : undefined;
+    const minAgree = parsed.minAgree ?? inheritMinAgree ?? defaultMinAgree(consensus);
+    const consensusModel = parsed.consensusModel ?? artifact.manifest.consensusModel ?? base.consensusModel;
+    const consensusRetries =
+      parsed.consensusRetries ?? artifact.manifest.consensusRetries ?? base.consensusRetries;
+    const overrides = parseReviewerModelOverrides(parsed.reviewerModels);
+    const mergedReviewers = applyReviewerModelOverrides(
+      base.reviewers.map((spec) => {
+        const prev = artifactById.get(spec.id);
+        return prev ? { ...spec, ...prev } : spec;
+      }),
+      overrides,
+    );
+    return finalizePanelConfig({
+      presetName: base.presetName,
+      reviewers: mergedReviewers,
+      consensus,
+      minAgree,
+      consensusModel,
+      consensusRetries,
+      concurrency: parsed.concurrency ?? base.concurrency,
+    });
+  }
+
+  if (parsed.reviewers !== undefined) {
+    const count = parsed.reviewers;
+    const fallbackRoles = assignGenericReviewerRoles(count);
+    const baseSpecs: PanelReviewerSpec[] = Array.from({ length: count }, (_, index) => {
+      const id = `r${index + 1}`;
+      const prev = artifactById.get(id);
+      if (prev) return { ...prev };
+      return { id, role: fallbackRoles[index]! };
+    });
+    const consensus = (explicitConsensus ?? artifact.manifest.consensusPolicy) as ConsensusPolicy;
+    const inheritMinAgree = consensus === "quorum" ? artifact.manifest.minAgree : undefined;
+    const minAgree = parsed.minAgree ?? inheritMinAgree ?? defaultMinAgree(consensus);
+    const consensusModel = parsed.consensusModel ?? artifact.manifest.consensusModel;
+    const consensusRetries =
+      parsed.consensusRetries ?? artifact.manifest.consensusRetries ?? DEFAULT_CONSENSUS_RETRIES;
+    return finalizePanelConfig({
+      reviewers: applyReviewerModelOverrides(baseSpecs, parseReviewerModelOverrides(parsed.reviewerModels)),
+      consensus,
+      minAgree,
+      consensusModel,
+      consensusRetries,
+      concurrency: parsed.concurrency,
+    });
+  }
+
+  const consensus = (explicitConsensus ?? artifact.manifest.consensusPolicy) as ConsensusPolicy;
+  const inheritMinAgree = consensus === "quorum" ? artifact.manifest.minAgree : undefined;
+  const minAgree = parsed.minAgree ?? inheritMinAgree ?? defaultMinAgree(consensus);
+  const consensusModel = parsed.consensusModel ?? artifact.manifest.consensusModel;
+  const consensusRetries =
+    parsed.consensusRetries ?? artifact.manifest.consensusRetries ?? DEFAULT_CONSENSUS_RETRIES;
+  const reviewers = applyReviewerModelOverrides(
+    artifact.manifest.reviewers,
+    parseReviewerModelOverrides(parsed.reviewerModels),
+  );
+
+  return finalizePanelConfig({
+    presetName: artifact.manifest.panelPreset,
+    reviewers,
+    consensus,
+    minAgree,
+    consensusModel,
+    consensusRetries,
+    concurrency: parsed.concurrency,
+  });
+}
+
+function finalizePanelConfig(input: {
+  presetName?: string;
+  reviewers: PanelReviewerSpec[];
+  consensus: ConsensusPolicy;
+  minAgree?: number;
+  consensusModel?: string;
+  consensusRetries: number;
+  concurrency?: number;
+}): ResolvedPanelConfig {
+  const { presetName, reviewers, consensus, minAgree, consensusModel, consensusRetries, concurrency } = input;
 
   if (minAgree !== undefined) {
     if (!Number.isSafeInteger(minAgree) || minAgree < 1) {
@@ -294,6 +418,10 @@ export function resolvePanelConfig(
     if (consensus !== "quorum") {
       throw new ArgsParseError("--min-agree is only meaningful with --consensus quorum");
     }
+  }
+
+  if (!Number.isSafeInteger(consensusRetries) || consensusRetries < 0) {
+    throw new ArgsParseError("--consensus-retries must be a non-negative integer");
   }
 
   const reviewerCount = reviewers.length;
@@ -314,6 +442,7 @@ export function resolvePanelConfig(
     consensus,
     ...(minAgree !== undefined ? { minAgree } : {}),
     ...(consensusModel ? { consensusModel, semanticEnabled: true } : { semanticEnabled: false }),
+    consensusRetries,
     concurrency: effectiveConcurrency,
   };
 }

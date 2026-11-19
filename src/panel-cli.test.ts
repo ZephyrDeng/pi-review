@@ -77,15 +77,45 @@ function out(verdict, findings) {
   emit("## Verdict\\n" + verdict + "\\n\\n## Summary\\n- Fixture.\\n\\n## Findings\\n" + findings + "\\n\\n## Risks and Blind Spots\\nNone.\\n\\n## Open Questions\\nNone.\\n");
 }
 const bugReporters = ["r1", "r2", "correctness", "security"];
+function recordCall(entry) {
+  const logFile = process.env.FAKE_PI_CALL_LOG;
+  if (logFile) {
+    require("node:fs").appendFileSync(logFile, JSON.stringify(entry) + "\\n");
+  }
+}
 // The consensus adjudicator child answers with plain merge JSON: it runs
 // without --mode json, so the raw object must go straight to stdout (the
 // normal emit() JSONL stream would not parse as one JSON object).
 if (prompt.includes("consensus adjudicator")) {
+  const fsMod = require("node:fs");
+  const stateFile = process.env.FAKE_ADJUDICATOR_STATE_FILE;
+  let callNum = 1;
+  if (stateFile) {
+    callNum = fsMod.existsSync(stateFile) ? Number(fsMod.readFileSync(stateFile, "utf8")) + 1 : 1;
+    fsMod.writeFileSync(stateFile, String(callNum));
+  }
+  recordCall({ kind: "adjudicator", callNum, hasPreviousError: prompt.includes("validation errors") });
+  const adjMode = process.env.FAKE_ADJUDICATOR_MODE || "valid";
+  if (adjMode === "always-invent") {
+    process.stdout.write('{"merges":[{"sourceFindingIds":["r1#F1","r9#F1"],"confidence":0.9}]}');
+    process.exit(0);
+  }
+  if (adjMode === "retry-recover") {
+    if (callNum === 1) {
+      process.stdout.write('{"merges":[{"sourceFindingIds":["r1#F1","r9#F1"],"confidence":0.9}]}');
+    } else if (!prompt.includes("r9#F1")) {
+      process.stdout.write('{"merges":[{"sourceFindingIds":["r1#F1","r8#F1"],"confidence":0.9}]}');
+    } else {
+      process.stdout.write('{"merges":[{"sourceFindingIds":["r1#F1","r2#F1"],"confidence":0.9}]}');
+    }
+    process.exit(0);
+  }
   process.stdout.write('{"merges":[{"sourceFindingIds":["r1#F1","r2#F1"],"confidence":0.9}]}');
   process.exit(0);
 }
+recordCall({ kind: "reviewer", reviewerId, argv: process.argv.slice(2) });
 if (scenario === "runtime-fail" && reviewerId === "r2") { process.stderr.write("child crashed\\n"); process.exit(9); }
-if (scenario === "agree-bug") {
+if (scenario === "agree-bug" || scenario === "runtime-fail") {
   if (bugReporters.includes(reviewerId)) out("request_changes", bug);
   else out("approve", "No material findings.");
 } else if (scenario === "all-clean") {
@@ -109,7 +139,7 @@ process.exit(0);
   return fakePi;
 }
 
-function runPanelCli(fakePi: string, scenario: string, extraArgs: string[], envExtra: Record<string, string> = {}) {
+function runPanelCliRaw(fakePi: string, scenario: string, args: string[], envExtra: Record<string, string> = {}) {
   const env = { ...process.env };
   // Tests are hermetic by default: machine-level Jev env must not leak in.
   delete env.PI_REVIEW_JEV;
@@ -118,7 +148,7 @@ function runPanelCli(fakePi: string, scenario: string, extraArgs: string[], envE
   Object.assign(env, { PI_BIN: fakePi, FAKE_PANEL_SCENARIO: scenario }, envExtra);
   return spawnSync(
     process.execPath,
-    [...tsxLoaderArgs(), cliPath(), ...extraArgs, "--", "@src"],
+    [...tsxLoaderArgs(), cliPath(), ...args],
     {
       cwd: repoRoot(),
       env,
@@ -126,6 +156,10 @@ function runPanelCli(fakePi: string, scenario: string, extraArgs: string[], envE
       timeout: 30_000,
     },
   );
+}
+
+function runPanelCli(fakePi: string, scenario: string, extraArgs: string[], envExtra: Record<string, string> = {}) {
+  return runPanelCliRaw(fakePi, scenario, [...extraArgs, "--", "@src"], envExtra);
 }
 
 interface CliResult {
@@ -673,5 +707,270 @@ test("an explicit --consensus-model keeps the Pi adjudicator even with a Jev key
     assert.equal(server.requests.length, 0);
   } finally {
     await server.close();
+  }
+});
+
+function readCallLog(logPath: string): Array<{ kind: string; reviewerId?: string; argv?: string[]; callNum?: number; hasPreviousError?: boolean }> {
+  if (!fs.existsSync(logPath)) return [];
+  return fs
+    .readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test("adjudicator semantic error triggers automatic retry with error feedback and recovers healthy", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const callLog = path.join(tempDir, "calls.jsonl");
+  const stateFile = path.join(tempDir, "adj-state.txt");
+
+  const result = runPanelCli(
+    fakePi,
+    "ambiguous",
+    ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"],
+    {
+      FAKE_ADJUDICATOR_MODE: "retry-recover",
+      FAKE_ADJUDICATOR_STATE_FILE: stateFile,
+      FAKE_PI_CALL_LOG: callLog,
+    },
+  );
+
+  assert.equal(result.status, 1, result.stderr);
+  const meta = metaRecord(result);
+  assert.ok(meta, result.stderr);
+  assert.equal(meta!.panelHealth, "healthy");
+  assert.equal(meta!.status, "has_findings");
+  assert.equal((meta!.confirmedClusters as unknown[]).length, 1);
+  assert.equal(meta!.adjudicationErrors, undefined);
+  assert.equal(meta!.adjudicationRetries, 1);
+  const attempts = meta!.adjudicationAttemptErrors as Array<{ attempt: number; errors: string[] }>;
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0]!.attempt, 1);
+  assert.ok(attempts[0]!.errors.some((e) => /r9#F1/.test(e)));
+
+  const adjCalls = readCallLog(callLog).filter((c) => c.kind === "adjudicator");
+  assert.equal(adjCalls.length, 2);
+  assert.equal(adjCalls[0]!.hasPreviousError, false);
+  assert.equal(adjCalls[1]!.hasPreviousError, true);
+});
+
+test("adjudicator exhausting retries (and --consensus-retries 0) falls back to needs_human + fallbackClusters", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  // Default retries = 1 -> 2 adjudicator calls, still needs_human.
+  const callLogDefault = path.join(tempDir, "calls-default.jsonl");
+  const stateDefault = path.join(tempDir, "state-default.txt");
+  const defaultRes = runPanelCli(
+    fakePi,
+    "ambiguous",
+    ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"],
+    {
+      FAKE_ADJUDICATOR_MODE: "always-invent",
+      FAKE_ADJUDICATOR_STATE_FILE: stateDefault,
+      FAKE_PI_CALL_LOG: callLogDefault,
+    },
+  );
+  assert.equal(defaultRes.status, 3, defaultRes.stderr);
+  const defaultMeta = metaRecord(defaultRes)!;
+  assert.equal(defaultMeta.panelHealth, "needs_human");
+  assert.equal((defaultMeta.confirmedClusters as unknown[]).length, 0);
+  assert.equal((defaultMeta.advisories as unknown[]).length, 2);
+  assert.ok((defaultMeta.adjudicationErrors as string[]).some((e) => /r9#F1/.test(e)));
+  assert.equal(defaultMeta.adjudicationRetries, 1);
+  assert.equal((defaultMeta.adjudicationAttemptErrors as unknown[]).length, 2);
+  assert.equal(readCallLog(callLogDefault).filter((c) => c.kind === "adjudicator").length, 2);
+
+  // --consensus-retries 0 -> single adjudicator call, no retry metadata.
+  const callLogZero = path.join(tempDir, "calls-zero.jsonl");
+  const zeroRes = runPanelCli(
+    fakePi,
+    "ambiguous",
+    ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2", "--consensus-retries", "0"],
+    {
+      FAKE_ADJUDICATOR_MODE: "always-invent",
+      FAKE_PI_CALL_LOG: callLogZero,
+    },
+  );
+  assert.equal(zeroRes.status, 3, zeroRes.stderr);
+  const zeroMeta = metaRecord(zeroRes)!;
+  assert.equal(zeroMeta.panelHealth, "needs_human");
+  assert.equal(zeroMeta.adjudicationRetries, undefined);
+  assert.equal(zeroMeta.adjudicationAttemptErrors, undefined);
+  assert.equal(readCallLog(callLogZero).filter((c) => c.kind === "adjudicator").length, 1);
+});
+
+test("panel reaggregate and --reuse-reviewers re-run adjudication without spawning any reviewer", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const runDir1 = path.join(tempDir, "run-1");
+
+  // Initial panel fails adjudication (needs_human), but persists all 3 reviewers.
+  const initial = runPanelCli(
+    fakePi,
+    "ambiguous",
+    ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2", "--consensus-retries", "0", "--run-dir", runDir1],
+    { FAKE_ADJUDICATOR_MODE: "always-invent" },
+  );
+  assert.equal(initial.status, 3, initial.stderr);
+  const initialMeta = metaRecord(initial)!;
+  assert.equal(initialMeta.runDir, runDir1);
+  assert.equal(initialMeta.panelHealth, "needs_human");
+
+  // 1) `pi-review panel reaggregate <run-dir>` with valid adjudicator -> 0 reviewer calls!
+  const callLog1 = path.join(tempDir, "reagg-1.jsonl");
+  const runDir2 = path.join(tempDir, "run-2");
+  const reagg = runPanelCliRaw(
+    fakePi,
+    "ambiguous",
+    ["panel", "reaggregate", runDir1, "--consensus-model", "fake/strong", "--run-dir", runDir2],
+    { FAKE_ADJUDICATOR_MODE: "valid", FAKE_PI_CALL_LOG: callLog1 },
+  );
+  assert.equal(reagg.status, 1, reagg.stderr);
+  const reaggCalls = readCallLog(callLog1);
+  assert.equal(reaggCalls.filter((c) => c.kind === "reviewer").length, 0);
+  assert.equal(reaggCalls.filter((c) => c.kind === "adjudicator").length, 1);
+  const reaggMeta = metaRecord(reagg)!;
+  assert.equal(reaggMeta.panelHealth, "healthy");
+  assert.equal((reaggMeta.confirmedClusters as unknown[]).length, 1);
+  assert.equal(reaggMeta.reusedFrom, runDir1);
+  for (const r of reaggMeta.reviewers as Array<{ reused?: boolean }>) {
+    assert.equal(r.reused, true);
+  }
+
+  // 2) `pi-review --reuse-reviewers <run-dir>` -> also 0 reviewer calls!
+  const callLog2 = path.join(tempDir, "reagg-2.jsonl");
+  const reuse = runPanelCliRaw(
+    fakePi,
+    "ambiguous",
+    ["--reuse-reviewers", runDir1, "--consensus-model", "fake/strong"],
+    { FAKE_ADJUDICATOR_MODE: "valid", FAKE_PI_CALL_LOG: callLog2 },
+  );
+  assert.equal(reuse.status, 1, reuse.stderr);
+  assert.equal(readCallLog(callLog2).filter((c) => c.kind === "reviewer").length, 0);
+  assert.equal(metaRecord(reuse)!.panelHealth, "healthy");
+
+  // 3) `pi-review panel reaggregate <run-dir>/meta.json` -> works from standalone meta file!
+  const callLog3 = path.join(tempDir, "reagg-3.jsonl");
+  const fromMeta = runPanelCliRaw(
+    fakePi,
+    "ambiguous",
+    ["panel", "reaggregate", path.join(runDir1, "meta.json"), "--consensus-model", "fake/strong"],
+    { FAKE_ADJUDICATOR_MODE: "valid", FAKE_PI_CALL_LOG: callLog3 },
+  );
+  assert.equal(fromMeta.status, 1, fromMeta.stderr);
+  assert.equal(readCallLog(callLog3).filter((c) => c.kind === "reviewer").length, 0);
+  assert.equal(metaRecord(fromMeta)!.panelHealth, "healthy");
+});
+
+test("--only-reviewers and --rerun-failed rerun only selected or failed reviewers while reusing healthy ones", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+  const runDir1 = path.join(tempDir, "run-fail");
+
+  // Initial panel: r2 crashes (exit 4, blocked), r1 and r3 succeed and are persisted.
+  const initial = runPanelCli(
+    fakePi,
+    "runtime-fail",
+    ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2", "--run-dir", runDir1],
+  );
+  assert.equal(initial.status, 4, initial.stderr);
+  assert.equal(metaRecord(initial)!.panelHealth, "blocked");
+
+  // 1) `--reuse-reviewers <dir> --only-reviewers r2` -> spawns ONLY r2.
+  const onlyLog = path.join(tempDir, "only-r2.jsonl");
+  const onlyRes = runPanelCli(
+    fakePi,
+    "agree-bug",
+    ["--reuse-reviewers", runDir1, "--only-reviewers", "r2"],
+    { FAKE_PI_CALL_LOG: onlyLog },
+  );
+  assert.equal(onlyRes.status, 1, onlyRes.stderr);
+  const onlyReviewersRan = readCallLog(onlyLog).filter((c) => c.kind === "reviewer").map((c) => c.reviewerId);
+  assert.deepEqual(onlyReviewersRan, ["r2"]);
+  const onlyMeta = metaRecord(onlyRes)!;
+  assert.equal(onlyMeta.panelHealth, "healthy");
+  assert.equal((onlyMeta.confirmedClusters as unknown[]).length, 1);
+  const onlyRows = onlyMeta.reviewers as Array<{ reviewerId: string; reused?: boolean }>;
+  assert.equal(onlyRows.find((r) => r.reviewerId === "r1")?.reused, true);
+  assert.equal(onlyRows.find((r) => r.reviewerId === "r2")?.reused, undefined);
+  assert.equal(onlyRows.find((r) => r.reviewerId === "r3")?.reused, true);
+
+  // 2) `--reuse-reviewers <dir> --rerun-failed` WITHOUT repeating `-- @src` ->
+  // restores persisted payload/target from manifest.json and spawns ONLY r2!
+  const failedLog = path.join(tempDir, "rerun-failed.jsonl");
+  const failedRes = runPanelCliRaw(
+    fakePi,
+    "agree-bug",
+    ["--reuse-reviewers", runDir1, "--rerun-failed"],
+    { FAKE_PI_CALL_LOG: failedLog },
+  );
+  assert.equal(failedRes.status, 1, failedRes.stderr);
+  const failedReviewersRan = readCallLog(failedLog).filter((c) => c.kind === "reviewer");
+  assert.deepEqual(failedReviewersRan.map((c) => c.reviewerId), ["r2"]);
+  assert.ok(
+    (failedReviewersRan[0]!.argv ?? []).some((arg) => arg.includes("src")),
+    `expected restored @src payload in rerun argv: ${JSON.stringify(failedReviewersRan[0]!.argv)}`,
+  );
+  assert.equal(metaRecord(failedRes)!.panelHealth, "healthy");
+
+  // 3) Unknown reviewer id in --only-reviewers exits 2.
+  const unknownRes = runPanelCli(
+    fakePi,
+    "agree-bug",
+    ["--reuse-reviewers", runDir1, "--only-reviewers", "r99"],
+  );
+  assert.equal(unknownRes.status, 2);
+  assert.match(unknownRes.stderr, /unknown reviewer id/);
+
+  // 4) In-place overwrite (`--reuse-reviewers <dir> --run-dir <dir>`) is rejected with exit 2.
+  const sameDirRes = runPanelCliRaw(
+    fakePi,
+    "agree-bug",
+    ["--reuse-reviewers", runDir1, "--run-dir", runDir1],
+  );
+  assert.equal(sameDirRes.status, 2);
+  assert.match(sameDirRes.stderr, /cannot overwrite the --reuse-reviewers source artifact/);
+
+  // 5) `--reviewer-model` targeting a reused reviewer not in --only-reviewers exits 2.
+  const unusedOverrideRes = runPanelCli(
+    fakePi,
+    "agree-bug",
+    ["--reuse-reviewers", runDir1, "--only-reviewers", "r2", "--reviewer-model", "r1=fake/other"],
+  );
+  assert.equal(unusedOverrideRes.status, 2);
+  assert.match(unusedOverrideRes.stderr, /not being rerun: r1/);
+});
+
+test("panel meta records start/end/duration timestamps for panel, adjudication, and every reviewer", () => {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-panel-cli-"));
+  const fakePi = writeFakePi(tempDir);
+
+  const result = runPanelCli(fakePi, "ambiguous", ["--reviewers", "3", "--consensus", "quorum", "--min-agree", "2"]);
+  assert.equal(result.status, 1, result.stderr);
+  const meta = metaRecord(result)!;
+
+  assert.equal(typeof meta.startedAt, "number");
+  assert.equal(typeof meta.completedAt, "number");
+  assert.equal(typeof meta.durationMs, "number");
+  assert.ok((meta.startedAt as number) <= (meta.completedAt as number));
+  assert.equal(meta.durationMs, (meta.completedAt as number) - (meta.startedAt as number));
+
+  assert.equal(typeof meta.adjudicationStartedAt, "number");
+  assert.equal(typeof meta.adjudicationCompletedAt, "number");
+  assert.equal(typeof meta.adjudicationDurationMs, "number");
+  assert.ok((meta.adjudicationStartedAt as number) <= (meta.adjudicationCompletedAt as number));
+  assert.equal(
+    meta.adjudicationDurationMs,
+    (meta.adjudicationCompletedAt as number) - (meta.adjudicationStartedAt as number),
+  );
+
+  for (const r of meta.reviewers as Array<{ startedAt?: number; completedAt?: number; durationMs: number }>) {
+    assert.equal(typeof r.startedAt, "number");
+    assert.equal(typeof r.completedAt, "number");
+    assert.ok(r.startedAt! <= r.completedAt!);
+    assert.equal(r.durationMs, r.completedAt! - r.startedAt!);
   }
 });

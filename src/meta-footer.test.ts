@@ -207,3 +207,21 @@ test("panel ASCII footer preserves multi-line child runtime diagnostics (issue #
   assert.match(ascii, /--- child stderr ---/);
   assert.match(ascii, /extension ctx is stale/);
 });
+
+test("panel ASCII footer shows adjudicator retries, duration, runDir, and reused badge", () => {
+  const ascii = formatPanelMetaAscii({
+    ...panelSample,
+    adjudicationUsed: true,
+    adjudicationEngine: "pi",
+    adjudicationRetries: 1,
+    adjudicationDurationMs: 2450,
+    runDir: "/tmp/panel-runs/run-123",
+    reviewers: [
+      { ...panelSample.reviewers[0]!, reused: true },
+      panelSample.reviewers[1]!,
+    ],
+  });
+  assert.match(ascii, /Adjudicator\s+used \(pi · 1 retry · 2\.5s\)/);
+  assert.match(ascii, /Run dir\s+\/tmp\/panel-runs\/run-123/);
+  assert.match(ascii, /r1 \| CLEAN \| approve \| role:one \| provider\/model-a \| reused \| 100ms/);
+});

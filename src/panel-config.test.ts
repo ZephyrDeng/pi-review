@@ -4,9 +4,11 @@ import { ArgsParseError } from "./args.js";
 import {
   assignGenericReviewerRoles,
   resolvePanelConfig,
+  resolveReusedPanelConfig,
   resolveReviewerModelThinking,
   splitModelThinking,
 } from "./panel-config.js";
+import type { LoadedPanelArtifact } from "./panel-artifacts.js";
 import type { PanelPreset, ParsedArgs } from "./types.js";
 
 function baseParsed(overrides: Partial<ParsedArgs> = {}): ParsedArgs {
@@ -237,4 +239,98 @@ test("concurrency greater than reviewer count is a usage error", () => {
     {},
     /--concurrency 5 cannot exceed reviewer count 2/,
   );
+});
+
+test("resolvePanelConfig defaults consensusRetries to 1 and allows overrides", () => {
+  assert.equal(resolvePanelConfig(baseParsed({ reviewers: 2 }), {}).consensusRetries, 1);
+  assert.equal(resolvePanelConfig(baseParsed({ reviewers: 2, consensusRetries: 0 }), {}).consensusRetries, 0);
+  const presetWithRetries: PanelPreset = { ...codeExperts, consensusRetries: 3 };
+  assert.equal(
+    resolvePanelConfig(baseParsed({ panel: "code-experts" }), { "code-experts": presetWithRetries }).consensusRetries,
+    3,
+  );
+  assert.equal(
+    resolvePanelConfig(baseParsed({ panel: "code-experts", consensusRetries: 0 }), { "code-experts": presetWithRetries }).consensusRetries,
+    0,
+  );
+});
+
+test("resolveReusedPanelConfig inherits manifest settings and applies CLI overrides cleanly", () => {
+  const artifact: LoadedPanelArtifact = {
+    sourcePath: "/tmp/run-1",
+    sourceKind: "run-dir",
+    manifest: {
+      mode: "plan",
+      panelPreset: "code-experts",
+      reviewers: [
+        { id: "correctness", role: "Correctness" },
+        { id: "security", role: "Security" },
+        { id: "testing", role: "Testing" },
+      ],
+      consensusPolicy: "quorum",
+      minAgree: 2,
+      consensusModel: "old/model",
+      consensusRetries: 3,
+    },
+    submissionsById: new Map(),
+  };
+
+  // Inherits reviewers, policy, minAgree, consensusModel, and consensusRetries from manifest.
+  const inherited = resolveReusedPanelConfig(baseParsed({ reuseReviewers: "/tmp/run-1" }), artifact);
+  assert.equal(inherited.presetName, "code-experts");
+  assert.equal(inherited.consensus, "quorum");
+  assert.equal(inherited.minAgree, 2);
+  assert.equal(inherited.consensusModel, "old/model");
+  assert.equal(inherited.consensusRetries, 3);
+
+  // Meta-file artifacts without consensusRetries fall back to DEFAULT_CONSENSUS_RETRIES (1).
+  const fromMeta = resolveReusedPanelConfig(
+    baseParsed({ reuseReviewers: "/tmp/meta.json" }),
+    { ...artifact, sourceKind: "meta-file", manifest: { ...artifact.manifest, consensusRetries: undefined } },
+  );
+  assert.equal(fromMeta.consensusRetries, 1);
+
+  // Repeating --reviewers N alongside --reuse-reviewers preserves reused reviewer roles and manifest policy.
+  const genericArtifact: LoadedPanelArtifact = {
+    sourcePath: "/tmp/run-generic",
+    sourceKind: "run-dir",
+    manifest: {
+      mode: "code",
+      reviewers: [
+        { id: "r1", role: "Original One", model: "m1" },
+        { id: "r2", role: "Original Two", model: "m2" },
+      ],
+      consensusPolicy: "majority",
+      consensusModel: "adj/model",
+      consensusRetries: 2,
+    },
+    submissionsById: new Map(),
+  };
+  const withWidth = resolveReusedPanelConfig(
+    baseParsed({ reviewers: 2, reuseReviewers: "/tmp/run-generic" }),
+    genericArtifact,
+  );
+  assert.equal(withWidth.reviewers[0]?.role, "Original One");
+  assert.equal(withWidth.reviewers[1]?.role, "Original Two");
+  assert.equal(withWidth.consensus, "majority");
+  assert.equal(withWidth.consensusModel, "adj/model");
+  assert.equal(withWidth.consensusRetries, 2);
+
+  // Overriding consensus to majority drops stale minAgree from manifest.
+  const overridden = resolveReusedPanelConfig(
+    baseParsed({
+      reuseReviewers: "/tmp/run-1",
+      consensus: "majority",
+      consensusModel: "new/model",
+      consensusRetries: 2,
+      reviewerModels: ["security=openai/gpt-5.6:low"],
+    }),
+    artifact,
+  );
+  assert.equal(overridden.consensus, "majority");
+  assert.equal(overridden.minAgree, undefined);
+  assert.equal(overridden.consensusModel, "new/model");
+  assert.equal(overridden.consensusRetries, 2);
+  assert.equal(overridden.reviewers.find((r) => r.id === "security")?.model, "openai/gpt-5.6");
+  assert.equal(overridden.reviewers.find((r) => r.id === "security")?.thinking, "low");
 });

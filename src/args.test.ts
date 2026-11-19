@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { ArgsParseError, parseReviewCommand } from "./args.js";
+import { ArgsParseError, parseArgs, parsePanelSubcommand, parseReviewCommand } from "./args.js";
 
 test("review remains the default and explicit command", () => {
   assert.equal(parseReviewCommand(["--", "@src"]).command, "review");
@@ -320,4 +320,124 @@ test("single reviewer with no panel flags keeps existing single-review parsing",
   const parsed = parseReviewCommand(["--reviewers", "1", "--", "@src"]);
   assert.equal(parsed.reviewers, 1);
   assert.equal(parsed.panel, undefined);
+});
+
+test("--consensus-retries parses non-negative integers including 0 and requires an active panel", () => {
+  assert.equal(parseReviewCommand(["--reviewers", "2", "--consensus-retries", "0", "--", "@src"]).consensusRetries, 0);
+  assert.equal(parseReviewCommand(["--reviewers", "2", "--consensus-retries", "3", "--", "@src"]).consensusRetries, 3);
+  for (const bad of ["-1", "1.5", "abc"]) {
+    assert.throws(
+      () => parseReviewCommand(["--reviewers", "2", "--consensus-retries", bad, "--", "@src"]),
+      (error: unknown) => error instanceof ArgsParseError && /non-negative integer/.test(error.message),
+    );
+  }
+  assert.throws(
+    () => parseReviewCommand(["--consensus-retries", "1", "--", "@src"]),
+    (error: unknown) => error instanceof ArgsParseError && /panel options require/.test(error.message),
+  );
+});
+
+test("artifact reuse and partial rerun flags parse, deduplicate, and enforce dependencies", () => {
+  const parsed = parseReviewCommand([
+    "--reuse-reviewers", "/tmp/run-1",
+    "--only-reviewers", "r1,r2",
+    "--only-reviewers", "r2,security",
+    "--run-dir", "/tmp/run-2",
+    "--", "@src",
+  ]);
+  assert.equal(parsed.reuseReviewers, "/tmp/run-1");
+  assert.deepEqual(parsed.onlyReviewers, ["r1", "r2", "security"]);
+  assert.equal(parsed.runDir, "/tmp/run-2");
+
+  const failed = parseReviewCommand(["--reuse-reviewers", "/tmp/run-1", "--rerun-failed", "--", "@src"]);
+  assert.equal(failed.rerunFailed, true);
+
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--only-reviewers", "r1", "--", "@src"]),
+    /require --reuse-reviewers/,
+  );
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--rerun-failed", "--", "@src"]),
+    /require --reuse-reviewers/,
+  );
+  assert.throws(
+    () => parseReviewCommand(["--reuse-reviewers", "/tmp/run-1", "--only-reviewers", "r1", "--rerun-failed", "--", "@src"]),
+    /cannot be used together/,
+  );
+  for (const badId of ["", ",", "../x", "a/b", "__proto__", "constructor", "-r1", ".r1"]) {
+    assert.throws(
+      () => parseReviewCommand(["--reuse-reviewers", "/tmp/run-1", "--only-reviewers", badId, "--", "@src"]),
+      ArgsParseError,
+    );
+  }
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "1", "--reuse-reviewers", "/tmp/run-1", "--", "@src"]),
+    /requires a multi-reviewer panel/,
+  );
+  assert.throws(
+    () => parseReviewCommand(["--reviewers", "2", "--run-dir", "   ", "--", "@src"]),
+    /--run-dir cannot be empty/,
+  );
+  assert.throws(
+    () => parseReviewCommand(["loop", "--reuse-reviewers", "/tmp/run-1", "--", "@src"]),
+    /loop cannot be used with/,
+  );
+});
+
+test("modeExplicit distinguishes explicit --mode / positional mode from default", () => {
+  assert.equal(parseReviewCommand(["--reviewers", "2", "--", "@src"]).modeExplicit, undefined);
+  assert.equal(parseReviewCommand(["--reviewers", "2", "--mode", "plan", "--", "@src"]).modeExplicit, true);
+  assert.equal(parseReviewCommand(["plan", "--reviewers", "2", "--", "@src"]).modeExplicit, true);
+});
+
+test("parsePanelSubcommand parses `panel reaggregate` with overrides and rejects invalid input", () => {
+  const parsed = parsePanelSubcommand([
+    "reaggregate",
+    "/tmp/panel-run",
+    "--consensus-model", "openai/gpt-5.5",
+    "--consensus-retries", "2",
+    "--consensus", "majority",
+    "--run-dir", "/tmp/out",
+    "--output-format", "events-jsonl",
+  ]);
+  assert.equal(parsed.command, "panel-reaggregate");
+  assert.equal(parsed.reuseReviewers, "/tmp/panel-run");
+  assert.equal(parsed.consensusModel, "openai/gpt-5.5");
+  assert.equal(parsed.consensusRetries, 2);
+  assert.equal(parsed.consensus, "majority");
+  assert.equal(parsed.runDir, "/tmp/out");
+  assert.equal(parsed.outputFormat, "events-jsonl");
+
+  const pathAfterFlags = parseArgs(["panel", "reaggregate", "--consensus", "quorum", "--min-agree", "2", "/tmp/meta.json"]);
+  assert.equal(pathAfterFlags.command, "panel-reaggregate");
+  assert.equal(pathAfterFlags.reuseReviewers, "/tmp/meta.json");
+  assert.equal(pathAfterFlags.minAgree, 2);
+
+  const withUi = parsePanelSubcommand([
+    "reaggregate",
+    "/tmp/panel-run",
+    "--ui", "web",
+    "--no-ui-open",
+    "--ui-ttl", "30",
+  ]);
+  assert.equal(withUi.ui, "web");
+  assert.equal(withUi.uiOpen, false);
+  assert.equal(withUi.uiTtlSeconds, 30);
+  assert.throws(
+    () => parsePanelSubcommand(["reaggregate", "/tmp/panel-run", "--no-ui-open"]),
+    /require --ui web/,
+  );
+
+  assert.throws(() => parsePanelSubcommand(["reaggregate"]), /requires a run directory or meta file/);
+  assert.throws(() => parsePanelSubcommand(["unknown"]), /expected subcommand "reaggregate/);
+  assert.throws(() => parsePanelSubcommand(["reaggregate", "/tmp/a", "/tmp/b"]), /unexpected extra argument/);
+  assert.throws(() => parsePanelSubcommand(["reaggregate", "/tmp/a", "--unknown"]), /unknown option/);
+  assert.throws(
+    () => parsePanelSubcommand(["reaggregate", "/tmp/a", "--consensus", "any", "--min-agree", "2"]),
+    /only meaningful with --consensus quorum/,
+  );
+  assert.throws(
+    () => parsePanelSubcommand(["--help"]),
+    (error: unknown) => error instanceof ArgsParseError && error.exitCode === 0,
+  );
 });

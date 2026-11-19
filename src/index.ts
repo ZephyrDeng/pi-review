@@ -1,4 +1,4 @@
-export { ArgsParseError, DEFAULT_MAX_ROUNDS, isPanelActive, parseArgs, parseReviewCommand, resolveExclusivePanelShape } from "./args.js";
+export { ArgsParseError, DEFAULT_MAX_ROUNDS, isPanelActive, parseArgs, parsePanelSubcommand, parseReviewCommand, resolveExclusivePanelShape } from "./args.js";
 export { resolveConfig } from "./config.js";
 export type { Config } from "./config.js";
 export { loadPresets, loadPanelPresets, loadSystemPrompt } from "./presets.js";
@@ -23,6 +23,8 @@ export {
 export {
   buildReviewerArgs,
   collectPanelExtensionHints,
+  runPanelReaggregate,
+  runPanelReaggregateOnce,
   runPanelReview,
   runPanelReviewOnce,
   emitPanelFooter,
@@ -39,18 +41,34 @@ export type { LoopReviewResult, LoopRoundSummary, LoopRoundPanelSummary, LoopSto
 export { compareRoundFindings } from "./round-compare.js";
 export type { RoundComparison, RoundFindingRef } from "./round-compare.js";
 export { LOOP_CLEAN_GOAL } from "./loop.js";
-export { aggregatePanel, effectiveThreshold } from "./panel-aggregate.js";
+export { aggregatePanel, effectiveThreshold, isContributingSubmission } from "./panel-aggregate.js";
 export type { PanelAggregationInput } from "./panel-aggregate.js";
+export {
+  artifactsEnabled,
+  createPanelRunStore,
+  isValidReviewerId,
+  loadPanelArtifact,
+  panelRunsRoot,
+  safeReviewerIdForFile,
+  PANEL_ARTIFACT_SCHEMA_VERSION,
+} from "./panel-artifacts.js";
+export type {
+  CreatePanelRunStoreOptions,
+  LoadedPanelArtifact,
+  PanelRunManifest,
+  PanelRunStore,
+} from "./panel-artifacts.js";
 export { DeterministicMatcher, SemanticMatcher } from "./matcher.js";
-export type { FindingMatcher, MatchResult, SemanticAdjudicator, AdjudicationRequest, AdjudicationResponse, AdjudicationMerge, AdjudicationCandidate } from "./matcher.js";
+export type { FindingMatcher, MatcherOptions, MatchResult, SemanticAdjudicator, AdjudicationRequest, AdjudicationResponse, AdjudicationMerge, AdjudicationCandidate } from "./matcher.js";
 export { createJevAdjudicator, hasJevApiKey, resolveJev, resolveJevConnection, withAdjudicationFallback, withUncertaintyEscalation, JEV_ESCALATION_BAND, evaluateNouls, evaluateChoices } from "./jev.js";
 export type { JevConnection, JevDecision } from "./jev.js";
 export { classifyFindings, formatClassifyAscii, parseMetaFindings, resolveBaseline, SCOPE_CLASSES, CLASSIFY_CONFIDENCE_FLOOR } from "./classify.js";
 export type { ClassifiedFinding, ClassifyResult, ScopeClass } from "./classify.js";
-export { resolvePanelConfig } from "./panel-config.js";
+export { resolvePanelConfig, resolveReusedPanelConfig } from "./panel-config.js";
 export type { ResolvedPanelConfig } from "./panel-config.js";
 export { makeRunSessionDir, newestJsonl } from "./session.js";
 export type {
+  AdjudicationAttemptRecord,
   Verdict,
   ReviewStatus,
   ReviewFinding,
@@ -83,6 +101,7 @@ export {
   MAX_REVIEWERS,
   PANEL_READ_ONLY_TOOLS,
   DEFAULT_PANEL_MIN_AGREE,
+  DEFAULT_CONSENSUS_RETRIES,
   REVIEW_META_VERSION,
 } from "./types.js";
 export { fail, hasPathSeparator, expandMaybeHome, normalizeTools } from "./utils.js";
