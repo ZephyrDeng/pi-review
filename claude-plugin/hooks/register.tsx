@@ -256,7 +256,8 @@ export const register: Register = on => {
           {reviewers.map((r, i) => {
             const icon = r.status === 'running' ? spin(i * 3) : r.status === 'completed' ? '✔' : r.status === 'failed' ? '✖' : r.status === 'cancelled' ? '⊘' : '○'
             const role = r.role.length <= 24 && r.role.toLowerCase() !== r.reviewerId.toLowerCase() ? r.role : ''
-            const took = r.startedAt ? duration((r.completedAt ?? now) - r.startedAt) : ''
+            const tookMs = r.startedAt !== undefined ? (r.completedAt ?? now) - r.startedAt : r.submission?.durationMs
+            const took = tookMs !== undefined ? duration(tookMs) : ''
             const result = r.submission?.result
             return (
               <Box flexDirection="column">

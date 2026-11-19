@@ -216,6 +216,11 @@ A finding whose summary ends `matched no known pattern` is an unmatched signal: 
 | `--reviewer-model <id=model[:thinking]>` | In panel mode, to assign specific models or thinking levels to individual reviewers (e.g. `r1=openai/gpt-5:high`, `r2=zenmux/deepseek/deepseek-v4.1-flash:low`). Essential for cross-family heterogeneous panels. |
 | `--concurrency <n>` | Bounds parallel reviewer execution. **Omit for full speed** (all reviewers run concurrently by default). Only pass `<n>` if the provider account has strict concurrent request limits. |
 | `--consensus-model <model>` | Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters. |
+| `--consensus-retries <n>` | Retries consensus adjudication when the adjudicator returns invalid JSON, invented IDs, cross-path merges, or out-of-range confidence (default: `1`; `0` disables). |
+| `panel reaggregate <run-dir\|meta-file>` | Re-run consensus adjudication over persisted reviewer conclusions without re-running any reviewer child session (for example, after adjudication `needs_human` or when trying another `--consensus-model` / `--consensus` policy). |
+| `--reuse-reviewers <path>` | Reuse persisted reviewer submissions from a prior panel run directory (reported as `RunDir` / `runDir` in meta) or meta file; pair with `--rerun-failed` or `--only-reviewers <ids>` to re-run only selected reviewers. |
+| `--rerun-failed` / `--only-reviewers <ids>` | With `--reuse-reviewers <path>`, re-execute only failed/non-contributing reviewers (`--rerun-failed`) or specific comma-separated reviewer IDs (`--only-reviewers r2,r4`) while keeping healthy reviewers untouched. |
+| `--run-dir <path>` | Write panel artifacts (`manifest.json`, `reviewers/<id>.json`, `meta.json`) to an explicit directory instead of the automatic `~/.pi/pi-review/panel-runs/<timestamp>_<pid>_<runId>` directory. |
 | `--consensus <policy>` / `--min-agree <n>` | Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts. |
 | `--until clean` | In `loop` mode, automates iterative convergence (stops when confirmed actionable issues drop to 0 or hard `--max-rounds` cap is hit). |
 | `--progress-log <path>` | Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor. |
@@ -254,9 +259,13 @@ Multi-reviewer panels default to **quorum with minimum agreement 2** so panel mo
 
 Singleton (uncorroborated) findings remain visible as **advisories** but do **not** change clean status or fail the gate. They are recorded as non-blocking follow-ups; the host promotes them only with explicit human acceptance. Confirmed actionable clusters produce `has_findings`; no confirmed clusters produce `clean`.
 
-### Aggregation
+### Aggregation & recovery
 
-Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (enabled with `--consensus-model`). The adjudicator clusters findings and may **not** invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum.
+Two-phase matching: deterministic matching on stable anchors (path + normalized summary) first; only ambiguous same-path candidates go to a constrained **semantic adjudicator** (Jev when enabled, or Pi with `--consensus-model`). The adjudicator clusters findings and may **not** invent findings, drop findings, add evidence, or act as another reviewer — it has no write tools. Low-confidence matches stay separate advisories so uncertain similarity cannot manufacture quorum. Semantic validation failures automatically retry once (`--consensus-retries 1` by default) with prior validation errors fed back into the adjudicator prompt before falling back to `needs_human`.
+
+Every panel run persists redacted reviewer submissions under `~/.pi/pi-review/panel-runs/` (override with `--run-dir <path>` or `PI_REVIEW_PANEL_RUNS_DIR`; disable automatic writes with `PI_REVIEW_PANEL_ARTIFACTS=0`) and surfaces `runDir` in `PI_REVIEW_META_JSON` and the ASCII footer:
+- If adjudication fails or you want to switch `--consensus-model` / `--consensus` without paying for reviewers again: `pi-review panel reaggregate <runDir> --consensus-model <model>`.
+- If one reviewer timed out or hit a rate limit while others succeeded: `pi-review --reuse-reviewers <runDir> --rerun-failed` (or `--only-reviewers <id>`).
 
 ### Cost multipliers
 

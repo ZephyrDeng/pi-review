@@ -7,6 +7,7 @@ import {
   deterministicKey,
   normalizePath,
   normalizeSummary,
+  type AdjudicationRequest,
   type SemanticAdjudicator,
 } from "./matcher.js";
 import type { ReviewFinding, SourceFinding } from "./types.js";
@@ -331,4 +332,144 @@ test("DeterministicMatcher without baseDir keeps relative spellings cwd-relative
   ];
   const result = new DeterministicMatcher().match(findings);
   assert.equal(result.groups.length, 2);
+});
+
+test("SemanticMatcher retries on semantic validation errors and recovers when retry succeeds", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  const requests: AdjudicationRequest[] = [];
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate(request) {
+        requests.push(request);
+        if (requests.length === 1) {
+          return { merges: [{ sourceFindingIds: ["r1#F1", "r9#F1"], confidence: 0.9 }] };
+        }
+        return { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 0.9 }] };
+      },
+    },
+    { maxRetries: 1 },
+  );
+
+  const result = await matcher.match(findings);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0]!.previousErrors, undefined);
+  assert.equal(requests[1]!.attempt, 2);
+  assert.ok(requests[1]!.previousErrors?.some((e) => /invented.*r9#F1/.test(e)));
+  assert.equal(requests[1]!.priorAttempts?.length, 1);
+  assert.equal(requests[1]!.priorAttempts![0]!.attempt, 1);
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.adjudicationUsed, true);
+  assert.equal(result.adjudicationRetries, 1);
+  assert.equal(result.adjudicationAttemptErrors?.length, 1);
+  assert.ok(result.adjudicationAttemptErrors![0]!.errors.some((e) => /r9#F1/.test(e)));
+  assert.equal(result.groups.length, 1);
+  assert.deepEqual(result.groups[0]!.sort(), ["r1#F1", "r2#F1"]);
+});
+
+test("SemanticMatcher retries across cross-path, invalid confidence, malformed merges, and response.errors", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("a one", { path: "src/a.ts" })),
+    sf("r2#F1", "r2", finding("a two", { path: "src/a.ts" })),
+    sf("r1#F2", "r1", finding("b one", { path: "src/b.ts" })),
+    sf("r2#F2", "r2", finding("b two", { path: "src/b.ts" })),
+  ];
+  const badResponses = [
+    { merges: [{ sourceFindingIds: ["r1#F1", "r2#F2"], confidence: 0.9 }] }, // cross-path
+    { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 1.5 }] }, // invalid confidence
+    { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: true as unknown as number }] }, // boolean confidence
+    { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: null as unknown as number }] }, // null confidence
+    { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: "0.9" as unknown as number }] }, // string confidence
+    { merges: "bad" as unknown as never[] }, // non-array merges
+    { merges: ["bad-entry" as unknown as never] }, // malformed entry
+    { merges: [], errors: ["adjudicator returned no parseable JSON object"] }, // parse error
+  ];
+  let idx = 0;
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate() {
+        if (idx < badResponses.length) return badResponses[idx++]!;
+        return { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 0.9 }] };
+      },
+    },
+    { maxRetries: badResponses.length },
+  );
+
+  const result = await matcher.match(findings);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.adjudicationRetries, badResponses.length);
+  assert.equal(result.adjudicationAttemptErrors?.length, badResponses.length);
+  assert.equal(result.groups.length, 3);
+});
+
+test("SemanticMatcher returns final errors and full attempt history when retries are exhausted", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  const requests: AdjudicationRequest[] = [];
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate(request) {
+        requests.push(request);
+        const badId = `r${requests.length + 7}#F1`;
+        return { merges: [{ sourceFindingIds: ["r1#F1", badId], confidence: 0.9 }] };
+      },
+    },
+    { maxRetries: 2 },
+  );
+
+  const result = await matcher.match(findings);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2]!.priorAttempts?.length, 2);
+  assert.equal(result.adjudicationRetries, 2);
+  assert.equal(result.adjudicationAttemptErrors?.length, 3);
+  assert.ok(result.errors.some((e) => /r10#F1/.test(e)));
+  assert.equal(result.groups.length, 2);
+});
+
+test("SemanticMatcher with maxRetries 0 does not retry and omits retry metadata", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  let calls = 0;
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate() {
+        calls += 1;
+        return { merges: [{ sourceFindingIds: ["r1#F1", "r9#F1"], confidence: 0.9 }] };
+      },
+    },
+    { maxRetries: 0 },
+  );
+
+  const result = await matcher.match(findings);
+  assert.equal(calls, 1);
+  assert.equal(result.adjudicationRetries, undefined);
+  assert.equal(result.adjudicationAttemptErrors, undefined);
+  assert.ok(result.errors.some((e) => /r9#F1/.test(e)));
+});
+
+test("SemanticMatcher propagates thrown runtime errors immediately without retrying", async () => {
+  const findings = [
+    sf("r1#F1", "r1", finding("loop bound is wrong", { path: "src/cli.ts" })),
+    sf("r2#F1", "r2", finding("off-by-one iteration", { path: "src/cli.ts" })),
+  ];
+  let calls = 0;
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate() {
+        calls += 1;
+        throw new Error("adjudicator process crashed");
+      },
+    },
+    { maxRetries: 2 },
+  );
+
+  await assert.rejects(matcher.match(findings), /adjudicator process crashed/);
+  assert.equal(calls, 1);
 });

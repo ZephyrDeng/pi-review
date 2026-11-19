@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { PanelReviewerSpec, ReviewPreset, SplitPayload } from "./types.js";
+import type { AdjudicationAttemptRecord, PanelReviewerSpec, ReviewPreset, SplitPayload } from "./types.js";
 import { VERDICTS } from "./types.js";
 import type { AdjudicationCandidate } from "./matcher.js";
 
@@ -99,13 +99,42 @@ export function buildReviewerPrompt(
     .join("\n\n");
 }
 
+function formatAdjudicationRetryFeedback(
+  previousErrors?: string[],
+  priorAttempts?: AdjudicationAttemptRecord[],
+): string | undefined {
+  const attemptsWithErrors = (priorAttempts ?? []).filter((a) => a.errors.length > 0);
+  if (attemptsWithErrors.length > 1) {
+    const blocks = attemptsWithErrors.map(
+      (a) => `Attempt ${a.attempt}:\n${a.errors.map((err) => `- ${err}`).join("\n")}`,
+    );
+    return [
+      "Your previous responses had validation errors and were rejected:",
+      blocks.join("\n"),
+      "Fix every error above: only reference exact `id` values from Candidate findings below, never merge findings from different Candidate groups (different path anchors), use a finite `confidence` between 0 and 1, and respond with one valid JSON object only.",
+    ].join("\n\n");
+  }
+  const latestErrors =
+    attemptsWithErrors.length === 1 ? attemptsWithErrors[0]!.errors : (previousErrors ?? []);
+  if (latestErrors.length === 0) return undefined;
+  return [
+    "Your previous response had validation errors and was rejected:",
+    latestErrors.map((err) => `- ${err}`).join("\n"),
+    "Fix every error above: only reference exact `id` values from Candidate findings below, never merge findings from different Candidate groups (different path anchors), use a finite `confidence` between 0 and 1, and respond with one valid JSON object only.",
+  ].join("\n\n");
+}
+
 /**
  * Strict clustering contract for the consensus adjudicator. It receives
  * structured findings only, returns cluster assignments with confidence, and
  * may not invent findings, drop findings, claim new evidence, or act as a
  * reviewer. It has no write tools.
  */
-export function buildAdjudicatorPrompt(candidates: AdjudicationCandidate[]): string {
+export function buildAdjudicatorPrompt(
+  candidates: AdjudicationCandidate[],
+  previousErrors?: string[],
+  priorAttempts?: AdjudicationAttemptRecord[],
+): string {
   const candidateBlocks = candidates.map((candidate, index) => {
     const items = candidate.findings.map(
       (sf) =>
@@ -113,6 +142,8 @@ export function buildAdjudicatorPrompt(candidates: AdjudicationCandidate[]): str
     );
     return `Candidate group ${index + 1} (shared path anchor: ${candidate.anchorPath || "(none)"}):\n${items.join("\n")}`;
   });
+
+  const retryFeedback = formatAdjudicationRetryFeedback(previousErrors, priorAttempts);
 
   return [
     "You are the consensus adjudicator for a panel code review. Your only job is to decide which findings describe the same underlying issue.",
@@ -122,6 +153,7 @@ export function buildAdjudicatorPrompt(candidates: AdjudicationCandidate[]): str
     "Respond with one JSON object only, no prose, in this exact shape:",
     '{"merges":[{"sourceFindingIds":["r1#F1","r2#F1"],"confidence":0.9}]}',
     "`confidence` is a number between 0 and 1 expressing how sure you are that the listed findings are the same issue. Use 0 when unrelated. Every source id you reference must come from the candidates below.",
+    ...(retryFeedback ? [retryFeedback] : []),
     "Candidate findings:",
     candidateBlocks.join("\n\n"),
   ].join("\n\n");

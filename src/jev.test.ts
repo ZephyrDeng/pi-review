@@ -303,3 +303,81 @@ test("evaluateNouls surfaces only an allowlisted server error code", async () =>
     return true;
   });
 });
+
+test("withAdjudicationFallback skips Jev on subsequent retries after falling back to Pi", async () => {
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+  const primary = {
+    async adjudicate() {
+      primaryCalls += 1;
+      throw new JevError("http 503");
+    },
+  };
+  const fallback = {
+    async adjudicate() {
+      fallbackCalls += 1;
+      return { merges: [] };
+    },
+  };
+  const wrapped = withAdjudicationFallback(primary, fallback);
+  await wrapped.adjudicator.adjudicate({ candidates: [] });
+  await wrapped.adjudicator.adjudicate({
+    candidates: [],
+    attempt: 2,
+    previousErrors: ["adjudicator invented source finding ids: r9#F1"],
+  });
+  assert.equal(primaryCalls, 1);
+  assert.equal(fallbackCalls, 2);
+  assert.equal(wrapped.engine(), "pi");
+});
+
+test("withUncertaintyEscalation caches fast-tier state on retry and propagates strong-tier errors", async () => {
+  let fastCalls = 0;
+  const fast = {
+    async adjudicate() {
+      fastCalls += 1;
+      return {
+        merges: [
+          { sourceFindingIds: ["a", "b"], confidence: 0.95 },
+          { sourceFindingIds: ["e", "f"], confidence: 0.5 },
+        ],
+      };
+    },
+  };
+  const strongRequests: Array<{ previousErrors?: string[]; attempt?: number }> = [];
+  const strong = {
+    async adjudicate(req: { previousErrors?: string[]; attempt?: number }) {
+      strongRequests.push({ previousErrors: req.previousErrors, attempt: req.attempt });
+      if (strongRequests.length === 1) {
+        return { merges: [], errors: ["adjudicator returned no parseable JSON object"] };
+      }
+      return { merges: [{ sourceFindingIds: ["e", "f"], confidence: 0.85 }] };
+    },
+  };
+
+  const cascade = withUncertaintyEscalation(fast as never, strong as never);
+  const candidates = [
+    {
+      anchorPath: "src/x.ts",
+      findings: ["a", "b", "e", "f"].map((id) => ({ id, reviewerId: "r1", finding: { summary: id, actionable: true } })),
+    },
+  ];
+  const first = await cascade.adjudicate({ candidates } as never);
+  assert.deepEqual(first.errors, ["adjudicator returned no parseable JSON object"]);
+  const second = await cascade.adjudicate({
+    candidates,
+    attempt: 2,
+    previousErrors: first.errors,
+  } as never);
+  assert.equal(fastCalls, 1);
+  assert.equal(strongRequests.length, 2);
+  assert.deepEqual(strongRequests[1], {
+    previousErrors: ["adjudicator returned no parseable JSON object"],
+    attempt: 2,
+  });
+  assert.deepEqual(
+    second.merges.map((m) => [m.sourceFindingIds, m.confidence]),
+    [[["a", "b"], 0.95], [["e", "f"], 0.85]],
+  );
+  assert.equal(second.errors, undefined);
+});

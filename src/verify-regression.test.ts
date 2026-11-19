@@ -61,7 +61,20 @@ function runCli(args: string[]) {
   const metaLine = result.stderr.split("\n").find((line) => line.startsWith("PI_REVIEW_META_JSON: "));
   const meta = JSON.parse(metaLine!.slice("PI_REVIEW_META_JSON: ".length));
   meta.durationMs = 0;
-  for (const reviewer of meta.reviewers ?? []) Object.assign(reviewer, { durationMs: 0, role: "<ROLE>" });
+  if (typeof meta.startedAt === "number") meta.startedAt = 0;
+  if (typeof meta.completedAt === "number") meta.completedAt = 0;
+  if (typeof meta.adjudicationStartedAt === "number") meta.adjudicationStartedAt = 0;
+  if (typeof meta.adjudicationCompletedAt === "number") meta.adjudicationCompletedAt = 0;
+  if (typeof meta.adjudicationDurationMs === "number") meta.adjudicationDurationMs = 0;
+  if (typeof meta.runDir === "string") meta.runDir = "<RUN_DIR>";
+  for (const reviewer of meta.reviewers ?? []) {
+    Object.assign(reviewer, {
+      durationMs: 0,
+      role: "<ROLE>",
+      ...(typeof reviewer.startedAt === "number" ? { startedAt: 0 } : {}),
+      ...(typeof reviewer.completedAt === "number" ? { completedAt: 0 } : {}),
+    });
+  }
   return { status: result.status, argvs: argvs.map((a) => JSON.parse(a) as string[]), meta };
 }
 
@@ -269,8 +282,12 @@ test("panel review without --verify: reviewer argv, prompts, and meta match the 
   expect(run.meta).toMatchInlineSnapshot(`
     {
       "actionableCount": 0,
+      "adjudicationCompletedAt": 0,
+      "adjudicationDurationMs": 0,
+      "adjudicationStartedAt": 0,
       "adjudicationUsed": false,
       "advisories": [],
+      "completedAt": 0,
       "configuredReviewers": 2,
       "confirmedClusters": [],
       "consensusPolicy": "quorum",
@@ -283,27 +300,33 @@ test("panel review without --verify: reviewer argv, prompts, and meta match the 
       "reviewMode": "code",
       "reviewers": [
         {
+          "completedAt": 0,
           "contributed": true,
           "durationMs": 0,
           "model": null,
           "reviewerId": "r1",
           "role": "<ROLE>",
+          "startedAt": 0,
           "status": "clean",
           "verdict": "approve",
           "verdictSource": "parsed",
         },
         {
+          "completedAt": 0,
           "contributed": true,
           "durationMs": 0,
           "model": null,
           "reviewerId": "r2",
           "role": "<ROLE>",
+          "startedAt": 0,
           "status": "clean",
           "verdict": "approve",
           "verdictSource": "parsed",
         },
       ],
+      "runDir": "<RUN_DIR>",
       "sourceFindings": [],
+      "startedAt": 0,
       "status": "clean",
       "strategy": "panel",
       "successfulReviewers": 2,

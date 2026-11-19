@@ -9,7 +9,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { SEMANTIC_MATCH_CONFIDENCE_THRESHOLD, type SourceFinding } from "./types.js";
+import {
+  SEMANTIC_MATCH_CONFIDENCE_THRESHOLD,
+  type AdjudicationAttemptRecord,
+  type SourceFinding,
+} from "./types.js";
+
+export type { AdjudicationAttemptRecord } from "./types.js";
 
 /** Result of matching a set of source findings into clusters. */
 export interface MatchResult {
@@ -22,6 +28,10 @@ export interface MatchResult {
   errors: string[];
   /** True when a semantic adjudicator was actually consulted. */
   adjudicationUsed: boolean;
+  /** Number of semantic-error retries executed during adjudication (present when > 0). */
+  adjudicationRetries?: number;
+  /** Validation errors recorded on each failed attempt when retries occurred. */
+  adjudicationAttemptErrors?: AdjudicationAttemptRecord[];
 }
 
 /** A finding matcher clusters source findings into groups. */
@@ -29,7 +39,7 @@ export interface FindingMatcher {
   match(findings: SourceFinding[]): MatchResult | Promise<MatchResult>;
 }
 
-/** Normalize a path anchor so reviewers that phrase paths slightly differently still match. */
+/** Options controlling deterministic and semantic finding matching. */
 export interface MatcherOptions {
   /**
    * Base directory for resolving relative finding paths before comparison.
@@ -38,6 +48,12 @@ export interface MatcherOptions {
    * answering `/abs/target/calc.ts`.
    */
   baseDir?: string;
+  /**
+   * Maximum number of retries when the semantic adjudicator returns
+   * validation errors (default: 0 on SemanticMatcher directly; panel runs pass
+   * DEFAULT_CONSENSUS_RETRIES = 1).
+   */
+  maxRetries?: number;
 }
 
 /** Normalize a path anchor so reviewers that phrase paths slightly differently still match. */
@@ -114,6 +130,12 @@ export interface AdjudicationCandidate {
 /** Request sent to a semantic adjudicator. */
 export interface AdjudicationRequest {
   candidates: AdjudicationCandidate[];
+  /** Validation errors from the immediately preceding failed attempt (present on retries). */
+  previousErrors?: string[];
+  /** 1-based attempt number (1 = initial call, 2 = first retry, ...; present on retries). */
+  attempt?: number;
+  /** Full history of prior failed attempts (present on retries). */
+  priorAttempts?: AdjudicationAttemptRecord[];
 }
 
 /** A proposed merge of source finding IDs into one cluster. */
@@ -185,10 +207,6 @@ export class SemanticMatcher implements FindingMatcher {
       return { ...det, adjudicationUsed: false };
     }
 
-    // A throwing adjudicator is a runtime failure; let it propagate so the
-    // aggregator can map it to blocked rather than a silent semantic merge.
-    const response = await this.adjudicator.adjudicate({ candidates });
-
     const candidateIds = new Set<string>();
     const idToCandidate = new Map<string, number>();
     candidates.forEach((candidate, candidateIndex) => {
@@ -198,105 +216,175 @@ export class SemanticMatcher implements FindingMatcher {
       }
     });
 
-    const errors: string[] = [];
-    if (response.errors?.length) errors.push(...response.errors);
-
-    if (!Array.isArray(response.merges)) {
-      return {
-        groups: det.groups,
-        errors: ["malformed adjudicator response: merges is not an array", ...errors],
-        adjudicationUsed: true,
-      };
-    }
-
-    // Deterministic-group level merge evidence. The adjudicator's merges are
-    // expanded to unordered pairs of deterministic-group indices: a 3-id
-    // merge (the Pi adjudicator's cluster form) marks every internal pair,
-    // while Jev's pairwise questions already arrive one pair per merge.
-    // Findings inside one deterministic group (exact path+summary duplicates)
-    // share the group's fate, so a merge naming one member links them all.
     const groupIndex = new Map<string, number>();
     det.groups.forEach((group, index) => {
       for (const id of group) groupIndex.set(id, index);
     });
-    const pairId = (a: number, b: number) => (a < b ? a * 65536 + b : b * 65536 + a);
-    const pairConfidence = new Map<number, number>();
 
-    for (const merge of response.merges ?? []) {
-      if (!merge || typeof merge !== "object" || Array.isArray(merge)) {
-        errors.push("adjudicator returned a malformed merge entry (not an object)");
-        continue;
+    const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 0));
+    const attemptErrors: AdjudicationAttemptRecord[] = [];
+
+    for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
+      const request: AdjudicationRequest =
+        attempt === 1
+          ? { candidates }
+          : {
+              candidates,
+              attempt,
+              previousErrors: attemptErrors[attemptErrors.length - 1]!.errors,
+              priorAttempts: attemptErrors.map((record) => ({
+                attempt: record.attempt,
+                errors: [...record.errors],
+              })),
+            };
+
+      // A throwing adjudicator is a runtime failure; let it propagate immediately
+      // without retrying so the aggregator maps it to blocked.
+      const response = await this.adjudicator.adjudicate(request);
+      const { groups, errors } = validateAndCluster(
+        response,
+        det.groups,
+        candidateIds,
+        idToCandidate,
+        groupIndex,
+      );
+
+      if (errors.length === 0) {
+        const retries = attempt - 1;
+        return {
+          groups,
+          errors: [],
+          adjudicationUsed: true,
+          ...(retries > 0
+            ? { adjudicationRetries: retries, adjudicationAttemptErrors: attemptErrors }
+            : {}),
+        };
       }
-      if (!Array.isArray(merge.sourceFindingIds)) {
-        errors.push("adjudicator returned a merge with non-array sourceFindingIds");
-        continue;
-      }
-      const unknown = merge.sourceFindingIds.filter((id) => !candidateIds.has(id));
-      if (unknown.length > 0) {
-        errors.push(`adjudicator invented source finding ids: ${unknown.join(", ")}`);
-        continue;
-      }
-      // A merge must stay within a single candidate group (same path anchor).
-      // Cross-path merges would create false consensus across different files.
-      const candidateIndices = new Set(merge.sourceFindingIds.map((id) => idToCandidate.get(id)!));
-      if (candidateIndices.size > 1) {
-        errors.push(`adjudicator merged findings across different path anchors: ${merge.sourceFindingIds.join(", ")}`);
-        continue;
-      }
-      const ids = merge.sourceFindingIds;
-      if (ids.length < 2) continue; // no-op, not malformed
-      const confidence = Number(merge.confidence);
-      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-        errors.push(`adjudicator returned invalid confidence for merge of ${ids.join(", ")}`);
-        continue;
-      }
-      // Below-threshold confidence is recorded as evidence, never merges: it
-      // blocks a complete-linkage merge instead of silently chaining.
-      const indices = [...new Set(ids.map((id) => groupIndex.get(id)!))];
-      for (let i = 0; i < indices.length; i += 1) {
-        for (let j = i + 1; j < indices.length; j += 1) {
-          const key = pairId(indices[i]!, indices[j]!);
-          pairConfidence.set(key, Math.max(pairConfidence.get(key) ?? 0, confidence));
-        }
+
+      attemptErrors.push({ attempt, errors: [...errors] });
+      if (attempt > maxRetries) {
+        const retries = attempt - 1;
+        return {
+          groups,
+          errors,
+          adjudicationUsed: true,
+          ...(retries > 0
+            ? { adjudicationRetries: retries, adjudicationAttemptErrors: attemptErrors }
+            : {}),
+        };
       }
     }
 
-    // Complete-linkage merging, strongest link first: two clusters merge only
-    // when every cross-cluster pair clears the confidence threshold. A pair
-    // the adjudicator never proposed (or proposed below the threshold) blocks
-    // the merge, so transitive chains across distinct issues cannot form.
-    const clusters = det.groups.map((_, index) => [index]);
-    for (;;) {
-      let bestConfidence = Number.NEGATIVE_INFINITY;
-      let bestI = -1;
-      let bestJ = -1;
-      for (let i = 0; i < clusters.length; i += 1) {
-        for (let j = i + 1; j < clusters.length; j += 1) {
-          let min = Number.POSITIVE_INFINITY;
-          for (const a of clusters[i]!) {
-            for (const b of clusters[j]!) {
-              const confidence = pairConfidence.get(pairId(a, b)) ?? 0;
-              if (confidence < min) min = confidence;
-            }
-          }
-          if (min >= SEMANTIC_MATCH_CONFIDENCE_THRESHOLD && min > bestConfidence) {
-            bestConfidence = min;
-            bestI = i;
-            bestJ = j;
-          }
-        }
-      }
-      if (bestI === -1) break;
-      clusters[bestI]!.push(...clusters[bestJ]!);
-      clusters.splice(bestJ, 1);
-    }
-
-    // Preserve a stable order: by first source id within each merged group.
-    const groups = clusters.map((cluster) =>
-      cluster.flatMap((index) => det.groups[index]!).sort((a, b) => a.localeCompare(b)),
-    );
-    groups.sort((a, b) => a[0]!.localeCompare(b[0]!));
-
-    return { groups, errors, adjudicationUsed: true };
+    // Unreachable, satisfies TypeScript control flow.
+    return { groups: det.groups, errors: [], adjudicationUsed: true };
   }
+}
+
+function validateAndCluster(
+  response: AdjudicationResponse,
+  detGroups: string[][],
+  candidateIds: Set<string>,
+  idToCandidate: Map<string, number>,
+  groupIndex: Map<string, number>,
+): { groups: string[][]; errors: string[] } {
+  const errors: string[] = [];
+  if (response.errors?.length) errors.push(...response.errors);
+
+  if (!Array.isArray(response.merges)) {
+    return {
+      groups: detGroups,
+      errors: ["malformed adjudicator response: merges is not an array", ...errors],
+    };
+  }
+
+  // Deterministic-group level merge evidence. The adjudicator's merges are
+  // expanded to unordered pairs of deterministic-group indices: a 3-id
+  // merge (the Pi adjudicator's cluster form) marks every internal pair,
+  // while Jev's pairwise questions already arrive one pair per merge.
+  // Findings inside one deterministic group (exact path+summary duplicates)
+  // share the group's fate, so a merge naming one member links them all.
+  const pairId = (a: number, b: number) => (a < b ? a * 65536 + b : b * 65536 + a);
+  const pairConfidence = new Map<number, number>();
+
+  for (const merge of response.merges ?? []) {
+    if (!merge || typeof merge !== "object" || Array.isArray(merge)) {
+      errors.push("adjudicator returned a malformed merge entry (not an object)");
+      continue;
+    }
+    if (!Array.isArray(merge.sourceFindingIds)) {
+      errors.push("adjudicator returned a merge with non-array sourceFindingIds");
+      continue;
+    }
+    const unknown = merge.sourceFindingIds.filter((id) => !candidateIds.has(id));
+    if (unknown.length > 0) {
+      errors.push(`adjudicator invented source finding ids: ${unknown.join(", ")}`);
+      continue;
+    }
+    // A merge must stay within a single candidate group (same path anchor).
+    // Cross-path merges would create false consensus across different files.
+    const candidateIndices = new Set(merge.sourceFindingIds.map((id) => idToCandidate.get(id)!));
+    if (candidateIndices.size > 1) {
+      errors.push(`adjudicator merged findings across different path anchors: ${merge.sourceFindingIds.join(", ")}`);
+      continue;
+    }
+    const ids = merge.sourceFindingIds;
+    if (ids.length < 2) continue; // no-op, not malformed
+    if (
+      typeof merge.confidence !== "number" ||
+      !Number.isFinite(merge.confidence) ||
+      merge.confidence < 0 ||
+      merge.confidence > 1
+    ) {
+      errors.push(`adjudicator returned invalid confidence for merge of ${ids.join(", ")}`);
+      continue;
+    }
+    const confidence = merge.confidence;
+    // Below-threshold confidence is recorded as evidence, never merges: it
+    // blocks a complete-linkage merge instead of silently chaining.
+    const indices = [...new Set(ids.map((id) => groupIndex.get(id)!))];
+    for (let i = 0; i < indices.length; i += 1) {
+      for (let j = i + 1; j < indices.length; j += 1) {
+        const key = pairId(indices[i]!, indices[j]!);
+        pairConfidence.set(key, Math.max(pairConfidence.get(key) ?? 0, confidence));
+      }
+    }
+  }
+
+  // Complete-linkage merging, strongest link first: two clusters merge only
+  // when every cross-cluster pair clears the confidence threshold. A pair
+  // the adjudicator never proposed (or proposed below the threshold) blocks
+  // the merge, so transitive chains across distinct issues cannot form.
+  const clusters = detGroups.map((_, index) => [index]);
+  for (;;) {
+    let bestConfidence = Number.NEGATIVE_INFINITY;
+    let bestI = -1;
+    let bestJ = -1;
+    for (let i = 0; i < clusters.length; i += 1) {
+      for (let j = i + 1; j < clusters.length; j += 1) {
+        let min = Number.POSITIVE_INFINITY;
+        for (const a of clusters[i]!) {
+          for (const b of clusters[j]!) {
+            const confidence = pairConfidence.get(pairId(a, b)) ?? 0;
+            if (confidence < min) min = confidence;
+          }
+        }
+        if (min >= SEMANTIC_MATCH_CONFIDENCE_THRESHOLD && min > bestConfidence) {
+          bestConfidence = min;
+          bestI = i;
+          bestJ = j;
+        }
+      }
+    }
+    if (bestI === -1) break;
+    clusters[bestI]!.push(...clusters[bestJ]!);
+    clusters.splice(bestJ, 1);
+  }
+
+  // Preserve a stable order: by first source id within each merged group.
+  const groups = clusters.map((cluster) =>
+    cluster.flatMap((index) => detGroups[index]!).sort((a, b) => a.localeCompare(b)),
+  );
+  groups.sort((a, b) => a[0]!.localeCompare(b[0]!));
+
+  return { groups, errors };
 }

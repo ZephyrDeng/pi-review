@@ -119,7 +119,9 @@ export function reducePanelEvent(state: PanelViewState, event: ReviewEvent): Pan
   }
 
   const reviewerId = event.reviewerId;
-  const previous = state.reviewers[reviewerId] ?? fallbackReviewer(reviewerId);
+  const previous = Object.hasOwn(state.reviewers, reviewerId)
+    ? state.reviewers[reviewerId]!
+    : fallbackReviewer(reviewerId);
   let reviewer: PanelReviewerView = previous;
   switch (event.type) {
     case "reviewer.queued":

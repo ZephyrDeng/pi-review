@@ -5,6 +5,7 @@
 ```
 pi-review [review] [options] -- <@files|text...>
 pi-review loop [options] -- <@files|text...>
+pi-review panel reaggregate <run-dir|meta-file> [options]
 pi-review screen <@files|paths...>
 pi-review screen-memory
 pi-review classify --baseline <text|@file> [--meta <path>]
@@ -35,6 +36,11 @@ pi-review verify <propose|show|approve|run> [options]
 | `--min-agree <n>` | Panel: minimum reviewers for quorum (default: `2`; quorum only) |
 | `--reviewer-model <id=model[:thinking]>` | Panel: per-reviewer model override (repeatable, e.g. `r1=openai/gpt-5.6:high`) |
 | `--consensus-model <model>` | Panel: model for semantic consensus adjudication |
+| `--consensus-retries <n>` | Panel: retries when adjudicator returns invalid output (default: `1`; `0` disables) |
+| `--run-dir <path>` | Panel: directory to persist manifest, reviewer submissions, and meta |
+| `--reuse-reviewers <path>` | Panel: reuse persisted reviewer conclusions from a run dir or meta file |
+| `--only-reviewers <ids>` | Panel: comma-separated reviewer IDs to rerun (requires `--reuse-reviewers`) |
+| `--rerun-failed` | Panel: rerun only non-contributing/failed reviewers (requires `--reuse-reviewers`) |
 | `--concurrency <n>` | Panel: bounded reviewer concurrency (default: reviewer count) |
 | `--output-format events-jsonl` | Panel: normalized `ReviewEvent v1` JSONL for renderer adapters |
 | `--verify` | Run the committed `.pi-review.json` whitelist once in an isolated copy before reviewers ([Verify mode](verify-mode.md)) |
@@ -51,6 +57,8 @@ pi-review verify <propose|show|approve|run> [options]
 - **`--reviewer-model <id=model[:thinking]>`** — In panel mode, assigns specific models or thinking efforts to individual reviewers (e.g. `r1=openai/gpt-5:high`, `r2=zenmux/deepseek/deepseek-v4.1-flash:low`). Essential for cross-family heterogeneous panels.
 - **`--concurrency <n>`** — Bounds parallel reviewer execution. Omit for full speed (all reviewers run concurrently by default). Only pass `<n>` if the provider account has strict concurrent request limits.
 - **`--consensus-model <model>`** — Explicitly forces an LLM child session to act as the adjudicator instead of Jev System One. Use when you explicitly want full-text LLM reasoning on finding clusters.
+- **`--consensus-retries <n>`** — Automatically retries semantic adjudication when the adjudicator returns validation errors (such as invented IDs or unparseable JSON), feeding the previous errors back into the prompt (default: `1`).
+- **`pi-review panel reaggregate <run-dir|meta-file>` / `--reuse-reviewers <path>`** — Re-runs consensus adjudication over saved reviewer outputs with zero reviewer calls, or pairs with `--only-reviewers` / `--rerun-failed` to rerun only selected or failed reviewers.
 - **`--consensus <policy>` / `--min-agree <n>`** — Fine-tunes panel quorum. Defaults to `quorum` with `min-agree: 2`. Use `unanimous` for zero-tolerance security releases, or `any` for broad bug hunts.
 - **`--progress-log <path>`** — Streams compact JSON events to a file; essential for background runs in buffered-output hosts like Claude Code, Codex, or Cursor.
 - **`--verify` / `--verify-plan` + `pi-review verify …`** — Ground the review in executed tests: whitelisted commands run as-is; agent-proposed steps run only after a human approved them. See [Verify mode](verify-mode.md).

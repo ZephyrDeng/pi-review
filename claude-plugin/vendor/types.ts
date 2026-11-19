@@ -50,13 +50,15 @@ export interface StructuredReviewResult extends VerdictInfo {
 }
 
 export interface ParsedArgs {
-  command: "review" | "loop" | "classify" | "screen" | "screen-memory" | "models" | "install" | "install-skill" | "uninstall-skill" | "update" | "verify";
+  command: "review" | "loop" | "classify" | "screen" | "screen-memory" | "models" | "install" | "install-skill" | "uninstall-skill" | "update" | "verify" | "panel-reaggregate";
   /** For `install`: run `pi install npm:@zephyrdeng/pi-review` */
   installPi?: boolean;
   /** For `install`: run agent skill install (skills CLI / Claude + agy direct fallback) */
   installAgents?: boolean;
   extraArgs?: string[];
   mode: string;
+  /** True when --mode or a positional mode arg was explicitly specified on CLI. */
+  modeExplicit?: boolean;
   skills: string[];
   payload: string[];
   keepSession: boolean;
@@ -103,6 +105,16 @@ export interface ParsedArgs {
   minAgree?: number;
   /** Panel: model used for semantic consensus adjudication. */
   consensusModel?: string;
+  /** Panel: number of automatic retries on semantic adjudication validation errors (default: 1). */
+  consensusRetries?: number;
+  /** Panel: directory path for persisting reviewer and panel artifacts. */
+  runDir?: string;
+  /** Panel: reuse persisted reviewer conclusions from an existing run dir or meta file. */
+  reuseReviewers?: string;
+  /** Panel: only rerun specific reviewer IDs when reusing an artifact. */
+  onlyReviewers?: string[];
+  /** Panel: automatically rerun only non-contributing/failed reviewers when reusing an artifact. */
+  rerunFailed?: boolean;
   /** Panel: bounded reviewer concurrency. */
   concurrency?: number;
   /**
@@ -284,8 +296,18 @@ export const PANEL_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
 /** Default minimum agreement for a multi-reviewer quorum panel. */
 export const DEFAULT_PANEL_MIN_AGREE = 2;
 
+/** Default number of automatic retries when semantic adjudication returns validation errors. */
+export const DEFAULT_CONSENSUS_RETRIES = 1;
+
 /** Confidence at or above which a semantic adjudicator match merges clusters. */
 export const SEMANTIC_MATCH_CONFIDENCE_THRESHOLD = 0.6;
+
+/** Per-attempt semantic validation errors recorded during consensus adjudication. */
+export interface AdjudicationAttemptRecord {
+  /** 1-based attempt index (1 = initial call, 2 = first retry, ...). */
+  attempt: number;
+  errors: string[];
+}
 
 /** A raw finding tagged with reviewer identity and a globally-unique source ID. */
 export interface SourceFinding {
@@ -327,7 +349,13 @@ export interface ReviewerOutcome {
   responseModel?: string;
   thinking?: string;
   usage?: TokenUsage;
+  /** Epoch ms when this reviewer execution started (absent when unknown or synthetic). */
+  startedAt?: number;
+  /** Epoch ms when this reviewer execution completed. */
+  completedAt?: number;
   durationMs: number;
+  /** True when this reviewer outcome was reused from an earlier panel run artifact. */
+  reused?: boolean;
   status: ReviewStatus;
   verdict: Verdict;
   verdictSource: VerdictInfo["verdictSource"];
@@ -335,6 +363,7 @@ export interface ReviewerOutcome {
   contributed: boolean;
   runtimeError?: string;
   parseError?: string;
+  extensionHint?: ExtensionHint;
 }
 
 /** Additive panel fields shared by the aggregation result and the review meta. */
@@ -357,6 +386,22 @@ export interface PanelFields {
    */
   adjudicationEngine?: "jev" | "pi";
   adjudicationErrors?: string[];
+  /** Number of retries performed during semantic adjudication (present when > 0). */
+  adjudicationRetries?: number;
+  /** Errors captured on each failed adjudication attempt when retries occurred. */
+  adjudicationAttemptErrors?: AdjudicationAttemptRecord[];
+  /** Epoch ms when consensus aggregation/adjudication started. */
+  adjudicationStartedAt?: number;
+  /** Epoch ms when consensus aggregation/adjudication completed. */
+  adjudicationCompletedAt?: number;
+  /** Total duration (ms) of consensus aggregation/adjudication. */
+  adjudicationDurationMs?: number;
+  /** Directory path where this panel run persisted its manifest, reviewer submissions, and meta. */
+  runDir?: string;
+  /** Source run directory or meta file path when reviewer conclusions were reused. */
+  reusedFrom?: string;
+  /** Base directory used for normalizing relative finding path anchors, when single-target. */
+  matcherBaseDir?: string;
   /**
    * Every source finding a contributing reviewer produced during this
    * evaluation, keyed by `SourceFinding.id` (e.g. "r1#F1"). Resolves every id
@@ -379,6 +424,10 @@ export interface PanelAggregationResult extends StructuredReviewResult, PanelFie
 
 /** Review metadata for a panel evaluation; additive over ReviewMeta. */
 export interface PanelReviewMeta extends ReviewMeta, PanelFields {
+  /** Epoch ms when the panel run started. */
+  startedAt?: number;
+  /** Epoch ms when the panel run completed. */
+  completedAt?: number;
   /**
    * All extension-only providers that blocked reviewers before spawn
    * (issue #8), deduplicated by provider. Unlike single-review runs a panel
@@ -397,7 +446,10 @@ export interface ReviewerSubmission {
   responseModel?: string;
   thinking?: string;
   usage?: TokenUsage;
+  startedAt?: number;
+  completedAt?: number;
   durationMs: number;
+  reused?: boolean;
   result: StructuredReviewResult;
   /** Extension-only provider hint, when this reviewer was blocked before spawn (issue #8). */
   extensionHint?: ReviewMeta["extensionHint"];
@@ -419,5 +471,6 @@ export interface PanelPreset {
   consensus?: ConsensusPolicy;
   minAgree?: number;
   consensusModel?: string;
+  consensusRetries?: number;
   concurrency?: number;
 }

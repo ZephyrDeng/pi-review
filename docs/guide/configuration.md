@@ -19,6 +19,8 @@ Per-process overrides via environment variables (env wins over the config file):
 | `PI_REVIEW_PANEL_PRESETS` | Path to panel presets JSON file |
 | `PI_REVIEW_SYSTEM_PROMPT` | Path to system prompt file |
 | `PI_REVIEW_SESSION_DIR` | Directory for persisted review sessions |
+| `PI_REVIEW_PANEL_RUNS_DIR` | Directory for automatic panel run artifacts (`manifest.json`, `reviewers/*.json`, `meta.json`; default: `~/.pi/pi-review/panel-runs`) |
+| `PI_REVIEW_PANEL_ARTIFACTS` | `0`/`false`/`off`/`no` disables automatic panel run artifact persistence (explicit `--run-dir` still writes) |
 | `PI_REVIEW_META_STDOUT` | Set to `1`/`true` to print `PI_REVIEW_META_JSON` on stdout instead of stderr |
 | `PI_REVIEW_UI` | `pane`: panel runs (and panel `loop` rounds) write their events for a host pane under `$TMPDIR/pi-review-ui/` and start no dashboard server or browser, even with `--ui web`. The Claude Code plugin sets it for its session |
 | `PI_REVIEW_JEV` | Per-run override for `jev`: `1`/`true`/`on` routes panel consensus adjudication to TypeSafe Jev, any other set value (e.g. `0`) keeps the Pi adjudicator. Connection: `TYPESAFE_API_KEY` (required), optional `TYPESAFE_BASE_URL` and `PI_REVIEW_JEV_MODEL` (default `jev-latest`) |
@@ -37,6 +39,7 @@ Per-process overrides via environment variables (env wins over the config file):
 - Before spawning, pi-review probes the Pi model catalog when an explicit provider is in effect (via `--provider` or the `provider/` prefix of `--model`): if the provider only exists with host extensions loaded, the run is blocked with an actionable hint (`verdictSource: "config_error"`, meta `extensionHint`; panel runs aggregate every affected provider into `extensionHints`) instead of failing with a confusing unknown-provider error — set `childExtensions: true` in the config file or re-run with `PI_REVIEW_CHILD_EXTENSIONS=1`. Catalog probes are cached only on success; a transient probe failure never blocks a review.
 - On reviewer runtime failure, the panel footer and `reviewers[].runtimeError` keep a child stderr/stack tail for diagnosis
 - `--keep-session` stores only the child review session for explicit follow-up
+- Panel runs persist redacted structured reviewer submissions and `meta.json` under `~/.pi/pi-review/panel-runs/` (mode `0700` directory, `0600` files, symlink-refusing atomic writes) so `panel reaggregate` and `--reuse-reviewers` can recover from adjudication or single-reviewer failures without re-running healthy reviewers; disable automatic writes with `PI_REVIEW_PANEL_ARTIFACTS=0`
 - The review session is read-only: no file edits, patches, commits, or deployments
 - `--verify` (opt-in) is the one path that executes repository code: pi-review's own code runs whitelisted (`.pi-review.json` committed at `HEAD`) or human-approved commands in a disposable worktree copy, with a filtered environment, timeouts, and capped output. Reviewers stay read-only. It protects the working tree, not the machine — see [Verify mode](verify-mode.md#safety-defaults).
 

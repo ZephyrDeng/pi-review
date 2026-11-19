@@ -21,6 +21,8 @@
 | `PI_REVIEW_PANEL_PRESETS` | 面板预设 JSON 文件路径 |
 | `PI_REVIEW_SYSTEM_PROMPT` | 系统提示词文件路径 |
 | `PI_REVIEW_SESSION_DIR` | 持久化审查会话的目录 |
+| `PI_REVIEW_PANEL_RUNS_DIR` | 自动保存面板运行产物（`manifest.json`、`reviewers/*.json`、`meta.json`）的目录（默认 `~/.pi/pi-review/panel-runs`） |
+| `PI_REVIEW_PANEL_ARTIFACTS` | `0`/`false`/`off`/`no` 关闭面板运行产物的自动落盘（显式传 `--run-dir` 仍会写入） |
 | `PI_REVIEW_META_STDOUT` | 设为 `1`/`true` 时把 `PI_REVIEW_META_JSON` 打到 stdout 而不是 stderr |
 | `PI_REVIEW_UI` | `pane`：面板运行（以及面板 `loop` 的每一轮）把事件写到 `$TMPDIR/pi-review-ui/` 供宿主 Pane 读取，不启动看板 server 也不打开浏览器，即使传了 `--ui web`。Claude Code 插件会为它的会话设置这个变量 |
 | `PI_REVIEW_JEV` | `jev` 的单次覆盖：`1`/`true`/`on` 把面板共识裁决交给 TypeSafe Jev，其它任何已设置的值（如 `0`）保留 Pi 裁决器。连接：`TYPESAFE_API_KEY`（必需），可选 `TYPESAFE_BASE_URL` 和 `PI_REVIEW_JEV_MODEL`（默认 `jev-latest`） |
@@ -40,5 +42,6 @@
 - 生效了显式 provider（通过 `--provider` 或 `--model` 的 `provider/` 前缀）时，pi-review 在 spawn 前先探测 Pi 模型目录：如果该 provider 只在加载宿主扩展后才存在，运行会带可操作提示阻塞（`verdictSource: "config_error"`，meta 里 `extensionHint`；面板运行把所有受影响的 provider 汇总进 `extensionHints`），而不是抛一个让人困惑的 unknown-provider 错误——在配置文件里设 `childExtensions: true` 或用 `PI_REVIEW_CHILD_EXTENSIONS=1` 重跑。目录探测只在成功时缓存；瞬时探测失败永远不会阻塞审查。
 - 评审员运行失败时，面板页脚和 `reviewers[].runtimeError` 保留子进程 stderr / 堆栈尾部用于诊断
 - `--keep-session` 只存储子审查会话，供显式追问
+- 面板运行会把脱敏后的结构化评审员结论与 `meta.json` 写入 `~/.pi/pi-review/panel-runs/`（目录权限 `0700`、文件权限 `0600`、拒绝符号链接的原子写入），方便用 `panel reaggregate` 或 `--reuse-reviewers` 在裁决失败或单个评审员超时后恢复，无需重跑已成功的评审员；设 `PI_REVIEW_PANEL_ARTIFACTS=0` 可关闭自动落盘
 - 审查会话是只读的：不改文件、不打补丁、不提交、不部署
 - `--verify`（需显式开启）是唯一会执行仓库代码的路径：由 pi-review 自身代码在一次性 worktree 副本里执行白名单（`HEAD` 已提交的 `.pi-review.json`）或经人批准的命令，过滤环境变量、有超时、输出有上限。reviewer 仍然只读。它保护工作树，保护不了本机——见[验证模式](verify-mode.md#安全默认)。

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { aggregatePanel, effectiveThreshold, resolvePanelEffectiveModel } from "./panel-aggregate.js";
+import { aggregatePanel, effectiveThreshold, isContributingSubmission, resolvePanelEffectiveModel } from "./panel-aggregate.js";
 import { DeterministicMatcher, SemanticMatcher, type FindingMatcher } from "./matcher.js";
 import type {
   ConsensusPolicy,
@@ -656,4 +656,119 @@ test("resolvePanelEffectiveModel: configured model outranks its own responseMode
     null,
   );
   assert.equal(model, "prov/model-x");
+});
+
+test("acceptance: adjudicator recovers on retry after invented id -> healthy, 1 retry recorded", async () => {
+  const reviewers = [
+    submission("r1", review("has_findings", [finding("loop bound is wrong", { id: "F1", path: "src/cli.ts" })])),
+    submission("r2", review("has_findings", [finding("off-by-one iteration", { id: "F1", path: "src/cli.ts" })])),
+  ];
+  let calls = 0;
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate() {
+        calls += 1;
+        if (calls === 1) {
+          return { merges: [{ sourceFindingIds: ["r1#F1", "r9#F1"], confidence: 0.9 }] };
+        }
+        return { merges: [{ sourceFindingIds: ["r1#F1", "r2#F1"], confidence: 0.9 }] };
+      },
+    },
+    { maxRetries: 1 },
+  );
+
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher,
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.panelHealth, "healthy");
+  assert.equal(result.status, "has_findings");
+  assert.equal(result.confirmedClusters.length, 1);
+  assert.equal(result.adjudicationErrors, undefined);
+  assert.equal(result.adjudicationRetries, 1);
+  assert.equal(result.adjudicationAttemptErrors?.length, 1);
+  assert.equal(result.adjudicationAttemptErrors![0]!.attempt, 1);
+  assert.ok(result.adjudicationAttemptErrors![0]!.errors.some((e) => /r9#F1/.test(e)));
+});
+
+test("acceptance: exhausted retries degrade to needs_human + fallbackClusters + adjudicationErrors", async () => {
+  const reviewers = [
+    submission("r1", review("has_findings", [finding("loop bound is wrong", { id: "F1", path: "src/cli.ts" })])),
+    submission("r2", review("has_findings", [finding("off-by-one iteration", { id: "F1", path: "src/cli.ts" })])),
+  ];
+  let calls = 0;
+  const matcher = new SemanticMatcher(
+    {
+      async adjudicate() {
+        calls += 1;
+        return { merges: [{ sourceFindingIds: ["r1#F1", `r${calls + 7}#F1`], confidence: 0.9 }] };
+      },
+    },
+    { maxRetries: 1 },
+  );
+
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher,
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.panelHealth, "needs_human");
+  assert.equal(result.status, "needs_human");
+  assert.equal(result.confirmedClusters.length, 0);
+  assert.equal(result.advisories.length, 2);
+  assert.ok(result.adjudicationErrors?.some((e) => /r9#F1/.test(e)));
+  assert.equal(result.adjudicationRetries, 1);
+  assert.equal(result.adjudicationAttemptErrors?.length, 2);
+});
+
+test("aggregatePanel records adjudication timing and passes reviewer startedAt/completedAt/reused", async () => {
+  const reviewers: ReviewerSubmission[] = [
+    {
+      ...submission("r1", review("clean", []), { durationMs: 250 }),
+      startedAt: 1000,
+      completedAt: 1250,
+      reused: true,
+    },
+    {
+      ...submission("r2", review("clean", []), { durationMs: 400 }),
+      startedAt: 1010,
+      completedAt: 1410,
+    },
+  ];
+  const result = await aggregatePanel({
+    reviewers,
+    policy: "quorum",
+    minAgree: 2,
+    configuredReviewers: 2,
+    matcher: byPathSummary(),
+  });
+
+  assert.equal(typeof result.adjudicationStartedAt, "number");
+  assert.equal(typeof result.adjudicationCompletedAt, "number");
+  assert.equal(typeof result.adjudicationDurationMs, "number");
+  assert.ok(result.adjudicationStartedAt! <= result.adjudicationCompletedAt!);
+  assert.ok(result.adjudicationDurationMs! >= 0);
+  assert.equal(result.reviewers[0]!.startedAt, 1000);
+  assert.equal(result.reviewers[0]!.completedAt, 1250);
+  assert.equal(result.reviewers[0]!.reused, true);
+  assert.equal(result.reviewers[1]!.startedAt, 1010);
+  assert.equal(result.reviewers[1]!.completedAt, 1410);
+  assert.equal(result.reviewers[1]!.reused, undefined);
+});
+
+test("isContributingSubmission matches panel classification semantics", () => {
+  assert.equal(isContributingSubmission(submission("r1", review("clean", []))), true);
+  assert.equal(isContributingSubmission(submission("r1", review("has_findings", [bugA()]))), true);
+  assert.equal(isContributingSubmission(submission("r1", review("blocked", [], "runtime_error", "crash"))), false);
+  assert.equal(isContributingSubmission(submission("r1", review("needs_human", [], "fallback", "bad"))), false);
+  assert.equal(isContributingSubmission(submission("r1", review("has_findings", [], "parsed"))), false);
 });

@@ -1,12 +1,14 @@
 import type { ParsedArgs } from "./types.js";
 import { CONSENSUS_POLICIES, MAX_REVIEWERS, PANEL_READ_ONLY_TOOLS } from "./types.js";
 import { parseInstallCommand } from "./install-args.js";
+import { isValidReviewerId } from "./panel-artifacts.js";
 
 export function usage(exitCode = 0): never {
   const out = `Usage:
   pi-review models [search]
   pi-review [review] [options] -- <@files|text...>
   pi-review loop [options] -- <@files|text...>
+  pi-review panel reaggregate <run-dir|meta-file> [options]
   pi-review classify --baseline <text|@file> [--meta <path>]   Classify a previous review's findings against the frozen baseline (Jev required)
   pi-review screen <@files|paths...>           Gate-grade Jev screening: typed defect judgments, no LLM generation (Jev required)
   pi-review screen-memory                     Show accumulated screen signals and the effective pattern catalog
@@ -37,6 +39,11 @@ Options:
   --consensus <policy>                        Panel: any | quorum | majority | unanimous (default: quorum)
   --min-agree <n>                             Panel: minimum reviewers for quorum (default: 2; quorum only)
   --consensus-model <model>                   Panel: model for semantic consensus adjudication
+  --consensus-retries <n>                     Panel: retries when adjudicator returns invalid output (default: 1; 0 disables)
+  --run-dir <path>                            Panel: directory to persist manifest, reviewer submissions, and meta
+  --reuse-reviewers <path>                    Panel: reuse persisted reviewer conclusions from a run dir or meta file
+  --only-reviewers <ids>                      Panel: comma-separated reviewer IDs to rerun (with --reuse-reviewers)
+  --rerun-failed                              Panel: rerun only failed/non-contributing reviewers (with --reuse-reviewers)
   --concurrency <n>                           Panel: bounded reviewer concurrency (default: reviewer count)
   --output-format <events-jsonl>              Panel: emit normalized ReviewEvent v1 JSONL to stdout
   --ui <web>                                  Panel: start a loopback dashboard; prints its URL before reviewers start
@@ -101,6 +108,14 @@ function requireValue(flag: string, argv: string[]): string {
   return argv.shift()!;
 }
 
+function requireNonEmptyPath(flag: string, argv: string[]): string {
+  const value = requireValue(flag, argv).trim();
+  if (!value) {
+    throw new ArgsParseError(`${flag} cannot be empty`);
+  }
+  return value;
+}
+
 function parsePositiveInteger(flag: string, value: string): number {
   if (!/^[1-9]\d*$/.test(value)) {
     throw new ArgsParseError(`${flag} must be a positive integer`);
@@ -108,6 +123,17 @@ function parsePositiveInteger(flag: string, value: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) {
     throw new ArgsParseError(`${flag} must be a safe positive integer`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(flag: string, value: string): number {
+  if (!/^(?:0|[1-9]\d*)$/.test(value)) {
+    throw new ArgsParseError(`${flag} must be a non-negative integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new ArgsParseError(`${flag} must be a safe non-negative integer`);
   }
   return parsed;
 }
@@ -121,13 +147,16 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
   }
 
   let mode = "code";
+  let modeExplicit = false;
   if (argv[0] && !argv[0].startsWith("-")) {
     mode = argv.shift()!;
+    modeExplicit = true;
   }
 
   const options: ParsedArgs = {
     command,
     mode,
+    ...(modeExplicit ? { modeExplicit: true } : {}),
     skills: [],
     payload: [],
     keepSession: false,
@@ -147,6 +176,7 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
         throw new ArgsParseError("", 0);
       case "--mode":
         options.mode = requireValue(arg, argv);
+        options.modeExplicit = true;
         break;
       case "--keep-session":
         options.keepSession = true;
@@ -204,10 +234,13 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
         break;
       case "--reviewer-model": {
         const value = requireValue(arg, argv);
-        if (!/^[A-Za-z0-9_.-]+=\S+$/.test(value)) {
+        const eq = value.indexOf("=");
+        const id = eq > 0 ? value.slice(0, eq).trim() : "";
+        const modelSpec = eq > 0 ? value.slice(eq + 1).trim() : "";
+        if (!isValidReviewerId(id) || !modelSpec || /\s/.test(modelSpec)) {
           throw new ArgsParseError("--reviewer-model must look like id=provider/model (e.g. r1=openai/gpt-5.6-sol)");
         }
-        options.reviewerModels = [...(options.reviewerModels ?? []), value];
+        options.reviewerModels = [...(options.reviewerModels ?? []), `${id}=${modelSpec}`];
         break;
       }
       case "--consensus":
@@ -218,6 +251,38 @@ export function parseReviewCommand(input: string[]): ParsedArgs {
         break;
       case "--consensus-model":
         options.consensusModel = requireValue(arg, argv);
+        break;
+      case "--consensus-retries":
+        options.consensusRetries = parseNonNegativeInteger(arg, requireValue(arg, argv));
+        break;
+      case "--run-dir":
+        options.runDir = requireNonEmptyPath(arg, argv);
+        break;
+      case "--reuse-reviewers":
+        options.reuseReviewers = requireNonEmptyPath(arg, argv);
+        break;
+      case "--only-reviewers": {
+        const rawIds = requireValue(arg, argv)
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean);
+        if (rawIds.length === 0) {
+          throw new ArgsParseError("--only-reviewers requires at least one reviewer id");
+        }
+        for (const id of rawIds) {
+          if (!isValidReviewerId(id)) {
+            throw new ArgsParseError(`--only-reviewers invalid reviewer id "${id}"`);
+          }
+        }
+        const merged = [...(options.onlyReviewers ?? [])];
+        for (const id of rawIds) {
+          if (!merged.includes(id)) merged.push(id);
+        }
+        options.onlyReviewers = merged;
+        break;
+      }
+      case "--rerun-failed":
+        options.rerunFailed = true;
         break;
       case "--concurrency":
         options.concurrency = parsePositiveInteger(arg, requireValue(arg, argv));
@@ -317,19 +382,44 @@ function validatePanelOptions(options: ParsedArgs): void {
 
   const hasReviewers = options.reviewers !== undefined;
   const reviewerCount = options.reviewers ?? 1;
-  const panelActive = reviewerCount > 1 || options.panel !== undefined;
+  const panelActive =
+    reviewerCount > 1 || options.panel !== undefined || options.reuseReviewers !== undefined;
   const anyPanelOption =
     options.consensus !== undefined ||
     options.minAgree !== undefined ||
     options.consensusModel !== undefined ||
+    options.consensusRetries !== undefined ||
+    options.runDir !== undefined ||
+    options.onlyReviewers !== undefined ||
+    options.rerunFailed === true ||
     options.concurrency !== undefined ||
     (options.reviewerModels?.length ?? 0) > 0;
 
   if (hasReviewers && options.reviewers! > MAX_REVIEWERS) {
     throw new ArgsParseError(`--reviewers must be between 1 and ${MAX_REVIEWERS}`);
   }
+  if (options.reviewers === 1 && options.reuseReviewers !== undefined) {
+    throw new ArgsParseError("--reuse-reviewers requires a multi-reviewer panel (--reviewers >= 2 or --panel)");
+  }
   if (!panelActive && anyPanelOption) {
     throw new ArgsParseError("panel options require --reviewers > 1 or --panel");
+  }
+  if ((options.onlyReviewers !== undefined || options.rerunFailed) && !options.reuseReviewers) {
+    throw new ArgsParseError("--only-reviewers and --rerun-failed require --reuse-reviewers <path>");
+  }
+  if (options.onlyReviewers !== undefined && options.rerunFailed) {
+    throw new ArgsParseError("--only-reviewers and --rerun-failed cannot be used together");
+  }
+  if (
+    options.command === "loop" &&
+    (options.reuseReviewers !== undefined ||
+      options.onlyReviewers !== undefined ||
+      options.rerunFailed ||
+      options.runDir !== undefined)
+  ) {
+    throw new ArgsParseError(
+      "loop cannot be used with --reuse-reviewers, --only-reviewers, --rerun-failed, or --run-dir",
+    );
   }
   if (!panelActive && options.outputFormat) {
     throw new ArgsParseError("--output-format events-jsonl requires an active panel");
@@ -373,8 +463,114 @@ function validatePanelOptions(options: ParsedArgs): void {
   }
 }
 
-export function isPanelActive(options: Pick<ParsedArgs, "reviewers" | "panel">): boolean {
-  return (options.reviewers !== undefined && options.reviewers > 1) || options.panel !== undefined;
+export function isPanelActive(options: Pick<ParsedArgs, "reviewers" | "panel" | "reuseReviewers">): boolean {
+  return (
+    (options.reviewers !== undefined && options.reviewers > 1) ||
+    options.panel !== undefined ||
+    options.reuseReviewers !== undefined
+  );
+}
+
+/** Pure parser for `pi-review panel reaggregate <run-dir|meta-file> [options]`. */
+export function parsePanelSubcommand(input: string[]): ParsedArgs {
+  const argv = [...input];
+  if (argv.length === 0 || argv[0] === "-h" || argv[0] === "--help") {
+    throw new ArgsParseError("", 0);
+  }
+  const subcommand = argv.shift()!;
+  if (subcommand !== "reaggregate") {
+    throw new ArgsParseError(`panel: expected subcommand "reaggregate <run-dir|meta-file>" (got ${subcommand})`);
+  }
+
+  const options: ParsedArgs = {
+    command: "panel-reaggregate",
+    mode: "code",
+    skills: [],
+    payload: [],
+    keepSession: false,
+    stream: true,
+  };
+  let targetPath: string | undefined;
+
+  while (argv.length > 0) {
+    const arg = argv.shift()!;
+    switch (arg) {
+      case "-h":
+      case "--help":
+        throw new ArgsParseError("", 0);
+      case "--consensus-model":
+        options.consensusModel = requireValue(arg, argv);
+        break;
+      case "--consensus-retries":
+        options.consensusRetries = parseNonNegativeInteger(arg, requireValue(arg, argv));
+        break;
+      case "--consensus":
+        options.consensus = requireValue(arg, argv);
+        break;
+      case "--min-agree":
+        options.minAgree = parsePositiveInteger(arg, requireValue(arg, argv));
+        break;
+      case "--model":
+        options.model = requireValue(arg, argv);
+        break;
+      case "--run-dir":
+        options.runDir = requireNonEmptyPath(arg, argv);
+        break;
+      case "--output-format": {
+        const format = requireValue(arg, argv);
+        if (format !== "events-jsonl") throw new ArgsParseError("--output-format must be events-jsonl");
+        options.outputFormat = format;
+        break;
+      }
+      case "--ui": {
+        const value = requireValue(arg, argv);
+        if (value !== "web") throw new ArgsParseError("--ui must be web");
+        options.ui = value;
+        break;
+      }
+      case "--ui-url-file":
+        options.uiUrlFile = requireValue(arg, argv);
+        break;
+      case "--ui-ttl":
+        options.uiTtlSeconds = parsePositiveInteger(arg, requireValue(arg, argv));
+        break;
+      case "--no-ui-open":
+        options.uiOpen = false;
+        break;
+      default:
+        if (arg.startsWith("-")) {
+          throw new ArgsParseError(`panel reaggregate: unknown option ${arg}`);
+        }
+        if (targetPath !== undefined) {
+          throw new ArgsParseError(`panel reaggregate: unexpected extra argument ${arg}`);
+        }
+        targetPath = arg.trim();
+        if (!targetPath) {
+          throw new ArgsParseError("panel reaggregate requires a non-empty run directory or meta file path");
+        }
+        break;
+    }
+  }
+
+  if (!targetPath) {
+    throw new ArgsParseError("panel reaggregate requires a run directory or meta file path");
+  }
+  if (
+    (options.uiUrlFile !== undefined || options.uiTtlSeconds !== undefined || options.uiOpen !== undefined) &&
+    options.ui !== "web"
+  ) {
+    throw new ArgsParseError("--ui-url-file, --ui-ttl, and --no-ui-open require --ui web");
+  }
+  if (options.consensus !== undefined && !(CONSENSUS_POLICIES as readonly string[]).includes(options.consensus)) {
+    throw new ArgsParseError(
+      `unknown consensus policy: ${options.consensus}. Available: ${CONSENSUS_POLICIES.join(", ")}`,
+    );
+  }
+  if (options.minAgree !== undefined && options.consensus !== undefined && options.consensus !== "quorum") {
+    throw new ArgsParseError("--min-agree is only meaningful with --consensus quorum");
+  }
+
+  return { ...options, reuseReviewers: targetPath };
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -398,6 +594,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     return { command: "update", mode: "code", skills: [], payload: [], keepSession: false, stream: true };
   }
   try {
+    if (argv[0] === "panel") {
+      return parsePanelSubcommand(argv.slice(1));
+    }
     if (argv[0] === "classify") {
       return parseClassifyCommand(argv.slice(1));
     }
